@@ -6,11 +6,18 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./src/index.ts",
       "import": "./dist/index.js"
+    },
+    "./gen/*": {
+      "types": "./src/gen/*.ts",
+      "import": "./dist/gen/*.js"
     }
   },
   "scripts": {
     "build": "tsc -b"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.12.1"
   }
 }

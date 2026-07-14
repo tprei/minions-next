@@ -8,6 +8,7 @@ export default defineConfig({
       "apps/**/*.{test,spec}.ts",
       "packages/**/*.{test,spec}.ts",
       "test/unit/**/*.{test,spec}.ts",
+      "test/integration/**/*.{test,spec}.ts",
     ],
     passWithNoTests: true,
     pool: "forks",

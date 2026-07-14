@@ -3,6 +3,7 @@ packages:
   - packages/*
 
 allowBuilds:
+  "@bufbuild/buf": true
   esbuild: true
 autoInstallPeers: false
 engineStrict: true

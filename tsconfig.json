@@ -3,7 +3,9 @@
   "compilerOptions": {
     "composite": false,
     "incremental": false,
-    "noEmit": true
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    "types": ["node"]
   },
-  "include": ["vitest.config.ts"]
+  "include": ["test/**/*.ts", "vitest*.config.ts"]
 }
