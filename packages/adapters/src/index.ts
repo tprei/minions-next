@@ -1,3 +1,13 @@
+export { SqliteCommandError } from "./sqlite/command-error.js";
+export type { SqliteCommandErrorCode } from "./sqlite/command-error.js";
+export { createSqliteCommandStore } from "./sqlite/command-store.js";
+export type {
+  ApplySqliteCommand,
+  CommandCommitNotifier,
+  OpenSqliteCommandStoreOptions,
+  SqliteCommandStore,
+  SqliteCommandTransaction,
+} from "./sqlite/command.js";
 export { openHostDatabase, openSupervisorDatabase } from "./sqlite/database.js";
 export type {
   ManagedSqliteDatabase,

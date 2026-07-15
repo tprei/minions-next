@@ -1,4 +1,5 @@
 export * from "./attempt.js";
+export * from "./command.js";
 export * from "./domain-error.js";
 export * from "./ports.js";
 export * from "./repository.js";

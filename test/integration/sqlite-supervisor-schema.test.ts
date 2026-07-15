@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  type ManagedSqliteDatabase,
   openSupervisorDatabase,
   SqliteDatabaseError,
   type SqliteDatabaseErrorCode,
@@ -11,7 +10,7 @@ import {
 } from "@minions/adapters";
 import { timestampFromEpochMilliseconds } from "@minions/core";
 import { FixedClock } from "@minions/testkit";
-import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
+import { TemporarySqliteDatabase, type TestManagedSqliteDatabase } from "@minions/testkit/sqlite";
 import { describe, expect, it } from "vitest";
 
 const NOW_MS = 1_700_000_000_000;
@@ -55,7 +54,10 @@ const WSL_PROFILE_HOST_ID = "018f3a2e-4a20-7b90-8123-abcdef123485";
 const WSL_PROFILE_ID = "018f3a2e-4a20-7b90-8123-abcdef123486";
 
 async function withTemporarySupervisorDatabase(
-  operation: (database: ManagedSqliteDatabase, temporary: TemporarySqliteDatabase) => Promise<void>,
+  operation: (
+    database: TestManagedSqliteDatabase,
+    temporary: TemporarySqliteDatabase,
+  ) => Promise<void>,
 ): Promise<void> {
   const temporary = await TemporarySqliteDatabase.create("supervisor", CLOCK);
   try {
@@ -82,7 +84,7 @@ async function expectAsyncSqliteError(
   return error;
 }
 
-function expectNoRow(database: ManagedSqliteDatabase, table: string, id: string): void {
+function expectNoRow(database: TestManagedSqliteDatabase, table: string, id: string): void {
   expect(database.read((reader) => reader.get(`SELECT id FROM ${table} WHERE id = ?`, [id]))).toBe(
     undefined,
   );
@@ -110,14 +112,14 @@ function insertPairedDevice(
 }
 
 async function expectTransactionFailure(
-  database: ManagedSqliteDatabase,
+  database: TestManagedSqliteDatabase,
   operation: (transaction: SqliteTransaction) => unknown,
 ): Promise<void> {
   await expectAsyncSqliteError(database.write(operation), "transaction_failed");
 }
 
 async function expectSshProfileHostKindFailure(
-  database: ManagedSqliteDatabase,
+  database: TestManagedSqliteDatabase,
   hostId: string,
   profileId: string,
   hostKind: "local" | "wsl2",
@@ -148,7 +150,7 @@ async function expectSshProfileHostKindFailure(
   expectNoRow(database, "ssh_profiles", profileId);
 }
 
-async function insertValidSupervisorState(database: ManagedSqliteDatabase): Promise<void> {
+async function insertValidSupervisorState(database: TestManagedSqliteDatabase): Promise<void> {
   await database.write((transaction) => {
     transaction.run(
       "INSERT INTO execution_hosts (id, host_kind, display_name, state_kind, endpoint, version, registered_at_ms, last_seen_at_ms, removed_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -252,7 +254,13 @@ describe("supervisor SQLite schema integration", () => {
       });
       await database.write((transaction) => {
         expect(runtimeOwnKeys(transaction)).toEqual([]);
-        expect(runtimePrototypeKeys(transaction)).toEqual(["all", "constructor", "get", "run"]);
+        expect(runtimePrototypeKeys(transaction)).toEqual([
+          "all",
+          "constructor",
+          "get",
+          "run",
+          "withCurrentStateWrites",
+        ]);
       });
     });
   });

@@ -26,6 +26,13 @@ const protectedWriterTables: Readonly<Record<string, true>> = Object.freeze({
   schema_migrations: true,
   sqlite_sequence: true,
 });
+const commandJournalTables: Readonly<Record<string, true>> = Object.freeze({
+  events: true,
+  external_operations: true,
+  idempotency_records: true,
+  operator_commands: true,
+  outbox: true,
+});
 
 export type SqliteValue = SQLInputValue;
 export type SqliteRow = Readonly<Record<string, SQLOutputValue>>;
@@ -42,6 +49,7 @@ export interface SqliteReader {
 
 export interface SqliteTransaction extends SqliteReader {
   run(sql: string, parameters?: readonly SqliteValue[]): SqliteWriteResult;
+  withCurrentStateWrites<T>(operation: () => T): T;
 }
 
 export type OpenSqliteDatabaseOptions = Readonly<{
@@ -54,11 +62,10 @@ export interface ManagedSqliteDatabase {
   readonly path: string;
   readonly migration: MigrationReceipt;
   read<T>(operation: (reader: SqliteReader) => T): T;
-  write<T>(operation: (transaction: SqliteTransaction) => T): Promise<T>;
   close(): Promise<void>;
 }
 
-class ManagedSqliteDatabaseInstance implements ManagedSqliteDatabase {
+class ManagedSqliteDatabaseInstance {
   readonly path: string;
   readonly migration: MigrationReceipt;
 
@@ -123,7 +130,7 @@ class ManagedSqliteDatabaseInstance implements ManagedSqliteDatabase {
 
   #executeWrite<T>(operation: (transaction: SqliteTransaction) => T): T | Promise<never> {
     this.#writing = true;
-    const transaction = new TransactionConnection(this.#writerDatabase);
+    const transaction = new TransactionConnection(this.#writerDatabase, this.#writerAuthorization);
     let cleanupAfterReturn = true;
     try {
       this.#writerAuthorization.executeTransactionControl("BEGIN IMMEDIATE");
@@ -183,6 +190,70 @@ class ManagedSqliteDatabaseInstance implements ManagedSqliteDatabase {
       throw new SqliteDatabaseError("database_closed", "the SQLite database is closed");
     }
   }
+}
+
+type SqliteWriteOperation = <T>(operation: (transaction: SqliteTransaction) => T) => Promise<T>;
+
+const managedSqliteWriters = new WeakMap<ManagedSqliteDatabase, SqliteWriteOperation>();
+
+class ManagedSqliteDatabaseFacade implements ManagedSqliteDatabase {
+  readonly path: string;
+  readonly migration: MigrationReceipt;
+  readonly #instance: ManagedSqliteDatabaseInstance;
+
+  constructor(instance: ManagedSqliteDatabaseInstance) {
+    this.path = instance.path;
+    this.migration = instance.migration;
+    this.#instance = instance;
+    managedSqliteWriters.set(this, (operation) => instance.write(operation));
+  }
+
+  read<T>(operation: (reader: SqliteReader) => T): T {
+    return this.#instance.read(operation);
+  }
+
+  close(): Promise<void> {
+    return this.#instance.close();
+  }
+}
+
+export function executeManagedSqliteWrite<T>(
+  database: ManagedSqliteDatabase,
+  operation: (transaction: SqliteTransaction) => T,
+): Promise<T> {
+  const write = managedSqliteWriters.get(database);
+  if (write === undefined) {
+    return Promise.reject(
+      new SqliteDatabaseError(
+        "write_capability_unavailable",
+        "the SQLite database does not carry an application write capability",
+      ),
+    );
+  }
+  return write(operation);
+}
+
+export function registerManagedSqliteWriterAlias(
+  alias: ManagedSqliteDatabase,
+  source: ManagedSqliteDatabase,
+  decorate: (transaction: SqliteTransaction) => SqliteTransaction,
+): void {
+  if (managedSqliteWriters.has(alias)) {
+    throw new SqliteDatabaseError(
+      "write_capability_unavailable",
+      "the SQLite database alias already carries a write capability",
+    );
+  }
+  const write = managedSqliteWriters.get(source);
+  if (write === undefined) {
+    throw new SqliteDatabaseError(
+      "write_capability_unavailable",
+      "the source SQLite database does not carry a write capability",
+    );
+  }
+  managedSqliteWriters.set(alias, (operation) =>
+    write((transaction) => operation(decorate(transaction))),
+  );
 }
 
 export function openHostDatabase(
@@ -253,7 +324,7 @@ async function openSqliteDatabase(
     readerDatabase = new DatabaseSync(databasePath, databaseOptions(true));
     applyReaderPolicy(readerDatabase);
     const managedDatabaseIdentity = databaseIdentity;
-    return new ManagedSqliteDatabaseInstance(
+    const instance = new ManagedSqliteDatabaseInstance(
       databasePath,
       migration,
       writerDatabase,
@@ -263,6 +334,7 @@ async function openSqliteDatabase(
         activeDatabaseIdentities.delete(managedDatabaseIdentity);
       },
     );
+    return new ManagedSqliteDatabaseFacade(instance);
   } catch (error) {
     try {
       try {
@@ -384,10 +456,12 @@ class ReaderConnection implements SqliteReader {
 class TransactionConnection implements SqliteTransaction {
   readonly #database: DatabaseSync;
   readonly #reader: ReaderConnection;
+  readonly #writerAuthorization: WriterAuthorization;
 
-  constructor(database: DatabaseSync) {
+  constructor(database: DatabaseSync, writerAuthorization: WriterAuthorization) {
     this.#database = database;
     this.#reader = new ReaderConnection(database);
+    this.#writerAuthorization = writerAuthorization;
     activeTransactions.add(this);
   }
 
@@ -404,6 +478,10 @@ class TransactionConnection implements SqliteTransaction {
   run(sql: string, parameters: readonly SqliteValue[] = []): SqliteWriteResult {
     this.#assertActive();
     return writeResult(this.#database.prepare(sql).run(...parameters));
+  }
+  withCurrentStateWrites<T>(operation: () => T): T {
+    this.#assertActive();
+    return this.#writerAuthorization.executeCurrentStateWrites(operation);
   }
 
   #assertActive(): void {
@@ -425,6 +503,7 @@ function deactivateTransaction(transaction: TransactionConnection): void {
 class WriterAuthorization {
   readonly #database: DatabaseSync;
   #transactionControlAllowed = false;
+  #currentStateWrites = false;
 
   constructor(database: DatabaseSync) {
     this.#database = database;
@@ -442,13 +521,33 @@ class WriterAuthorization {
     }
   }
 
+  executeCurrentStateWrites<T>(operation: () => T): T {
+    const previousPolicy = this.#currentStateWrites;
+    this.#currentStateWrites = true;
+    try {
+      return operation();
+    } finally {
+      this.#currentStateWrites = previousPolicy;
+    }
+  }
+
   #authorize(actionCode: number, firstArgument: string | null): number {
     if (
       (actionCode === constants.SQLITE_DELETE ||
         actionCode === constants.SQLITE_INSERT ||
         actionCode === constants.SQLITE_UPDATE) &&
       firstArgument !== null &&
-      Object.hasOwn(protectedWriterTables, firstArgument.toLowerCase())
+      (Object.hasOwn(protectedWriterTables, firstArgument.toLowerCase()) ||
+        (this.#currentStateWrites &&
+          Object.hasOwn(commandJournalTables, firstArgument.toLowerCase())))
+    ) {
+      return constants.SQLITE_DENY;
+    }
+    if (
+      this.#currentStateWrites &&
+      actionCode === constants.SQLITE_READ &&
+      firstArgument !== null &&
+      Object.hasOwn(commandJournalTables, firstArgument.toLowerCase())
     ) {
       return constants.SQLITE_DENY;
     }

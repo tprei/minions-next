@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ManagedSqliteDatabase, SqliteTransaction } from "@minions/adapters";
+import type { SqliteTransaction } from "@minions/adapters";
 import { timestampFromEpochMilliseconds } from "@minions/core";
 import { FixedClock } from "@minions/testkit";
-import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
+import { TemporarySqliteDatabase, type TestManagedSqliteDatabase } from "@minions/testkit/sqlite";
 
 const NOW = timestampFromEpochMilliseconds(1_700_000_000_000);
 const BASE_COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -109,7 +109,7 @@ type NodeRecord = Readonly<{
 const CLOCK = new FixedClock(NOW);
 let temporaryDatabase: TemporarySqliteDatabase | undefined;
 
-function database(): ManagedSqliteDatabase {
+function database(): TestManagedSqliteDatabase {
   if (temporaryDatabase === undefined) {
     throw new Error("temporary database is not initialized");
   }
@@ -277,7 +277,7 @@ function insertArtifactInput(
   );
 }
 
-async function seedCanonicalAggregate(target: ManagedSqliteDatabase): Promise<void> {
+async function seedCanonicalAggregate(target: TestManagedSqliteDatabase): Promise<void> {
   await target.write((transaction) => {
     insertRepository(transaction, CANONICAL_IDS);
     insertTree(transaction, CANONICAL_IDS);
@@ -290,14 +290,14 @@ async function seedCanonicalAggregate(target: ManagedSqliteDatabase): Promise<vo
 }
 
 async function expectSqliteConstraint(
-  target: ManagedSqliteDatabase,
+  target: TestManagedSqliteDatabase,
   operation: (transaction: SqliteTransaction) => void,
 ): Promise<void> {
   await expect(target.write(operation)).rejects.toMatchObject({ code: "transaction_failed" });
 }
 
 function expectCanonicalCounts(
-  target: ManagedSqliteDatabase,
+  target: TestManagedSqliteDatabase,
   nodeCount = 1n,
   artifactInputCount = 0n,
 ): void {
