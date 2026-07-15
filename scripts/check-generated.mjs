@@ -29,6 +29,17 @@ if (changedPaths.length > 0) {
   }
   process.exit(1);
 }
+const sqliteGenerated = spawnSync(
+  process.execPath,
+  [resolve(dirname(fileURLToPath(import.meta.url)), "generate-sqlite-schema.mjs"), "--check"],
+  { stdio: "inherit" },
+);
+if (sqliteGenerated.error !== undefined) {
+  throw sqliteGenerated.error;
+}
+if (sqliteGenerated.status !== 0) {
+  process.exit(sqliteGenerated.status ?? 1);
+}
 
 function snapshot(root) {
   const files = new Map();

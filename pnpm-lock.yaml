@@ -23,6 +23,9 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.7.0(jiti@2.7.0))
+      '@minions/adapters':
+        specifier: workspace:*
+        version: link:packages/adapters
       '@minions/contracts':
         specifier: workspace:*
         version: link:packages/contracts
@@ -89,7 +92,15 @@ importers:
 
   apps/web: {}
 
-  packages/adapters: {}
+  packages/adapters:
+    dependencies:
+      '@minions/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
 
   packages/contracts:
     dependencies:
@@ -101,9 +112,16 @@ importers:
 
   packages/testkit:
     dependencies:
+      '@minions/adapters':
+        specifier: workspace:*
+        version: link:../adapters
       '@minions/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
 
   packages/ui-kit: {}
 
