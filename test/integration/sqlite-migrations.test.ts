@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { copyFile, link, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -19,6 +20,16 @@ import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { describe, expect, it } from "vitest";
 
 const fixedTimestamp = timestampFromEpochMilliseconds(1_725_000_000_123);
+
+const externalRepositoryUpdate = `
+  import { DatabaseSync } from "node:sqlite";
+  const database = new DatabaseSync(process.argv[1]);
+  database.exec("PRAGMA busy_timeout = 5000");
+  database.prepare("UPDATE repositories SET version = 1 WHERE id = ?").run(process.argv[2]);
+  database.close();
+`;
+const snapshotRepositoryId = "01900000-0000-7000-8000-000000000001";
+const snapshotHostId = "01900000-0000-7000-8000-000000000002";
 
 const migrationCases = [
   {
@@ -452,6 +463,53 @@ describe("SQLite migration integration", () => {
       );
     } finally {
       await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("SQLite snapshot reads", () => {
+  it("pins all projection reads to one transaction while another process commits", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+          [snapshotRepositoryId, snapshotHostId, "/workspace/snapshot", fixedTimestamp],
+        );
+      });
+
+      const observed = temporary.database.snapshot((reader) => {
+        const before = reader.get("SELECT version FROM repositories WHERE id = ?", [
+          snapshotRepositoryId,
+        ])?.["version"];
+        execFileSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "--eval",
+            externalRepositoryUpdate,
+            temporary.path,
+            snapshotRepositoryId,
+          ],
+          { stdio: "pipe" },
+        );
+        const after = reader.get("SELECT version FROM repositories WHERE id = ?", [
+          snapshotRepositoryId,
+        ])?.["version"];
+        return { before, after };
+      });
+
+      expect(observed).toEqual({ before: 0n, after: 0n });
+      expect(
+        temporary.database.read(
+          (reader) =>
+            reader.get("SELECT version FROM repositories WHERE id = ?", [snapshotRepositoryId])?.[
+              "version"
+            ],
+        ),
+      ).toBe(1n);
+    } finally {
+      await temporary.dispose();
     }
   });
 });

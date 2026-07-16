@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import { WireType } from "@bufbuild/protobuf/wire";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
+import { createEventCommitWaiter } from "@minions/adapters";
 import {
   ApiVersionSchema,
   ErrorDetailSchema,
@@ -12,12 +13,16 @@ import {
   SystemService,
   type ValidationError,
 } from "@minions/contracts";
+import { timestampFromEpochMilliseconds } from "@minions/core";
+import { FixedClock } from "@minions/testkit";
+import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { startSystemServer, type RunningSystemServer } from "../../apps/daemon/src/server.js";
 
 let systemServer: RunningSystemServer | undefined;
 let systemClient: Client<typeof SystemService> | undefined;
+let temporaryDatabase: TemporarySqliteDatabase | undefined;
 
 function getSystemClient(): Client<typeof SystemService> {
   if (systemClient === undefined) {
@@ -76,8 +81,15 @@ async function closeServer(server: Server): Promise<void> {
 
 describe("SystemService integration", () => {
   beforeAll(async () => {
+    temporaryDatabase = await TemporarySqliteDatabase.create(
+      "host",
+      new FixedClock(timestampFromEpochMilliseconds(1_700_000_000_000)),
+    );
     systemServer = await startSystemServer({
       port: 0,
+      database: temporaryDatabase.database,
+      eventWaiter: createEventCommitWaiter(),
+      eventPollIntervalMs: 10,
       serverVersion: "0.0.0",
     });
     systemClient = createClient(
@@ -93,6 +105,9 @@ describe("SystemService integration", () => {
   afterAll(async () => {
     if (systemServer !== undefined) {
       await systemServer.close();
+    }
+    if (temporaryDatabase !== undefined) {
+      await temporaryDatabase.dispose();
     }
   });
 
@@ -116,7 +131,10 @@ describe("SystemService integration", () => {
         patch: 0,
       }),
     );
-    expect(response.capabilities).toEqual([ServerCapability.SYSTEM_INFO]);
+    expect(response.capabilities).toEqual([
+      ServerCapability.SYSTEM_INFO,
+      ServerCapability.EVENT_STREAM,
+    ]);
   });
 
   it("rejects an empty client name with validation violations", async () => {
@@ -229,13 +247,18 @@ describe("SystemService integration", () => {
     const port = address.port;
     await closeServer(portProbe);
 
+    const eventWaiter = createEventCommitWaiter();
     const startup = await startSystemServer({
       port,
+      database: getTemporaryDatabase().database,
+      eventWaiter,
+      eventPollIntervalMs: 10,
       serverVersion: "not-a-semantic-version",
     }).then(
       (server) => ({ case: "started", server }) as const,
       (error: unknown) => ({ case: "rejected", error }) as const,
     );
+    eventWaiter.close();
     if (startup.case === "started") {
       await startup.server.close();
       throw new Error("invalid server version started a listener");
@@ -247,4 +270,11 @@ describe("SystemService integration", () => {
     await listenOnLoopback(rebound, port);
     await closeServer(rebound);
   });
+
+  function getTemporaryDatabase(): TemporarySqliteDatabase {
+    if (temporaryDatabase === undefined) {
+      throw new Error("temporary database is not initialized");
+    }
+    return temporaryDatabase;
+  }
 });

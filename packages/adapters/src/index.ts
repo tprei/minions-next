@@ -1,3 +1,9 @@
+export { createEventCommitWaiter } from "./event-commit-waiter.js";
+export type {
+  EventCommitWaiter,
+  EventCommitWaitOptions,
+  EventCommitWaitResult,
+} from "./event-commit-waiter.js";
 export { SqliteCommandError } from "./sqlite/command-error.js";
 export type { SqliteCommandErrorCode } from "./sqlite/command-error.js";
 export { createSqliteCommandStore } from "./sqlite/command-store.js";
@@ -8,6 +14,19 @@ export type {
   SqliteCommandStore,
   SqliteCommandTransaction,
 } from "./sqlite/command.js";
+export { createSqliteEventStore } from "./sqlite/event-store.js";
+export type {
+  OpenSqliteEventStoreOptions,
+  SqliteAttentionSummary,
+  SqliteEventBounds,
+  SqliteEventSnapshot,
+  SqliteEventStore,
+  SqliteHostSummary,
+  SqliteNodeSummary,
+  SqliteRepositorySummary,
+  SqliteStoredEvent,
+  SqliteTreeSummary,
+} from "./sqlite/event-store.js";
 export { openHostDatabase, openSupervisorDatabase } from "./sqlite/database.js";
 export type {
   ManagedSqliteDatabase,

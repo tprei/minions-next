@@ -22,7 +22,7 @@ export function registerSystemService(router: ConnectRouter, serverVersion: stri
   const response = create(GetServerInfoResponseSchema, {
     serverVersion,
     apiVersion,
-    capabilities: [ServerCapability.SYSTEM_INFO],
+    capabilities: [ServerCapability.SYSTEM_INFO, ServerCapability.EVENT_STREAM],
   });
   const responseValidation = responseValidator.validate(GetServerInfoResponseSchema, response);
   if (responseValidation.kind !== "valid") {

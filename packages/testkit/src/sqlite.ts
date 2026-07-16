@@ -38,6 +38,10 @@ class TestSqliteDatabaseAlias implements TestManagedSqliteDatabase {
     return this.#inner.read(operation);
   }
 
+  snapshot<T>(operation: (reader: SqliteReader) => T): T {
+    return this.#inner.snapshot(operation);
+  }
+
   write<T>(operation: (transaction: SqliteTransaction) => T): Promise<T> {
     return executeTestSqliteWrite(this, operation);
   }
@@ -152,6 +156,10 @@ export class FaultInjectingSqliteDatabase implements TestManagedSqliteDatabase {
 
   read<T>(operation: (reader: SqliteReader) => T): T {
     return this.#inner.read(operation);
+  }
+
+  snapshot<T>(operation: (reader: SqliteReader) => T): T {
+    return this.#inner.snapshot(operation);
   }
 
   write<T>(operation: (transaction: SqliteTransaction) => T): Promise<T> {

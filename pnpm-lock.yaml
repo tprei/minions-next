@@ -82,6 +82,9 @@ importers:
       '@connectrpc/validate':
         specifier: 0.2.0
         version: 0.2.0(@bufbuild/protobuf@2.12.1)(@bufbuild/protovalidate@1.2.0(@bufbuild/protobuf@2.12.1))(@connectrpc/connect@2.1.2(@bufbuild/protobuf@2.12.1))
+      '@minions/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
       '@minions/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -94,6 +97,9 @@ importers:
 
   packages/adapters:
     dependencies:
+      '@minions/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@minions/core':
         specifier: workspace:*
         version: link:../core
@@ -107,6 +113,9 @@ importers:
       '@bufbuild/protobuf':
         specifier: 2.12.1
         version: 2.12.1
+      '@bufbuild/protovalidate':
+        specifier: 1.2.0
+        version: 1.2.0(@bufbuild/protobuf@2.12.1)
 
   packages/core: {}
 

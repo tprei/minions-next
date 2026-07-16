@@ -1,15 +1,25 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import {
+  createSqliteEventStore,
+  type EventCommitWaiter,
+  type ManagedSqliteDatabase,
+} from "@minions/adapters";
+
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { createValidateInterceptor } from "@connectrpc/validate";
 
 import { createErrorDetailInterceptor } from "./error-detail-interceptor.js";
+import { registerEventService } from "./event-service.js";
 import { registerSystemService } from "./system-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
 
 export type SystemServerOptions = Readonly<{
   port: number;
+  database: ManagedSqliteDatabase;
+  eventWaiter: EventCommitWaiter;
+  eventPollIntervalMs: number;
   serverVersion: string;
 }>;
 
@@ -24,6 +34,11 @@ export async function startSystemServer(
   const handler = connectNodeAdapter({
     routes: (router) => {
       registerSystemService(router, options.serverVersion);
+      registerEventService(router, {
+        store: createSqliteEventStore({ database: options.database }),
+        waiter: options.eventWaiter,
+        pollIntervalMs: options.eventPollIntervalMs,
+      });
     },
     interceptors: [
       createErrorDetailInterceptor(),
@@ -53,7 +68,7 @@ export async function startSystemServer(
   return {
     baseUrl: toBaseUrl(address),
     close: async () => {
-      server.closeIdleConnections();
+      options.eventWaiter.close();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error === undefined) {
@@ -62,6 +77,7 @@ export async function startSystemServer(
           }
           reject(error);
         });
+        server.closeAllConnections();
       });
     },
   };

@@ -11,6 +11,7 @@ message ErrorDetail {
 
     ValidationError validation = 1;
     UnsupportedApiVersion unsupported_api_version = 2;
+    EventCursorExpired event_cursor_expired = 3;
   }
 }
 
@@ -21,4 +22,9 @@ message ValidationError {
 message UnsupportedApiVersion {
   ApiVersion requested = 1 [(buf.validate.field).required = true];
   ApiVersion supported = 2 [(buf.validate.field).required = true];
+}
+
+message EventCursorExpired {
+  uint64 minimum_available_sequence = 1 [(buf.validate.field).uint64.gte = 1];
+  uint64 last_sequence = 2;
 }

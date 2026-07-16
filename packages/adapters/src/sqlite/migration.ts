@@ -151,7 +151,7 @@ export function applyReaderPolicy(database: DatabaseSync): void {
   }
 }
 
-function authorizeReaderAction(
+export function authorizeReaderAction(
   actionCode: number,
   firstArgument: string | null,
   secondArgument: string | null,
