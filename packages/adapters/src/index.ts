@@ -1,3 +1,5 @@
+export type { SchedulerStore } from "@minions/core";
+
 export { inspectRepository, RepositoryInspectionError } from "./repository-inspector.js";
 export type {
   RepositoryInspection,
@@ -88,6 +90,11 @@ export type {
   TreeRecord,
   TreeSummaryRecord,
 } from "./sqlite/plan-registry.js";
+export { createSqliteSchedulerStore, SqliteSchedulerError } from "./sqlite/scheduler-store.js";
+export type {
+  CreateSqliteSchedulerStoreOptions,
+  SqliteSchedulerErrorCode,
+} from "./sqlite/scheduler-store.js";
 export { openHostDatabase, openSupervisorDatabase } from "./sqlite/database.js";
 export type {
   ManagedSqliteDatabase,
