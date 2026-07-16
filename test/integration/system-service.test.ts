@@ -5,7 +5,14 @@ import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { WireType } from "@bufbuild/protobuf/wire";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
-import { createEventCommitWaiter } from "@minions/adapters";
+import {
+  createEventCommitWaiter,
+  createPlanRegistry,
+  createSqliteCommandStore,
+  type EventCommitWaiter,
+  type ManagedSqliteDatabase,
+  type PlanRegistry,
+} from "@minions/adapters";
 import {
   ApiVersionSchema,
   DaemonMode,
@@ -21,8 +28,8 @@ import {
   RunDoctorResponseSchema,
   type ValidationError,
 } from "@minions/contracts";
-import { timestampFromEpochMilliseconds } from "@minions/core";
-import { FixedClock } from "@minions/testkit";
+import { hostId, timestampFromEpochMilliseconds } from "@minions/core";
+import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -31,10 +38,11 @@ import { startDaemonServer, type RunningDaemonServer } from "@minions/daemon";
 let systemServer: RunningDaemonServer | undefined;
 let systemClient: Client<typeof SystemService> | undefined;
 let temporaryDatabase: TemporarySqliteDatabase | undefined;
+const hostIdentifier = "01900000-0000-7000-8000-000000000002";
 const health = create(GetHealthResponseSchema, {
   instanceId: "01900000-0000-7000-8000-000000000001",
   mode: DaemonMode.HOST,
-  hostId: "01900000-0000-7000-8000-000000000002",
+  hostId: hostIdentifier,
   startedAt: create(TimestampSchema, { seconds: 1_700_000_000n }),
 });
 const doctor = create(RunDoctorResponseSchema, {
@@ -46,6 +54,25 @@ const doctor = create(RunDoctorResponseSchema, {
     }),
   ],
 });
+const fixtureNow = timestampFromEpochMilliseconds(1_700_000_000_000);
+const trustedHostId = hostId(hostIdentifier);
+
+function createHostPlanRegistry(
+  database: ManagedSqliteDatabase,
+  eventWaiter: EventCommitWaiter,
+  clock: FixedClock,
+): PlanRegistry {
+  const commandStore = createSqliteCommandStore({
+    database,
+    ports: { clock, ids: new SequenceIdGenerator([health.instanceId]) },
+    notifier: eventWaiter,
+  });
+  return createPlanRegistry({
+    database,
+    commandStore,
+    hostId: trustedHostId,
+  });
+}
 
 function getSystemClient(): Client<typeof SystemService> {
   if (systemClient === undefined) {
@@ -104,16 +131,18 @@ async function closeServer(server: Server): Promise<void> {
 
 describe("SystemService integration", () => {
   beforeAll(async () => {
-    temporaryDatabase = await TemporarySqliteDatabase.create(
-      "host",
-      new FixedClock(timestampFromEpochMilliseconds(1_700_000_000_000)),
-    );
+    const clock = new FixedClock(fixtureNow);
+    temporaryDatabase = await TemporarySqliteDatabase.create("host", clock);
+    const eventWaiter = createEventCommitWaiter();
+    const planRegistry = createHostPlanRegistry(temporaryDatabase.database, eventWaiter, clock);
     systemServer = await startDaemonServer({
       mode: "host",
       port: 0,
       database: temporaryDatabase.database,
-      eventWaiter: createEventCommitWaiter(),
+      eventWaiter,
       eventPollIntervalMs: 10,
+      planRegistry,
+      clock,
       system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
     });
     systemClient = createClient(
@@ -159,6 +188,7 @@ describe("SystemService integration", () => {
       ServerCapability.SYSTEM_INFO,
       ServerCapability.HEALTH_DOCTOR,
       ServerCapability.EVENT_STREAM,
+      ServerCapability.TREE_PLANNING,
     ]);
   });
   it("returns typed daemon health identity", async () => {
@@ -284,12 +314,20 @@ describe("SystemService integration", () => {
     await closeServer(portProbe);
 
     const eventWaiter = createEventCommitWaiter();
+    const clock = new FixedClock(fixtureNow);
+    const planRegistry = createHostPlanRegistry(
+      getTemporaryDatabase().database,
+      eventWaiter,
+      clock,
+    );
     const startup = await startDaemonServer({
       mode: "host",
       port,
       database: getTemporaryDatabase().database,
       eventWaiter,
       eventPollIntervalMs: 10,
+      planRegistry,
+      clock,
       system: {
         serverVersion: "not-a-semantic-version",
         health,

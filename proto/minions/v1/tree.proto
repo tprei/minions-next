@@ -1,0 +1,294 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "minions/v1/event.proto";
+
+service TreeService {
+  rpc CreateTree(CreateTreeRequest) returns (CreateTreeResponse);
+  rpc GetTree(GetTreeRequest) returns (GetTreeResponse);
+  rpc ListTrees(ListTreesRequest) returns (ListTreesResponse);
+  rpc ProposePlan(ProposePlanRequest) returns (ProposePlanResponse);
+  rpc RepairPlan(RepairPlanRequest) returns (RepairPlanResponse);
+  rpc ApprovePlan(ApprovePlanRequest) returns (ApprovePlanResponse);
+}
+
+enum PlanRevisionState {
+  PLAN_REVISION_STATE_UNSPECIFIED = 0;
+  PLAN_REVISION_STATE_DRAFT = 1;
+  PLAN_REVISION_STATE_APPROVED = 2;
+  PLAN_REVISION_STATE_SUPERSEDED = 3;
+}
+
+enum PlanNodeMode {
+  PLAN_NODE_MODE_UNSPECIFIED = 0;
+  PLAN_NODE_MODE_PLAN = 1;
+  PLAN_NODE_MODE_RESEARCH = 2;
+  PLAN_NODE_MODE_EXPLORE = 3;
+  PLAN_NODE_MODE_IMPLEMENTATION = 4;
+}
+
+enum PlanAttentionKind {
+  PLAN_ATTENTION_KIND_UNSPECIFIED = 0;
+  PLAN_ATTENTION_KIND_PLAN_REQUIRED = 1;
+  PLAN_ATTENTION_KIND_PLAN_INVALID = 2;
+  PLAN_ATTENTION_KIND_REPAIR_REQUIRED = 3;
+}
+
+enum PlanAttentionState {
+  PLAN_ATTENTION_STATE_UNSPECIFIED = 0;
+  PLAN_ATTENTION_STATE_OPEN = 1;
+  PLAN_ATTENTION_STATE_RESOLVED = 2;
+}
+
+message TreeBudget {
+  uint32 max_depth = 1 [(buf.validate.field).uint32.gte = 1];
+  uint32 max_fan_out = 2 [(buf.validate.field).uint32.gte = 1];
+  uint32 max_nodes = 3 [(buf.validate.field).uint32.gte = 1];
+  uint32 max_concurrency = 4 [(buf.validate.field).uint32.gte = 1];
+  uint32 max_attempts_per_node = 5 [(buf.validate.field).uint32.gte = 1];
+}
+
+message NodeBudget {
+  uint32 max_attempts = 1 [(buf.validate.field).uint32.gte = 1];
+}
+
+message ArtifactInput {
+  string artifact_id = 1 [(buf.validate.field).string.uuid = true];
+  string source_node_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message ArtifactOutputContract {
+  string artifact_id = 1 [(buf.validate.field).string.uuid = true];
+  string artifact_type = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message ImplementationOutputContract {}
+
+message ProposedNode {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  optional string parent_node_id = 2 [(buf.validate.field).string.uuid = true];
+  PlanNodeMode mode = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string objective = 4 [(buf.validate.field).string = {min_len: 1}];
+  repeated string acceptance_criteria = 5 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {string: {min_len: 1}}
+  }];
+  repeated ArtifactInput inputs = 6;
+  oneof output_contract {
+    option (buf.validate.oneof).required = true;
+
+    ArtifactOutputContract artifact = 7;
+    ImplementationOutputContract implementation = 8;
+  }
+  repeated string allowed_repository_paths = 9 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 128
+    items: {
+      string: {
+        min_len: 1
+        max_len: 512
+      }
+    }
+  }];
+  string check_profile = 10 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+}
+
+message PlanRevision {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string tree_id = 2 [(buf.validate.field).string.uuid = true];
+  uint64 ordinal = 3 [(buf.validate.field).uint64.gte = 1];
+  string goal = 4 [(buf.validate.field).string = {min_len: 1}];
+  PlanRevisionState state = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  uint64 version = 6;
+  google.protobuf.Timestamp created_at = 7 [(buf.validate.field).required = true];
+  optional google.protobuf.Timestamp approved_at = 8;
+  optional google.protobuf.Timestamp superseded_at = 9;
+}
+
+message TaskNode {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string tree_id = 2 [(buf.validate.field).string.uuid = true];
+  string repository_id = 3 [(buf.validate.field).string.uuid = true];
+  string host_id = 4 [(buf.validate.field).string.uuid = true];
+  optional string parent_node_id = 5 [(buf.validate.field).string.uuid = true];
+  string plan_revision_id = 6 [(buf.validate.field).string.uuid = true];
+  PlanNodeMode mode = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string objective = 8 [(buf.validate.field).string = {min_len: 1}];
+  repeated string acceptance_criteria = 9 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {string: {min_len: 1}}
+  }];
+  repeated ArtifactInput inputs = 10;
+  oneof output_contract {
+    option (buf.validate.oneof).required = true;
+
+    ArtifactOutputContract artifact = 11;
+    ImplementationOutputContract implementation = 12;
+  }
+  NodeState state = 13 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  uint64 version = 14;
+  google.protobuf.Timestamp created_at = 15 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp updated_at = 16 [(buf.validate.field).required = true];
+  repeated string allowed_repository_paths = 17 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 128
+    items: {
+      string: {
+        min_len: 1
+        max_len: 512
+      }
+    }
+  }];
+  string check_profile = 18 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+  NodeBudget budget = 19 [(buf.validate.field).required = true];
+}
+
+message PlanAttention {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string tree_id = 2 [(buf.validate.field).string.uuid = true];
+  optional string plan_revision_id = 3 [(buf.validate.field).string.uuid = true];
+  PlanAttentionKind kind = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string message = 5 [(buf.validate.field).string = {min_len: 1}];
+  PlanAttentionState state = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Timestamp created_at = 7 [(buf.validate.field).required = true];
+  optional google.protobuf.Timestamp resolved_at = 8;
+}
+
+message TaskTree {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string repository_id = 2 [(buf.validate.field).string.uuid = true];
+  string host_id = 3 [(buf.validate.field).string.uuid = true];
+  string base_commit = 4 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"];
+  string goal = 5 [(buf.validate.field).string = {min_len: 1}];
+  string active_plan_revision_id = 6 [(buf.validate.field).string.uuid = true];
+  string root_node_id = 7 [(buf.validate.field).string.uuid = true];
+  TreeState state = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  uint64 version = 9;
+  google.protobuf.Timestamp created_at = 10 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp updated_at = 11 [(buf.validate.field).required = true];
+  repeated PlanRevision revisions = 12;
+  repeated TaskNode nodes = 13;
+  TreeBudget budget = 14 [(buf.validate.field).required = true];
+  optional PlanAttention attention = 15;
+}
+
+message CreateTreeRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string repository_id = 3 [(buf.validate.field).string.uuid = true];
+  string tree_id = 4 [(buf.validate.field).string.uuid = true];
+  string plan_revision_id = 5 [(buf.validate.field).string.uuid = true];
+  string root_node_id = 6 [(buf.validate.field).string.uuid = true];
+  string root_artifact_id = 7 [(buf.validate.field).string.uuid = true];
+  string goal = 8 [(buf.validate.field).string = {min_len: 1}];
+  string base_commit = 9 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"];
+  TreeBudget budget = 10 [(buf.validate.field).required = true];
+  string attention_id = 11 [(buf.validate.field).string.uuid = true];
+  repeated string root_allowed_repository_paths = 12 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 128
+    items: {
+      string: {
+        min_len: 1
+        max_len: 512
+      }
+    }
+  }];
+  string root_check_profile = 13 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+}
+
+message CreateTreeResponse {
+  TaskTree tree = 1 [(buf.validate.field).required = true];
+}
+
+message GetTreeRequest {
+  string tree_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetTreeResponse {
+  TaskTree tree = 1 [(buf.validate.field).required = true];
+}
+
+message ListTreesRequest {
+  uint32 page_size = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 100
+  }];
+  optional string page_token = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message ListTreesResponse {
+  repeated TreeSummary trees = 1;
+  optional string next_page_token = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message ProposePlanRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string tree_id = 3 [(buf.validate.field).string.uuid = true];
+  string plan_revision_id = 4 [(buf.validate.field).string.uuid = true];
+  string goal = 5 [(buf.validate.field).string = {min_len: 1}];
+  repeated ProposedNode nodes = 6 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message ProposePlanResponse {
+  TaskTree tree = 1 [(buf.validate.field).required = true];
+}
+
+message RepairPlanRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string tree_id = 3 [(buf.validate.field).string.uuid = true];
+  string plan_revision_id = 4 [(buf.validate.field).string.uuid = true];
+  string attention_id = 5 [(buf.validate.field).string.uuid = true];
+  string goal = 6 [(buf.validate.field).string = {min_len: 1}];
+  repeated ProposedNode nodes = 7 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message RepairPlanResponse {
+  TaskTree tree = 1 [(buf.validate.field).required = true];
+}
+
+message ApprovePlanRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string tree_id = 3 [(buf.validate.field).string.uuid = true];
+  string plan_revision_id = 4 [(buf.validate.field).string.uuid = true];
+}
+
+message ApprovePlanResponse {
+  TaskTree tree = 1 [(buf.validate.field).required = true];
+}

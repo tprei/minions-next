@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import {
   acquireLifecycleLock,
   createEventCommitWaiter,
+  createPlanRegistry,
   createRepositoryRegistry,
   createSqliteCommandStore,
   createSecureIdGenerator,
@@ -22,6 +23,7 @@ import {
   type DaemonModeName,
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
+  type PlanRegistry,
   type RepositoryRegistry,
   type SupervisorHostRegistry,
 } from "@minions/adapters";
@@ -92,6 +94,7 @@ export async function startDaemonRuntime(
   let hostRegistry: SupervisorHostRegistry | undefined;
   let eventWaiter: EventCommitWaiter | undefined;
   let repositoryRegistry: RepositoryRegistry | undefined;
+  let planRegistry: PlanRegistry | undefined;
   let localHostId: HostId | undefined;
   let server: RunningDaemonServer | undefined;
 
@@ -143,6 +146,11 @@ export async function startDaemonRuntime(
         commandStore,
         hostId: activeHostId,
       });
+      planRegistry = createPlanRegistry({
+        database: hostDatabase,
+        commandStore,
+        hostId: activeHostId,
+      });
     }
     options.signal?.throwIfAborted();
 
@@ -163,6 +171,8 @@ export async function startDaemonRuntime(
         database: requireDatabase(hostDatabase),
         eventWaiter: requireWaiter(eventWaiter),
         eventPollIntervalMs: 1_000,
+        planRegistry: requirePlanRegistry(planRegistry),
+        clock: options.clock,
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -178,6 +188,8 @@ export async function startDaemonRuntime(
         database: requireDatabase(hostDatabase),
         eventWaiter: requireWaiter(eventWaiter),
         eventPollIntervalMs: 1_000,
+        planRegistry: requirePlanRegistry(planRegistry),
+        clock: options.clock,
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -574,6 +586,13 @@ function requireHostId(value: HostId | undefined): HostId {
 function requireRepositoryRegistry(value: RepositoryRegistry | undefined): RepositoryRegistry {
   if (value === undefined) {
     throw new Error("repository registry is not initialized");
+  }
+  return value;
+}
+
+function requirePlanRegistry(value: PlanRegistry | undefined): PlanRegistry {
+  if (value === undefined) {
+    throw new Error("plan registry is not initialized");
   }
   return value;
 }

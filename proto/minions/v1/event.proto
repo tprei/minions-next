@@ -105,6 +105,10 @@ message AttentionSummary {
   optional string evidence_id = 3 [(buf.validate.field).string.uuid = true];
 }
 
+message AttentionRemoved {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
 message ProjectionRemoved {
   AggregateKind aggregate_kind = 1 [(buf.validate.field).enum = {
     defined_only: true
@@ -123,7 +127,14 @@ message ProjectionChange {
     NodeSummary node_upserted = 4;
     AttentionSummary attention_upserted = 5;
     ProjectionRemoved removed = 6;
+
+    AttentionRemoved attention_removed = 7;
+    ProjectionBatch batch = 8;
   }
+}
+
+message ProjectionBatch {
+  repeated ProjectionChange changes = 1 [(buf.validate.field).repeated.min_items = 1];
 }
 
 message EventEnvelope {

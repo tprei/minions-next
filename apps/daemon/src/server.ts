@@ -5,6 +5,7 @@ import {
   createSqliteEventStore,
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
+  type PlanRegistry,
   type SupervisorHostRegistry,
   type RepositoryRegistry,
 } from "@minions/adapters";
@@ -23,6 +24,7 @@ import { registerEventService } from "./event-service.js";
 import { registerHostService } from "./host-service.js";
 import { registerRepositoryService } from "./repository-service.js";
 import { registerSystemService } from "./system-service.js";
+import { registerTreeService } from "./tree-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
 
 type DaemonSystemOptions = Readonly<{
@@ -48,8 +50,10 @@ export type DaemonServerOptions =
         mode: "host";
         database: ManagedSqliteDatabase;
         eventWaiter: EventCommitWaiter;
-        repository?: DaemonRepositoryOptions;
         eventPollIntervalMs: number;
+        planRegistry: PlanRegistry;
+        clock: Clock;
+        repository?: DaemonRepositoryOptions;
       }>)
   | (BaseDaemonServerOptions &
       Readonly<{
@@ -62,6 +66,8 @@ export type DaemonServerOptions =
         database: ManagedSqliteDatabase;
         eventWaiter: EventCommitWaiter;
         eventPollIntervalMs: number;
+        planRegistry: PlanRegistry;
+        clock: Clock;
         repository?: DaemonRepositoryOptions;
         hostRegistry: SupervisorHostRegistry;
       }>);
@@ -86,6 +92,10 @@ export async function startDaemonServer(
           store: createSqliteEventStore({ database: options.database }),
           waiter: options.eventWaiter,
           pollIntervalMs: options.eventPollIntervalMs,
+        });
+        registerTreeService(router, {
+          planRegistry: options.planRegistry,
+          clock: options.clock,
         });
         if (options.repository !== undefined) {
           registerRepositoryService(router, options.repository);
@@ -145,7 +155,7 @@ function capabilitiesForOptions(options: DaemonServerOptions): readonly ServerCa
     ServerCapability.HEALTH_DOCTOR,
   ];
   if (options.mode !== "supervisor") {
-    capabilities.push(ServerCapability.EVENT_STREAM);
+    capabilities.push(ServerCapability.EVENT_STREAM, ServerCapability.TREE_PLANNING);
     if (options.repository !== undefined) {
       capabilities.push(ServerCapability.REPOSITORY_REGISTRY);
     }

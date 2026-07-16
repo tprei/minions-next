@@ -38,7 +38,7 @@ export type SqliteNodeSummary = Readonly<{
 export type SqliteAttentionSummary = Readonly<{
   nodeId: string;
   kind: string;
-  evidenceId: string;
+  evidenceId: string | undefined;
 }>;
 
 export type SqliteEventBounds = Readonly<{
@@ -131,14 +131,33 @@ class DefaultSqliteEventStore implements SqliteEventStore {
         .map(toNodeSummary);
       const attention = reader
         .all(
-          `SELECT nodes.id AS node_id,
-                  CASE WHEN nodes.state_kind = 'failed' THEN 'node_failed' ELSE nodes.blocker_kind END AS kind,
-                  CASE WHEN nodes.state_kind = 'failed' THEN nodes.terminal_evidence_id ELSE nodes.blocker_evidence_id END AS evidence_id
-             FROM nodes
-             JOIN trees ON trees.id = nodes.tree_id
-            WHERE trees.archived_at_ms IS NULL
-              AND nodes.state_kind IN ('blocked', 'failed')
-            ORDER BY nodes.updated_at_ms, nodes.id`,
+          `SELECT node_id, kind, evidence_id
+             FROM (
+               SELECT nodes.id AS node_id,
+                      CASE WHEN nodes.state_kind = 'failed'
+                           THEN 'node_failed'
+                           ELSE nodes.blocker_kind
+                       END AS kind,
+                      CASE WHEN nodes.state_kind = 'failed'
+                           THEN nodes.terminal_evidence_id
+                           ELSE nodes.blocker_evidence_id
+                       END AS evidence_id,
+                      nodes.updated_at_ms AS ordered_at_ms
+                 FROM nodes
+                 JOIN trees ON trees.id = nodes.tree_id
+                WHERE trees.archived_at_ms IS NULL
+                  AND nodes.state_kind IN ('blocked', 'failed')
+               UNION ALL
+               SELECT trees.root_node_id AS node_id,
+                      'human_input' AS kind,
+                      NULL AS evidence_id,
+                      plan_attentions.created_at_ms AS ordered_at_ms
+                 FROM plan_attentions
+                 JOIN trees ON trees.id = plan_attentions.tree_id
+                WHERE trees.archived_at_ms IS NULL
+                  AND plan_attentions.state_kind = 'open'
+             )
+            ORDER BY ordered_at_ms, node_id`,
         )
         .map(toAttentionSummary);
       const bounds = readBounds(
@@ -263,7 +282,7 @@ function toAttentionSummary(row: SqliteRow): SqliteAttentionSummary {
   return Object.freeze({
     nodeId: requiredString(row, "node_id"),
     kind: requiredString(row, "kind"),
-    evidenceId: requiredString(row, "evidence_id"),
+    evidenceId: optionalString(row, "evidence_id"),
   });
 }
 

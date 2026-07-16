@@ -16,7 +16,7 @@ import {
 } from "@minions/adapters";
 import { timestampFromEpochMilliseconds } from "@minions/core";
 import { FixedClock } from "@minions/testkit";
-import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
+import { TemporarySqliteDatabase, type TestManagedSqliteDatabase } from "@minions/testkit/sqlite";
 import { describe, expect, it } from "vitest";
 
 const fixedTimestamp = timestampFromEpochMilliseconds(1_725_000_000_123);
@@ -30,6 +30,15 @@ const externalRepositoryUpdate = `
 `;
 const snapshotRepositoryId = "01900000-0000-7000-8000-000000000001";
 const snapshotHostId = "01900000-0000-7000-8000-000000000002";
+const planRepositoryId = "01900000-0000-7000-8000-000000000010";
+const planHostId = "01900000-0000-7000-8000-000000000011";
+const planTreeId = "01900000-0000-7000-8000-000000000012";
+const planRevisionId = "01900000-0000-7000-8000-000000000013";
+const planRootNodeId = "01900000-0000-7000-8000-000000000014";
+const planRootArtifactId = "01900000-0000-7000-8000-000000000015";
+const planAttentionId = "01900000-0000-7000-8000-000000000016";
+const secondAttentionId = "01900000-0000-7000-8000-000000000017";
+const planBaseCommit = "0123456789abcdef0123456789abcdef01234567";
 
 const migrationCases = [
   {
@@ -132,6 +141,67 @@ async function expectSqliteFailure(
   );
   expect(rejection).toBeInstanceOf(SqliteDatabaseError);
   expect(rejection).toMatchObject({ code: expectedCode });
+}
+
+async function seedPlanFoundation(database: TestManagedSqliteDatabase): Promise<void> {
+  await database.write((transaction) => {
+    transaction.run(
+      "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      [planRepositoryId, planHostId, "/workspace/plan", fixedTimestamp],
+    );
+    transaction.run(
+      `INSERT INTO trees (
+         id, repository_id, host_id, base_commit, goal, active_plan_revision_id,
+         root_node_id, version, created_at_ms, updated_at_ms, archived_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)`,
+      [
+        planTreeId,
+        planRepositoryId,
+        planHostId,
+        planBaseCommit,
+        "plan foundation",
+        planRevisionId,
+        planRootNodeId,
+        fixedTimestamp,
+        fixedTimestamp,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO plan_revisions (
+         id, tree_id, ordinal, goal, state_kind, version, created_at_ms,
+         approved_at_ms, superseded_at_ms
+       ) VALUES (?, ?, 1, ?, 'draft', 0, ?, NULL, NULL)`,
+      [planRevisionId, planTreeId, "plan foundation", fixedTimestamp],
+    );
+    transaction.run(
+      `INSERT INTO nodes (
+         id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+         mode, objective, output_kind, output_artifact_id, output_artifact_type,
+         state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+         blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+         outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+         outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+         version, created_at_ms, updated_at_ms
+       ) VALUES (?, ?, ?, ?, NULL, ?, 'plan', ?, 'artifact', ?, 'plan',
+         'planned', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+         NULL, NULL, NULL, NULL, 0, ?, ?)`,
+      [
+        planRootNodeId,
+        planTreeId,
+        planRepositoryId,
+        planHostId,
+        planRevisionId,
+        "plan foundation",
+        planRootArtifactId,
+        fixedTimestamp,
+        fixedTimestamp,
+      ],
+    );
+    transaction.run(
+      "INSERT INTO node_acceptance_criteria (node_id, ordinal, criterion) VALUES (?, 0, ?)",
+      [planRootNodeId, "plan foundation"],
+    );
+  });
 }
 
 describe("SQLite migration integration", () => {
@@ -246,8 +316,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 3,
-          appliedVersions: [2, 3],
+          currentVersion: 4,
+          appliedVersions: [2, 3, 4],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -409,7 +479,7 @@ describe("SQLite migration integration", () => {
           .prepare(
             "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
           )
-          .run(4, "future_state", "f".repeat(64), fixedTimestamp);
+          .run(5, "future_state", "f".repeat(64), fixedTimestamp);
       } finally {
         futureDatabase.close();
       }
@@ -428,7 +498,7 @@ describe("SQLite migration integration", () => {
       ).toEqual([
         ...expectedHistory(hostMigrations, fixedTimestamp),
         {
-          version: 4n,
+          version: 5n,
           name: "future_state",
           checksum: "f".repeat(64),
           applied_at_ms: BigInt(fixedTimestamp),
@@ -463,6 +533,205 @@ describe("SQLite migration integration", () => {
       );
     } finally {
       await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("SQLite v4 plan foundation", () => {
+  it("enforces structural budgets, ordered scope policies, attention resolution, and immutable definitions", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      await seedPlanFoundation(temporary.database);
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `INSERT INTO tree_budgets (
+                 tree_id, max_depth, max_fan_out, max_nodes, max_concurrency, max_attempts_per_node
+               ) VALUES (?, 1, 1, 2, 1, 1)`,
+              [planTreeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `INSERT INTO tree_budgets (
+             tree_id, max_depth, max_fan_out, max_nodes, max_concurrency, max_attempts_per_node
+           ) VALUES (?, 2, 1, 2, 1, 1)`,
+          [planTreeId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `INSERT INTO node_repository_scope (node_id, ordinal, repository_path)
+               VALUES (?, 0, '')`,
+              [planRootNodeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `INSERT INTO node_repository_scope (node_id, ordinal, repository_path)
+           VALUES (?, 1, 'tests')`,
+          [planRootNodeId],
+        );
+        transaction.run(
+          `INSERT INTO node_repository_scope (node_id, ordinal, repository_path)
+           VALUES (?, 0, 'src')`,
+          [planRootNodeId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
+               VALUES (?, '', 1)`,
+              [planRootNodeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
+               VALUES (?, 'event', 0)`,
+              [planRootNodeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
+           VALUES (?, 'event', 1)`,
+          [planRootNodeId],
+        );
+      });
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `INSERT INTO plan_attentions (
+             id, tree_id, plan_revision_id, kind, message, state_kind, created_at_ms, resolved_at_ms
+           ) VALUES (?, ?, ?, 'plan_required', 'plan is required', 'open', ?, NULL)`,
+          [planAttentionId, planTreeId, planRevisionId, fixedTimestamp],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `INSERT INTO plan_attentions (
+                 id, tree_id, plan_revision_id, kind, message, state_kind, created_at_ms, resolved_at_ms
+               ) VALUES (?, ?, ?, 'repair_required', 'another plan is required', 'open', ?, NULL)`,
+              [secondAttentionId, planTreeId, planRevisionId, fixedTimestamp],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE plan_attentions SET state_kind = 'resolved', resolved_at_ms = ? WHERE id = ?",
+              [fixedTimestamp - 1, planAttentionId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          "UPDATE plan_attentions SET state_kind = 'resolved', resolved_at_ms = ? WHERE id = ?",
+          [fixedTimestamp, planAttentionId],
+        );
+        transaction.run(
+          `INSERT INTO plan_attentions (
+             id, tree_id, plan_revision_id, kind, message, state_kind, created_at_ms, resolved_at_ms
+           ) VALUES (?, ?, ?, 'repair_required', 'repair is required', 'open', ?, NULL)`,
+          [secondAttentionId, planTreeId, planRevisionId, fixedTimestamp],
+        );
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader
+            .all(
+              "SELECT ordinal, repository_path FROM node_repository_scope WHERE node_id = ? ORDER BY ordinal",
+              [planRootNodeId],
+            )
+            .map((row) => [row["ordinal"], row["repository_path"]]),
+        ),
+      ).toEqual([
+        [0n, "src"],
+        [1n, "tests"],
+      ]);
+      expect(
+        temporary.database.read((reader) =>
+          reader.get(
+            "SELECT check_profile, max_attempts FROM node_plan_policies WHERE node_id = ?",
+            [planRootNodeId],
+          ),
+        ),
+      ).toEqual({ check_profile: "event", max_attempts: 1n });
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT max_depth, max_nodes FROM tree_budgets WHERE tree_id = ?", [
+            planTreeId,
+          ]),
+        ),
+      ).toEqual({ max_depth: 2n, max_nodes: 2n });
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT state_kind, resolved_at_ms FROM plan_attentions WHERE id = ?", [
+            planAttentionId,
+          ]),
+        ),
+      ).toEqual({ state_kind: "resolved", resolved_at_ms: BigInt(fixedTimestamp) });
+
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE tree_budgets SET max_depth = 3 WHERE tree_id = ?", [
+              planTreeId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_repository_scope SET repository_path = 'changed' WHERE node_id = ? AND ordinal = 0",
+              [planRootNodeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_plan_policies SET check_profile = 'changed' WHERE node_id = ?",
+              [planRootNodeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE plan_attentions SET message = 'changed' WHERE id = ?", [
+              secondAttentionId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+    } finally {
+      await temporary.dispose();
     }
   });
 });
