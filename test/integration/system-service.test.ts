@@ -9,9 +9,9 @@ import {
   createEventCommitWaiter,
   createPlanRegistry,
   createSqliteCommandStore,
+  createSqliteSteeringCommandStore,
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
-  type PlanRegistry,
 } from "@minions/adapters";
 import {
   ApiVersionSchema,
@@ -57,21 +57,25 @@ const doctor = create(RunDoctorResponseSchema, {
 const fixtureNow = timestampFromEpochMilliseconds(1_700_000_000_000);
 const trustedHostId = hostId(hostIdentifier);
 
-function createHostPlanRegistry(
+function createHostServices(
   database: ManagedSqliteDatabase,
   eventWaiter: EventCommitWaiter,
   clock: FixedClock,
-): PlanRegistry {
+) {
+  const ports = { clock, ids: new SequenceIdGenerator([health.instanceId]) };
   const commandStore = createSqliteCommandStore({
     database,
-    ports: { clock, ids: new SequenceIdGenerator([health.instanceId]) },
+    ports,
     notifier: eventWaiter,
   });
-  return createPlanRegistry({
-    database,
-    commandStore,
-    hostId: trustedHostId,
-  });
+  return {
+    planRegistry: createPlanRegistry({
+      database,
+      commandStore,
+      hostId: trustedHostId,
+    }),
+    steeringStore: createSqliteSteeringCommandStore({ database, commandStore, ports }),
+  };
 }
 
 function getSystemClient(): Client<typeof SystemService> {
@@ -134,7 +138,11 @@ describe("SystemService integration", () => {
     const clock = new FixedClock(fixtureNow);
     temporaryDatabase = await TemporarySqliteDatabase.create("host", clock);
     const eventWaiter = createEventCommitWaiter();
-    const planRegistry = createHostPlanRegistry(temporaryDatabase.database, eventWaiter, clock);
+    const { planRegistry, steeringStore } = createHostServices(
+      temporaryDatabase.database,
+      eventWaiter,
+      clock,
+    );
     systemServer = await startDaemonServer({
       mode: "host",
       port: 0,
@@ -143,6 +151,7 @@ describe("SystemService integration", () => {
       eventPollIntervalMs: 10,
       planRegistry,
       clock,
+      steeringStore,
       system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
     });
     systemClient = createClient(
@@ -189,6 +198,7 @@ describe("SystemService integration", () => {
       ServerCapability.HEALTH_DOCTOR,
       ServerCapability.EVENT_STREAM,
       ServerCapability.TREE_PLANNING,
+      ServerCapability.STEERING,
     ]);
   });
   it("returns typed daemon health identity", async () => {
@@ -315,7 +325,7 @@ describe("SystemService integration", () => {
 
     const eventWaiter = createEventCommitWaiter();
     const clock = new FixedClock(fixtureNow);
-    const planRegistry = createHostPlanRegistry(
+    const { planRegistry, steeringStore } = createHostServices(
       getTemporaryDatabase().database,
       eventWaiter,
       clock,
@@ -328,6 +338,7 @@ describe("SystemService integration", () => {
       eventPollIntervalMs: 10,
       planRegistry,
       clock,
+      steeringStore,
       system: {
         serverVersion: "not-a-semantic-version",
         health,

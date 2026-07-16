@@ -6,6 +6,7 @@ import {
   createEventCommitWaiter,
   createPlanRegistry,
   createSqliteCommandStore,
+  createSqliteSteeringCommandStore,
   openHostDatabase,
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
@@ -295,6 +296,11 @@ describe("EventService integration", () => {
         eventPollIntervalMs: 10,
         planRegistry,
         clock,
+        steeringStore: createSqliteSteeringCommandStore({
+          database: temporary.database,
+          commandStore,
+          ports: { clock, ids: new SequenceIdGenerator([]) },
+        }),
         system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
       }).then(
         (server) => ({ case: "started", server }) as const,
@@ -549,6 +555,8 @@ describe("EventService integration", () => {
             case "repositoryUpserted":
             case "removed":
             case "batch":
+            case "nodeCommandUpserted":
+            case "nodeAttentionUpserted":
             case undefined:
               throw new Error("tree command batch contains an unrelated projection change");
           }
@@ -617,6 +625,11 @@ async function startEventFixture(
     eventPollIntervalMs: 10,
     planRegistry,
     clock,
+    steeringStore: createSqliteSteeringCommandStore({
+      database,
+      commandStore,
+      ports: { clock, ids: new SequenceIdGenerator([]) },
+    }),
     system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
   });
   const transport = createConnectTransport({

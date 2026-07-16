@@ -63,6 +63,19 @@ const schedulerThirdChildLeaseId = "01900000-0000-7000-8000-000000000064";
 const schedulerInvalidLeaseId = "01900000-0000-7000-8000-000000000065";
 const schedulerOwnerId = "scheduler-owner-1";
 const schedulerSecondOwnerId = "scheduler-owner-2";
+const steeringActorSessionId = "01900000-0000-7000-8000-000000000100";
+const steeringCommandId = "01900000-0000-7000-8000-000000000110";
+const steeringFailedCommandId = "01900000-0000-7000-8000-000000000111";
+const steeringReviewCommandId = "01900000-0000-7000-8000-000000000112";
+const steeringAttentionCommandId = "01900000-0000-7000-8000-000000000113";
+const steeringAckFailedCommandId = "01900000-0000-7000-8000-000000000114";
+const steeringAttentionId = "01900000-0000-7000-8000-000000000120";
+const steeringSecondAttentionId = "01900000-0000-7000-8000-000000000121";
+const steeringDeliveryToken = "01900000-0000-7000-8000-000000000130";
+const steeringFailedDeliveryToken = "01900000-0000-7000-8000-000000000131";
+const steeringReviewDeliveryToken = "01900000-0000-7000-8000-000000000132";
+const steeringRedeliveryToken = "01900000-0000-7000-8000-000000000133";
+const steeringAckFailedDeliveryToken = "01900000-0000-7000-8000-000000000134";
 
 const migrationCases = [
   {
@@ -255,6 +268,28 @@ function createHostV5SchedulerFixture(path: string, appliedAtMs: number): void {
   try {
     database.exec("PRAGMA foreign_keys = ON");
     for (const migration of hostMigrations.slice(0, 5)) {
+      database.exec(migration.sql);
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .run(migration.version, migration.name, migration.checksum, appliedAtMs);
+    }
+    database
+      .prepare(
+        "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      )
+      .run(planRepositoryId, planHostId, "/workspace/plan", appliedAtMs);
+  } finally {
+    database.close();
+  }
+}
+
+function createHostV6SteeringFixture(path: string, appliedAtMs: number): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const migration of hostMigrations.slice(0, 6)) {
       database.exec(migration.sql);
       database
         .prepare(
@@ -473,7 +508,7 @@ async function seedSchedulerChildren(database: TestManagedSqliteDatabase): Promi
 
 describe("SQLite migration integration", () => {
   it.each(migrationCases)(
-    "migrates an empty $kind database to v6 with policy and persistent history",
+    "migrates an empty $kind database to its latest version with policy and persistent history",
     async ({ kind, table, open, migrations }) => {
       const clock = new FixedClock(fixedTimestamp);
       const temporary = await TemporarySqliteDatabase.create(kind, clock);
@@ -583,8 +618,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 6,
-          appliedVersions: [2, 3, 4, 5, 6],
+          currentVersion: 7,
+          appliedVersions: [2, 3, 4, 5, 6, 7],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -806,7 +841,7 @@ describe("SQLite migration integration", () => {
           .prepare(
             "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
           )
-          .run(7, "future_state", "f".repeat(64), fixedTimestamp);
+          .run(8, "future_state", "f".repeat(64), fixedTimestamp);
       } finally {
         futureDatabase.close();
       }
@@ -825,7 +860,7 @@ describe("SQLite migration integration", () => {
       ).toEqual([
         ...expectedHistory(hostMigrations, fixedTimestamp),
         {
-          version: 7n,
+          version: 8n,
           name: "future_state",
           checksum: "f".repeat(64),
           applied_at_ms: BigInt(fixedTimestamp),
@@ -864,6 +899,136 @@ describe("SQLite migration integration", () => {
   });
 });
 
+describe("SQLite v7 durable steering schema", () => {
+  it("creates durable steering tables, indexes, and triggers on a fresh host database", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      expect(temporary.database.migration).toEqual({
+        databaseKind: "host",
+        previousVersion: 0,
+        currentVersion: 7,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7],
+        backupPath: null,
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader.all(
+            `SELECT type, name
+               FROM sqlite_schema
+              WHERE name IN (
+                'node_command_sequences',
+                'node_command_deliveries',
+                'node_attention_records',
+                'node_command_deliveries_node_state',
+                'node_attention_records_node_state',
+                'node_command_sequence_is_monotonic',
+                'node_command_sequence_is_durable',
+                'node_command_delivery_identity_is_immutable',
+                'node_command_delivery_initial_state_is_queued',
+                'node_command_delivery_terminal_is_immutable',
+                'node_command_delivery_transition_is_legal',
+                'node_command_delivery_is_durable',
+                'node_attention_choices_are_canonical',
+                'node_attention_identity_is_immutable',
+                'node_attention_resolution_is_legal',
+                'node_attention_is_durable'
+              )
+              ORDER BY type, name`,
+          ),
+        ),
+      ).toEqual([
+        { type: "index", name: "node_attention_records_node_state" },
+        { type: "index", name: "node_command_deliveries_node_state" },
+        { type: "table", name: "node_attention_records" },
+        { type: "table", name: "node_command_deliveries" },
+        { type: "table", name: "node_command_sequences" },
+        { type: "trigger", name: "node_attention_choices_are_canonical" },
+        { type: "trigger", name: "node_attention_identity_is_immutable" },
+        { type: "trigger", name: "node_attention_is_durable" },
+        { type: "trigger", name: "node_attention_resolution_is_legal" },
+        { type: "trigger", name: "node_command_delivery_identity_is_immutable" },
+        { type: "trigger", name: "node_command_delivery_initial_state_is_queued" },
+        { type: "trigger", name: "node_command_delivery_is_durable" },
+        { type: "trigger", name: "node_command_delivery_terminal_is_immutable" },
+        { type: "trigger", name: "node_command_delivery_transition_is_legal" },
+        { type: "trigger", name: "node_command_sequence_is_durable" },
+        { type: "trigger", name: "node_command_sequence_is_monotonic" },
+      ]);
+      expect(
+        temporary.database.read((reader) =>
+          reader.get(
+            "SELECT (SELECT COUNT(*) FROM node_command_sequences) AS sequences, (SELECT COUNT(*) FROM node_command_deliveries) AS deliveries, (SELECT COUNT(*) FROM node_attention_records) AS attentions",
+          ),
+        ),
+      ).toEqual({ sequences: 0n, deliveries: 0n, attentions: 0n });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+
+  it("upgrades a v6 host database and preserves existing rows", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-steering-migration-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV6SteeringFixture(path, fixedTimestamp);
+      const database = await openHostDatabase({
+        path,
+        clock: new FixedClock(fixedTimestamp),
+        backupPath,
+      });
+      try {
+        expect(database.migration).toEqual({
+          databaseKind: "host",
+          previousVersion: 6,
+          currentVersion: 7,
+          appliedVersions: [7],
+          backupPath: resolve(backupPath),
+        });
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT id, host_id, root_path, version FROM repositories WHERE id = ?", [
+              planRepositoryId,
+            ]),
+          ),
+        ).toEqual({
+          id: planRepositoryId,
+          host_id: planHostId,
+          root_path: "/workspace/plan",
+          version: 0n,
+        });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            ),
+          ),
+        ).toEqual(expectedHistory(hostMigrations, fixedTimestamp));
+        expect(
+          database.read((reader) =>
+            reader.get(
+              "SELECT (SELECT COUNT(*) FROM node_command_sequences) AS sequences, (SELECT COUNT(*) FROM node_command_deliveries) AS deliveries, (SELECT COUNT(*) FROM node_attention_records) AS attentions",
+            ),
+          ),
+        ).toEqual({ sequences: 0n, deliveries: 0n, attentions: 0n });
+      } finally {
+        await database.close();
+      }
+      expect(
+        withReadOnlyDatabase(backupPath, (backup) =>
+          backup
+            .prepare(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            )
+            .all(),
+        ),
+      ).toEqual(expectedHistory(hostMigrations.slice(0, 6), fixedTimestamp));
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
+
 describe("SQLite v6 scheduler lease schema", () => {
   it("creates scheduler lease tables, indexes, and triggers on a fresh host database", async () => {
     const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
@@ -871,8 +1036,8 @@ describe("SQLite v6 scheduler lease schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 6,
-        appliedVersions: [1, 2, 3, 4, 5, 6],
+        currentVersion: 7,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7],
         backupPath: null,
       });
       expect(
@@ -938,8 +1103,8 @@ describe("SQLite v6 scheduler lease schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 5,
-          currentVersion: 6,
-          appliedVersions: [6],
+          currentVersion: 7,
+          appliedVersions: [6, 7],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1323,6 +1488,1088 @@ describe("SQLite v6 scheduler lease schema", () => {
           released_at_ms: BigInt(fixedTimestamp + 33),
         },
       ]);
+    } finally {
+      await temporary.dispose();
+    }
+  });
+});
+
+describe("SQLite v7 durable steering constraints", () => {
+  it("enforces per-node command ordinals, durable delivery identity, and legal transitions", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      await seedPlanFoundation(temporary.database);
+      await seedSchedulerChildren(temporary.database);
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          "INSERT INTO node_command_sequences (node_id, next_ordinal) VALUES (?, 1)",
+          [planRootNodeId],
+        );
+        transaction.run(
+          "INSERT INTO node_command_sequences (node_id, next_ordinal) VALUES (?, 1)",
+          [schedulerChildNodeId],
+        );
+      });
+      await temporary.database.write((transaction) => {
+        transaction.run("UPDATE node_command_sequences SET next_ordinal = 2 WHERE node_id = ?", [
+          planRootNodeId,
+        ]);
+        transaction.run("UPDATE node_command_sequences SET next_ordinal = 2 WHERE node_id = ?", [
+          schedulerChildNodeId,
+        ]);
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT next_ordinal FROM node_command_sequences WHERE node_id = ?", [
+            planRootNodeId,
+          ]),
+        ),
+      ).toEqual({ next_ordinal: 2n });
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT next_ordinal FROM node_command_sequences WHERE node_id = ?", [
+            schedulerChildNodeId,
+          ]),
+        ),
+      ).toEqual({ next_ordinal: 2n });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_sequences SET next_ordinal = 2 WHERE node_id = ?",
+              [planRootNodeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_sequences SET next_ordinal = 1 WHERE node_id = ?",
+              [planRootNodeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM node_command_sequences WHERE node_id = ?", [
+              planRootNodeId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+
+      await temporary.database.write((transaction) => {
+        for (const commandId of [
+          steeringCommandId,
+          steeringFailedCommandId,
+          steeringReviewCommandId,
+          steeringAttentionCommandId,
+          steeringAckFailedCommandId,
+        ]) {
+          transaction.run(
+            `INSERT INTO operator_commands (
+               id, actor_session_id, aggregate_kind, aggregate_id, expected_version,
+               command_type, command_payload, state_kind, created_at_ms, acknowledged_at_ms
+             ) VALUES (?, ?, 'node', ?, 0, 'steering.test', ?, 'queued', ?, NULL)`,
+            [
+              commandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              Uint8Array.of(1, 2, 3),
+              fixedTimestamp,
+            ],
+          );
+        }
+      });
+
+      const insertDelivery = `INSERT INTO node_command_deliveries (
+        command_id, actor_session_id, node_id, ordinal, command_kind, payload,
+        safe_to_redeliver, state_kind, recovery_disposition, delivery_attempts,
+        delivery_token, created_at_ms, sent_at_ms, acknowledged_at_ms, applied_at_ms,
+        failed_at_ms, failure
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+      await temporary.database.write((transaction) => {
+        transaction.run(insertDelivery, [
+          steeringCommandId,
+          steeringActorSessionId,
+          planRootNodeId,
+          1,
+          "message",
+          Uint8Array.of(9),
+          1,
+          "queued",
+          "resume_session",
+          0,
+          null,
+          fixedTimestamp,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ]);
+        transaction.run(insertDelivery, [
+          steeringAttentionCommandId,
+          steeringActorSessionId,
+          schedulerChildNodeId,
+          1,
+          "message",
+          Uint8Array.of(10),
+          1,
+          "queued",
+          "resume_session",
+          0,
+          null,
+          fixedTimestamp,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ]);
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringFailedCommandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              1,
+              "message",
+              Uint8Array.of(9),
+              1,
+              "queued",
+              "resume_session",
+              0,
+              null,
+              fixedTimestamp,
+              null,
+              null,
+              null,
+              null,
+              null,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringReviewCommandId,
+              steeringActorSessionId,
+              "01900000-0000-7000-8000-000000000199",
+              2,
+              "message",
+              Uint8Array.of(9),
+              1,
+              "queued",
+              "resume_session",
+              0,
+              null,
+              fixedTimestamp,
+              null,
+              null,
+              null,
+              null,
+              null,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_deliveries SET command_kind = 'pause' WHERE command_id = ?",
+              [steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringFailedCommandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              2,
+              "message",
+              Uint8Array.of(9),
+              1,
+              "failed",
+              "resume_session",
+              1,
+              steeringFailedDeliveryToken,
+              fixedTimestamp,
+              fixedTimestamp + 1,
+              null,
+              null,
+              fixedTimestamp + 2,
+              "direct terminal insert",
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringReviewCommandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              3,
+              "message",
+              Uint8Array.of(9),
+              0,
+              "review_required",
+              "requires_review",
+              1,
+              steeringReviewDeliveryToken,
+              fixedTimestamp,
+              fixedTimestamp + 1,
+              null,
+              null,
+              fixedTimestamp + 2,
+              "direct review insert",
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringFailedCommandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              2,
+              "message",
+              Uint8Array.of(9),
+              1,
+              "queued",
+              "resume_session",
+              1,
+              null,
+              fixedTimestamp,
+              null,
+              null,
+              null,
+              null,
+              null,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringFailedCommandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              2,
+              "message",
+              Uint8Array.of(9),
+              1,
+              "sent",
+              "resume_session",
+              0,
+              null,
+              fixedTimestamp,
+              null,
+              null,
+              null,
+              null,
+              null,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringFailedCommandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              2,
+              "message",
+              Uint8Array.of(9),
+              1,
+              "sent",
+              "resume_session",
+              1,
+              steeringDeliveryToken,
+              fixedTimestamp,
+              fixedTimestamp - 1,
+              null,
+              null,
+              null,
+              null,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringFailedCommandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              2,
+              "message",
+              Uint8Array.of(9),
+              1,
+              "failed",
+              "resume_session",
+              1,
+              steeringDeliveryToken,
+              fixedTimestamp,
+              fixedTimestamp + 1,
+              null,
+              null,
+              fixedTimestamp,
+              "failure",
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertDelivery, [
+              steeringFailedCommandId,
+              steeringActorSessionId,
+              planRootNodeId,
+              2,
+              "message",
+              Uint8Array.of(9),
+              1,
+              "sent",
+              "resume_session",
+              1,
+              "short-token",
+              fixedTimestamp,
+              fixedTimestamp + 1,
+              null,
+              null,
+              null,
+              null,
+            ]);
+          }),
+        "transaction_failed",
+      );
+
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'sent', delivery_attempts = 1, delivery_token = ?, sent_at_ms = ?
+            WHERE command_id = ?`,
+          [steeringDeliveryToken, fixedTimestamp + 1, steeringCommandId],
+        );
+      });
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'sent', delivery_attempts = 2, delivery_token = ?, sent_at_ms = ?
+            WHERE command_id = ?`,
+          [steeringRedeliveryToken, fixedTimestamp + 2, steeringCommandId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_command_deliveries
+                  SET state_kind = 'failed', delivery_attempts = 0, delivery_token = NULL,
+                      sent_at_ms = NULL, acknowledged_at_ms = NULL, applied_at_ms = NULL,
+                      failed_at_ms = ?, failure = ?
+                WHERE command_id = ?`,
+              [fixedTimestamp + 4, "missing delivery token", steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_command_deliveries
+                  SET state_kind = 'queued', delivery_attempts = 0, delivery_token = NULL,
+                      sent_at_ms = NULL, acknowledged_at_ms = NULL, applied_at_ms = NULL,
+                      failed_at_ms = NULL, failure = NULL
+                WHERE command_id = ?`,
+              [steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_deliveries SET state_kind = 'acknowledged' WHERE command_id = ?",
+              [steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_deliveries SET delivery_token = 'short-token' WHERE command_id = ?",
+              [steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_deliveries SET sent_at_ms = ? WHERE command_id = ?",
+              [fixedTimestamp - 1, steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_command_deliveries
+                  SET state_kind = 'acknowledged', acknowledged_at_ms = ?
+                WHERE command_id = ?`,
+              [fixedTimestamp + 1, steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'acknowledged', acknowledged_at_ms = ?
+            WHERE command_id = ?`,
+          [fixedTimestamp + 3, steeringCommandId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_command_deliveries
+                  SET state_kind = 'failed', applied_at_ms = ?, failed_at_ms = ?, failure = ?
+                WHERE command_id = ?`,
+              [
+                fixedTimestamp + 4,
+                fixedTimestamp + 5,
+                "applied timestamp on failed delivery",
+                steeringCommandId,
+              ],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_command_deliveries
+                  SET state_kind = 'applied', applied_at_ms = ?
+                WHERE command_id = ?`,
+              [fixedTimestamp + 2, steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_command_deliveries
+                  SET state_kind = 'sent', delivery_attempts = 3, delivery_token = ?,
+                      sent_at_ms = ?, acknowledged_at_ms = NULL, applied_at_ms = NULL,
+                      failed_at_ms = NULL, failure = NULL
+                WHERE command_id = ?`,
+              [steeringDeliveryToken, fixedTimestamp + 4, steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'applied', applied_at_ms = ?
+            WHERE command_id = ?`,
+          [fixedTimestamp + 4, steeringCommandId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_deliveries SET state_kind = 'failed', failed_at_ms = ?, failure = ? WHERE command_id = ?",
+              [fixedTimestamp + 5, "late failure", steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+
+      await temporary.database.write((transaction) => {
+        transaction.run(insertDelivery, [
+          steeringFailedCommandId,
+          steeringActorSessionId,
+          planRootNodeId,
+          2,
+          "interrupt_now",
+          Uint8Array.of(4),
+          1,
+          "queued",
+          "retry_external_action",
+          0,
+          null,
+          fixedTimestamp + 4,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ]);
+        transaction.run(insertDelivery, [
+          steeringReviewCommandId,
+          steeringActorSessionId,
+          planRootNodeId,
+          3,
+          "cancel_node",
+          Uint8Array.of(5),
+          0,
+          "queued",
+          "requires_review",
+          0,
+          null,
+          fixedTimestamp + 5,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ]);
+        transaction.run(insertDelivery, [
+          steeringAckFailedCommandId,
+          steeringActorSessionId,
+          planRootNodeId,
+          4,
+          "answer",
+          Uint8Array.of(6),
+          1,
+          "queued",
+          "resume_session",
+          0,
+          null,
+          fixedTimestamp + 6,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ]);
+      });
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'sent', delivery_attempts = 1, delivery_token = ?, sent_at_ms = ?
+            WHERE command_id = ?`,
+          [steeringFailedDeliveryToken, fixedTimestamp + 6, steeringFailedCommandId],
+        );
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'sent', delivery_attempts = 1, delivery_token = ?, sent_at_ms = ?
+            WHERE command_id = ?`,
+          [steeringReviewDeliveryToken, fixedTimestamp + 7, steeringReviewCommandId],
+        );
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'sent', delivery_attempts = 1, delivery_token = ?, sent_at_ms = ?
+            WHERE command_id = ?`,
+          [steeringAckFailedDeliveryToken, fixedTimestamp + 8, steeringAckFailedCommandId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_command_deliveries
+                  SET state_kind = 'review_required', applied_at_ms = ?, failed_at_ms = ?, failure = ?
+                WHERE command_id = ?`,
+              [
+                fixedTimestamp + 9,
+                fixedTimestamp + 9,
+                "applied timestamp on review delivery",
+                steeringReviewCommandId,
+              ],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'acknowledged', acknowledged_at_ms = ?
+            WHERE command_id = ?`,
+          [fixedTimestamp + 9, steeringAckFailedCommandId],
+        );
+      });
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'failed', failed_at_ms = ?, failure = ?
+            WHERE command_id = ?`,
+          [fixedTimestamp + 8, "provider unavailable", steeringFailedCommandId],
+        );
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'review_required', failed_at_ms = ?, failure = ?
+            WHERE command_id = ?`,
+          [fixedTimestamp + 9, "unsafe stale delivery", steeringReviewCommandId],
+        );
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'failed', failed_at_ms = ?, failure = ?
+            WHERE command_id = ?`,
+          [fixedTimestamp + 10, "failed after acknowledgement", steeringAckFailedCommandId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_deliveries SET delivery_token = ? WHERE command_id = ?",
+              [steeringDeliveryToken, steeringCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE node_command_deliveries SET failure = ? WHERE command_id = ?", [
+              "changed failure",
+              steeringFailedCommandId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE node_command_deliveries SET recovery_disposition = ? WHERE command_id = ?",
+              ["resume_session", steeringReviewCommandId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM node_command_deliveries WHERE command_id = ?", [
+              steeringCommandId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      expect(
+        temporary.database.read((reader) =>
+          reader.all(
+            `SELECT command_id, node_id, ordinal, safe_to_redeliver, state_kind,
+                    delivery_attempts, delivery_token, sent_at_ms, acknowledged_at_ms,
+                    applied_at_ms, failed_at_ms, failure
+               FROM node_command_deliveries
+              WHERE node_id = ?
+              ORDER BY ordinal`,
+            [planRootNodeId],
+          ),
+        ),
+      ).toEqual([
+        {
+          command_id: steeringCommandId,
+          node_id: planRootNodeId,
+          ordinal: 1n,
+          safe_to_redeliver: 1n,
+          state_kind: "applied",
+          delivery_attempts: 2n,
+          delivery_token: steeringRedeliveryToken,
+          sent_at_ms: BigInt(fixedTimestamp + 2),
+          acknowledged_at_ms: BigInt(fixedTimestamp + 3),
+          applied_at_ms: BigInt(fixedTimestamp + 4),
+          failed_at_ms: null,
+          failure: null,
+        },
+        {
+          command_id: steeringFailedCommandId,
+          node_id: planRootNodeId,
+          ordinal: 2n,
+          safe_to_redeliver: 1n,
+          state_kind: "failed",
+          delivery_attempts: 1n,
+          delivery_token: steeringFailedDeliveryToken,
+          sent_at_ms: BigInt(fixedTimestamp + 6),
+          acknowledged_at_ms: null,
+          applied_at_ms: null,
+          failed_at_ms: BigInt(fixedTimestamp + 8),
+          failure: "provider unavailable",
+        },
+        {
+          command_id: steeringReviewCommandId,
+          node_id: planRootNodeId,
+          ordinal: 3n,
+          safe_to_redeliver: 0n,
+          state_kind: "review_required",
+          delivery_attempts: 1n,
+          delivery_token: steeringReviewDeliveryToken,
+          sent_at_ms: BigInt(fixedTimestamp + 7),
+          acknowledged_at_ms: null,
+          applied_at_ms: null,
+          failed_at_ms: BigInt(fixedTimestamp + 9),
+          failure: "unsafe stale delivery",
+        },
+        {
+          command_id: steeringAckFailedCommandId,
+          node_id: planRootNodeId,
+          ordinal: 4n,
+          safe_to_redeliver: 1n,
+          state_kind: "failed",
+          delivery_attempts: 1n,
+          delivery_token: steeringAckFailedDeliveryToken,
+          sent_at_ms: BigInt(fixedTimestamp + 8),
+          acknowledged_at_ms: BigInt(fixedTimestamp + 9),
+          applied_at_ms: null,
+          failed_at_ms: BigInt(fixedTimestamp + 10),
+          failure: "failed after acknowledgement",
+        },
+      ]);
+      expect(
+        temporary.database.read((reader) =>
+          reader.get(
+            "SELECT command_id, node_id, ordinal, state_kind FROM node_command_deliveries WHERE node_id = ?",
+            [schedulerChildNodeId],
+          ),
+        ),
+      ).toEqual({
+        command_id: steeringAttentionCommandId,
+        node_id: schedulerChildNodeId,
+        ordinal: 1n,
+        state_kind: "queued",
+      });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+
+  it("validates attention members and resolution, then preserves immutable rows", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      await seedPlanFoundation(temporary.database);
+      await seedSchedulerChildren(temporary.database);
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `INSERT INTO operator_commands (
+             id, actor_session_id, aggregate_kind, aggregate_id, expected_version,
+             command_type, command_payload, state_kind, created_at_ms, acknowledged_at_ms
+           ) VALUES (?, ?, 'node', ?, 0, 'answer', ?, 'queued', ?, NULL)`,
+          [
+            steeringAttentionCommandId,
+            steeringActorSessionId,
+            planRootNodeId,
+            Uint8Array.of(7),
+            fixedTimestamp,
+          ],
+        );
+        transaction.run(
+          `INSERT INTO node_command_deliveries (
+             command_id, actor_session_id, node_id, ordinal, command_kind, payload,
+             safe_to_redeliver, state_kind, recovery_disposition, delivery_attempts,
+             delivery_token, created_at_ms, sent_at_ms, acknowledged_at_ms, applied_at_ms,
+             failed_at_ms, failure
+           ) VALUES (?, ?, ?, 1, 'answer', ?, 1, 'queued', 'resume_session', 0, NULL, ?, NULL, NULL, NULL, NULL, NULL)`,
+          [
+            steeringAttentionCommandId,
+            steeringActorSessionId,
+            planRootNodeId,
+            Uint8Array.of(8),
+            fixedTimestamp,
+          ],
+        );
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'sent', delivery_attempts = 1, delivery_token = ?, sent_at_ms = ?
+            WHERE command_id = ?`,
+          [steeringDeliveryToken, fixedTimestamp + 1, steeringAttentionCommandId],
+        );
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'acknowledged', acknowledged_at_ms = ?
+            WHERE command_id = ?`,
+          [fixedTimestamp + 2, steeringAttentionCommandId],
+        );
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'applied', applied_at_ms = ?
+            WHERE command_id = ?`,
+          [fixedTimestamp + 3, steeringAttentionCommandId],
+        );
+        transaction.run(
+          `INSERT INTO node_command_deliveries (
+             command_id, actor_session_id, node_id, ordinal, command_kind, payload,
+             safe_to_redeliver, state_kind, recovery_disposition, delivery_attempts,
+             delivery_token, created_at_ms, sent_at_ms, acknowledged_at_ms, applied_at_ms,
+             failed_at_ms, failure
+           ) VALUES (?, ?, ?, 1, 'message', ?, 1, 'queued', 'resume_session', 0, NULL, ?, NULL, NULL, NULL, NULL, NULL)`,
+          [
+            steeringAckFailedCommandId,
+            steeringActorSessionId,
+            schedulerChildNodeId,
+            Uint8Array.of(9),
+            fixedTimestamp,
+          ],
+        );
+        transaction.run(
+          `UPDATE node_command_deliveries
+              SET state_kind = 'sent', delivery_attempts = 1, delivery_token = ?, sent_at_ms = ?
+            WHERE command_id = ?`,
+          [steeringAckFailedDeliveryToken, fixedTimestamp + 4, steeringAckFailedCommandId],
+        );
+      });
+
+      const insertAttention = `INSERT INTO node_attention_records (
+        id, node_id, attention_kind, prompt, choices_json, state_kind,
+        resolution_command_id, resolution, created_at_ms, resolved_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      await temporary.database.write((transaction) => {
+        transaction.run(insertAttention, [
+          steeringAttentionId,
+          planRootNodeId,
+          "question",
+          "Choose a deployment ring",
+          '["canary","production"]',
+          "open",
+          null,
+          null,
+          fixedTimestamp,
+          null,
+        ]);
+      });
+      for (const choices of ['["canary","canary"]', "[1]", '[""]', "{}", "not-json"]) {
+        await expectSqliteFailure(
+          () =>
+            temporary.database.write((transaction) => {
+              transaction.run(insertAttention, [
+                steeringSecondAttentionId,
+                planRootNodeId,
+                "question",
+                "Invalid choices",
+                choices,
+                "open",
+                null,
+                null,
+                fixedTimestamp,
+                null,
+              ]);
+            }),
+          "transaction_failed",
+        );
+      }
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertAttention, [
+              steeringSecondAttentionId,
+              planRootNodeId,
+              "question",
+              "Invalid state fields",
+              '["canary"]',
+              "open",
+              steeringAttentionCommandId,
+              "canary",
+              fixedTimestamp,
+              null,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertAttention, [
+              steeringSecondAttentionId,
+              planRootNodeId,
+              "question",
+              "Invalid resolution",
+              '["canary"]',
+              "resolved",
+              steeringAttentionCommandId,
+              null,
+              fixedTimestamp,
+              fixedTimestamp + 1,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertAttention, [
+              steeringSecondAttentionId,
+              planRootNodeId,
+              "question",
+              "Invalid resolution timestamp",
+              '["canary"]',
+              "resolved",
+              steeringAttentionCommandId,
+              "canary",
+              fixedTimestamp,
+              fixedTimestamp - 1,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(insertAttention, [
+              steeringSecondAttentionId,
+              planRootNodeId,
+              "other",
+              "Invalid kind",
+              '["canary"]',
+              "open",
+              null,
+              null,
+              fixedTimestamp,
+              null,
+            ]);
+          }),
+        "transaction_failed",
+      );
+
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE node_attention_records SET prompt = ? WHERE id = ?", [
+              "Changed prompt",
+              steeringAttentionId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE node_attention_records SET choices_json = ? WHERE id = ?", [
+              '["changed"]',
+              steeringAttentionId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_attention_records
+                  SET state_kind = 'resolved', resolution_command_id = ?, resolution = ?,
+                      resolved_at_ms = ?
+                WHERE id = ?`,
+              [steeringAckFailedCommandId, "canary", fixedTimestamp + 4, steeringAttentionId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `UPDATE node_attention_records
+                  SET state_kind = 'resolved', resolution_command_id = ?, resolution = ?,
+                      resolved_at_ms = ?
+                WHERE id = ?`,
+              [
+                "01900000-0000-7000-8000-000000000199",
+                "canary",
+                fixedTimestamp + 4,
+                steeringAttentionId,
+              ],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `UPDATE node_attention_records
+              SET state_kind = 'resolved', resolution_command_id = ?, resolution = ?,
+                  resolved_at_ms = ?
+            WHERE id = ?`,
+          [steeringAttentionCommandId, "canary", fixedTimestamp + 4, steeringAttentionId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE node_attention_records SET resolution = ? WHERE id = ?", [
+              "production",
+              steeringAttentionId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM node_attention_records WHERE id = ?", [
+              steeringAttentionId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM node_command_deliveries WHERE command_id = ?", [
+              steeringAttentionCommandId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      expect(
+        temporary.database.read((reader) =>
+          reader.get(
+            "SELECT id, node_id, attention_kind, prompt, choices_json, state_kind, resolution_command_id, resolution, created_at_ms, resolved_at_ms FROM node_attention_records WHERE id = ?",
+            [steeringAttentionId],
+          ),
+        ),
+      ).toEqual({
+        id: steeringAttentionId,
+        node_id: planRootNodeId,
+        attention_kind: "question",
+        prompt: "Choose a deployment ring",
+        choices_json: '["canary","production"]',
+        state_kind: "resolved",
+        resolution_command_id: steeringAttentionCommandId,
+        resolution: "canary",
+        created_at_ms: BigInt(fixedTimestamp),
+        resolved_at_ms: BigInt(fixedTimestamp + 4),
+      });
     } finally {
       await temporary.dispose();
     }
