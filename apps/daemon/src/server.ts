@@ -6,6 +6,7 @@ import {
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
   type SupervisorHostRegistry,
+  type RepositoryRegistry,
 } from "@minions/adapters";
 
 import { connectNodeAdapter } from "@connectrpc/connect-node";
@@ -15,10 +16,12 @@ import {
   type GetHealthResponse,
   type RunDoctorResponse,
 } from "@minions/contracts";
+import type { Clock } from "@minions/core";
 
 import { createErrorDetailInterceptor } from "./error-detail-interceptor.js";
 import { registerEventService } from "./event-service.js";
 import { registerHostService } from "./host-service.js";
+import { registerRepositoryService } from "./repository-service.js";
 import { registerSystemService } from "./system-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
 
@@ -26,6 +29,12 @@ type DaemonSystemOptions = Readonly<{
   serverVersion: string;
   health: GetHealthResponse;
   runDoctor: () => Promise<RunDoctorResponse>;
+}>;
+
+type DaemonRepositoryOptions = Readonly<{
+  registry: RepositoryRegistry;
+  home: string;
+  clock: Clock;
 }>;
 
 type BaseDaemonServerOptions = Readonly<{
@@ -39,6 +48,7 @@ export type DaemonServerOptions =
         mode: "host";
         database: ManagedSqliteDatabase;
         eventWaiter: EventCommitWaiter;
+        repository?: DaemonRepositoryOptions;
         eventPollIntervalMs: number;
       }>)
   | (BaseDaemonServerOptions &
@@ -52,6 +62,7 @@ export type DaemonServerOptions =
         database: ManagedSqliteDatabase;
         eventWaiter: EventCommitWaiter;
         eventPollIntervalMs: number;
+        repository?: DaemonRepositoryOptions;
         hostRegistry: SupervisorHostRegistry;
       }>);
 
@@ -68,7 +79,7 @@ export async function startDaemonServer(
     routes: (router) => {
       registerSystemService(router, {
         ...options.system,
-        capabilities: capabilitiesForMode(options.mode),
+        capabilities: capabilitiesForOptions(options),
       });
       if (options.mode !== "supervisor") {
         registerEventService(router, {
@@ -76,6 +87,9 @@ export async function startDaemonServer(
           waiter: options.eventWaiter,
           pollIntervalMs: options.eventPollIntervalMs,
         });
+        if (options.repository !== undefined) {
+          registerRepositoryService(router, options.repository);
+        }
       }
       if (options.mode !== "host") {
         registerHostService(router, options.hostRegistry);
@@ -125,28 +139,21 @@ export async function startDaemonServer(
   };
 }
 
-function capabilitiesForMode(mode: DaemonServerOptions["mode"]): readonly ServerCapability[] {
-  switch (mode) {
-    case "host":
-      return [
-        ServerCapability.SYSTEM_INFO,
-        ServerCapability.HEALTH_DOCTOR,
-        ServerCapability.EVENT_STREAM,
-      ];
-    case "supervisor":
-      return [
-        ServerCapability.SYSTEM_INFO,
-        ServerCapability.HEALTH_DOCTOR,
-        ServerCapability.HOST_REGISTRY,
-      ];
-    case "local":
-      return [
-        ServerCapability.SYSTEM_INFO,
-        ServerCapability.HEALTH_DOCTOR,
-        ServerCapability.EVENT_STREAM,
-        ServerCapability.HOST_REGISTRY,
-      ];
+function capabilitiesForOptions(options: DaemonServerOptions): readonly ServerCapability[] {
+  const capabilities: ServerCapability[] = [
+    ServerCapability.SYSTEM_INFO,
+    ServerCapability.HEALTH_DOCTOR,
+  ];
+  if (options.mode !== "supervisor") {
+    capabilities.push(ServerCapability.EVENT_STREAM);
+    if (options.repository !== undefined) {
+      capabilities.push(ServerCapability.REPOSITORY_REGISTRY);
+    }
   }
+  if (options.mode !== "host") {
+    capabilities.push(ServerCapability.HOST_REGISTRY);
+  }
+  return Object.freeze(capabilities);
 }
 
 function closeEventWaiter(options: DaemonServerOptions): void {

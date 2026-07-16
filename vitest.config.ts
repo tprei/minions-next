@@ -9,6 +9,7 @@ export default defineConfig({
       "packages/**/*.{test,spec}.ts",
       "test/unit/**/*.{test,spec}.ts",
       "test/integration/**/*.{test,spec}.ts",
+      "test/security/**/*.{test,spec}.ts",
     ],
     passWithNoTests: true,
     pool: "forks",

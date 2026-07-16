@@ -7,6 +7,8 @@ import { join, resolve } from "node:path";
 import {
   acquireLifecycleLock,
   createEventCommitWaiter,
+  createRepositoryRegistry,
+  createSqliteCommandStore,
   createSecureIdGenerator,
   createSupervisorHostRegistry,
   daemonLifecyclePath,
@@ -20,6 +22,7 @@ import {
   type DaemonModeName,
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
+  type RepositoryRegistry,
   type SupervisorHostRegistry,
 } from "@minions/adapters";
 import {
@@ -88,6 +91,7 @@ export async function startDaemonRuntime(
   let hostDatabase: ManagedSqliteDatabase | undefined;
   let hostRegistry: SupervisorHostRegistry | undefined;
   let eventWaiter: EventCommitWaiter | undefined;
+  let repositoryRegistry: RepositoryRegistry | undefined;
   let localHostId: HostId | undefined;
   let server: RunningDaemonServer | undefined;
 
@@ -129,6 +133,16 @@ export async function startDaemonRuntime(
         clock: options.clock,
       });
       eventWaiter = createEventCommitWaiter();
+      const commandStore = createSqliteCommandStore({
+        database: hostDatabase,
+        ports: { clock: options.clock, ids: options.ids },
+        notifier: eventWaiter,
+      });
+      repositoryRegistry = createRepositoryRegistry({
+        database: hostDatabase,
+        commandStore,
+        hostId: activeHostId,
+      });
     }
     options.signal?.throwIfAborted();
 
@@ -149,6 +163,11 @@ export async function startDaemonRuntime(
         database: requireDatabase(hostDatabase),
         eventWaiter: requireWaiter(eventWaiter),
         eventPollIntervalMs: 1_000,
+        repository: {
+          registry: requireRepositoryRegistry(repositoryRegistry),
+          home,
+          clock: options.clock,
+        },
         hostRegistry: requireRegistry(hostRegistry),
       });
     } else if (options.mode === "host") {
@@ -159,6 +178,12 @@ export async function startDaemonRuntime(
         database: requireDatabase(hostDatabase),
         eventWaiter: requireWaiter(eventWaiter),
         eventPollIntervalMs: 1_000,
+        repository: {
+          registry: requireRepositoryRegistry(repositoryRegistry),
+          home,
+          clock: options.clock,
+        },
+        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else {
       server = await startDaemonServer({
@@ -547,6 +572,13 @@ function requireHostId(value: HostId | undefined): HostId {
   return value;
 }
 
+function requireRepositoryRegistry(value: RepositoryRegistry | undefined): RepositoryRegistry {
+  if (value === undefined) {
+    throw new Error("repository registry is not initialized");
+  }
+  return value;
+}
+
 function requireServer(value: RunningDaemonServer | undefined): RunningDaemonServer {
   if (value === undefined) {
     throw new Error("daemon server is not initialized");
@@ -579,6 +611,8 @@ const supervisorSchemaQueries = [
 const hostSchemaQueries = [
   "SELECT version FROM schema_migrations LIMIT 0",
   "SELECT id FROM repositories LIMIT 0",
+  "SELECT repository_id FROM repository_registrations LIMIT 0",
+  "SELECT repository_id FROM repository_features LIMIT 0",
   "SELECT id FROM trees LIMIT 0",
   "SELECT id FROM plan_revisions LIMIT 0",
   "SELECT id FROM nodes LIMIT 0",

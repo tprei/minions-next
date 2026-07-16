@@ -23,9 +23,10 @@
     "proto:lint": "buf lint",
     "test:integration": "pnpm build:integration && vitest run test/integration",
     "test:domain": "pnpm build:domain && vitest run test/unit/domain",
+    "test:security": "pnpm build:integration && vitest run test/security",
     "test:unit": "pnpm build:domain && vitest run apps packages test/unit --passWithNoTests",
     "typecheck": "tsc --noEmit --pretty false -p tsconfig.json && pnpm -r exec tsc --noEmit --pretty false -p tsconfig.json",
-    "verify:pr": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm deadcode && pnpm generate:check && pnpm proto:lint && pnpm proto:breaking && pnpm test:unit && pnpm build && pnpm test:integration"
+    "verify:pr": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm deadcode && pnpm generate:check && pnpm proto:lint && pnpm proto:breaking && pnpm test:unit && pnpm build && pnpm test:integration && pnpm test:security"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.71.0",
