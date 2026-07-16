@@ -4,10 +4,14 @@ import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import {
   ApiVersionSchema,
   ErrorDetailSchema,
+  GetHealthResponseSchema,
   GetServerInfoResponseSchema,
-  ServerCapability,
+  RunDoctorResponseSchema,
   SystemService,
   UnsupportedApiVersionSchema,
+  type GetHealthResponse,
+  type RunDoctorResponse,
+  type ServerCapability,
 } from "@minions/contracts";
 
 const supportedApiVersion = {
@@ -17,17 +21,24 @@ const supportedApiVersion = {
 } as const;
 const responseValidator = createValidator();
 
-export function registerSystemService(router: ConnectRouter, serverVersion: string): void {
+export type SystemServiceOptions = Readonly<{
+  serverVersion: string;
+  capabilities: readonly ServerCapability[];
+  health: GetHealthResponse;
+  runDoctor: () => Promise<RunDoctorResponse>;
+}>;
+
+export function registerSystemService(router: ConnectRouter, options: SystemServiceOptions): void {
   const apiVersion = create(ApiVersionSchema, supportedApiVersion);
-  const response = create(GetServerInfoResponseSchema, {
-    serverVersion,
-    apiVersion,
-    capabilities: [ServerCapability.SYSTEM_INFO, ServerCapability.EVENT_STREAM],
-  });
-  const responseValidation = responseValidator.validate(GetServerInfoResponseSchema, response);
-  if (responseValidation.kind !== "valid") {
-    throw responseValidation.error;
-  }
+  const serverInfo = validateResponse(
+    GetServerInfoResponseSchema,
+    create(GetServerInfoResponseSchema, {
+      serverVersion: options.serverVersion,
+      apiVersion,
+      capabilities: [...options.capabilities],
+    }),
+  );
+  const health = validateResponse(GetHealthResponseSchema, options.health);
 
   router.service(SystemService, {
     getServerInfo(request) {
@@ -54,7 +65,30 @@ export function registerSystemService(router: ConnectRouter, serverVersion: stri
         ]);
       }
 
-      return responseValidation.message;
+      return serverInfo;
+    },
+    getHealth() {
+      return health;
+    },
+    async runDoctor() {
+      return validateResponse(RunDoctorResponseSchema, await options.runDoctor());
     },
   });
+}
+
+function validateResponse<Schema extends Parameters<typeof responseValidator.validate>[0]>(
+  schema: Schema,
+  message: Parameters<typeof responseValidator.validate<Schema>>[1],
+) {
+  const validation = responseValidator.validate(schema, message);
+  if (validation.kind !== "valid") {
+    throw new ConnectError(
+      `system service produced an invalid response: ${validation.error.message}`,
+      Code.Internal,
+      undefined,
+      undefined,
+      validation.error,
+    );
+  }
+  return validation.message;
 }

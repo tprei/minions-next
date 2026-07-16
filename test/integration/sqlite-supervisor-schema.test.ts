@@ -247,6 +247,7 @@ describe("supervisor SQLite schema integration", () => {
     await withTemporarySupervisorDatabase(async (database) => {
       expect(runtimeOwnKeys(database)).toEqual(["migration", "path"]);
       expect(runtimePrototypeKeys(database)).toEqual([
+        "checkIntegrity",
         "close",
         "constructor",
         "read",

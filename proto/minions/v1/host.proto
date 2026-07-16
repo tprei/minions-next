@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+service HostService {
+  rpc ListHosts(ListHostsRequest) returns (ListHostsResponse);
+}
+
+enum ExecutionHostKind {
+  EXECUTION_HOST_KIND_UNSPECIFIED = 0;
+  EXECUTION_HOST_KIND_LOCAL = 1;
+  EXECUTION_HOST_KIND_SSH = 2;
+  EXECUTION_HOST_KIND_WSL2 = 3;
+}
+
+enum ExecutionHostState {
+  EXECUTION_HOST_STATE_UNSPECIFIED = 0;
+  EXECUTION_HOST_STATE_PENDING = 1;
+  EXECUTION_HOST_STATE_ONLINE = 2;
+  EXECUTION_HOST_STATE_OFFLINE = 3;
+  EXECUTION_HOST_STATE_DEGRADED = 4;
+  EXECUTION_HOST_STATE_REMOVED = 5;
+}
+
+message ExecutionHost {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  ExecutionHostKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string display_name = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  ExecutionHostState state = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string endpoint = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+  uint64 version = 6;
+  google.protobuf.Timestamp registered_at = 7 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp last_seen_at = 8;
+}
+
+message ListHostsRequest {
+  uint32 page_size = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 100
+  }];
+  optional string page_token = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message ListHostsResponse {
+  repeated ExecutionHost hosts = 1;
+  optional string next_page_token = 2 [(buf.validate.field).string.uuid = true];
+}

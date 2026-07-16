@@ -1,4 +1,5 @@
 import { create, toBinary } from "@bufbuild/protobuf";
+import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import {
@@ -12,6 +13,11 @@ import {
 import { executeTestSqliteWrite } from "@minions/adapters/sqlite-test-support";
 import {
   AttentionKind,
+  DaemonMode,
+  DoctorCheckKind,
+  DoctorCheckSchema,
+  DoctorCheckStatus,
+  DoctorStatus,
   AttentionSummarySchema,
   ErrorDetailSchema,
   EventService,
@@ -21,6 +27,8 @@ import {
   ProjectionChangeSchema,
   RepositorySummarySchema,
   TreeState,
+  GetHealthResponseSchema,
+  RunDoctorResponseSchema,
   TreeSummarySchema,
   type WatchEventsResponse,
 } from "@minions/contracts";
@@ -37,7 +45,7 @@ import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { describe, expect, it } from "vitest";
 
-import { startSystemServer, type RunningSystemServer } from "../../apps/daemon/src/server.js";
+import { startDaemonServer, type RunningDaemonServer } from "@minions/daemon";
 
 const now = timestampFromEpochMilliseconds(1_725_000_000_123);
 const repositoryIdentifier = repositoryId(uuid(1));
@@ -51,8 +59,26 @@ const blockerEvidenceIdentifier = uuid(7);
 const baseCommit = "0123456789abcdef0123456789abcdef01234567";
 const rootObjective = "x".repeat(4_097);
 
+const health = create(GetHealthResponseSchema, {
+  instanceId: uuid(100),
+  mode: DaemonMode.HOST,
+  hostId: hostIdentifier,
+  startedAt: create(TimestampSchema, {
+    seconds: BigInt(Math.floor(now / 1_000)),
+    nanos: (now % 1_000) * 1_000_000,
+  }),
+});
+const doctor = create(RunDoctorResponseSchema, {
+  status: DoctorStatus.HEALTHY,
+  checks: [
+    create(DoctorCheckSchema, {
+      kind: DoctorCheckKind.LIFECYCLE_LOCK,
+      status: DoctorCheckStatus.PASSED,
+    }),
+  ],
+});
 interface RunningEventFixture {
-  server: RunningSystemServer;
+  server: RunningDaemonServer;
   client: Client<typeof EventService>;
 }
 
@@ -220,12 +246,13 @@ describe("EventService integration", () => {
     try {
       await seedSnapshotProjections(temporary.database);
       await seedIncompatibleEvent(temporary.database);
-      const startup = await startSystemServer({
+      const startup = await startDaemonServer({
+        mode: "host",
         port: 0,
         database: temporary.database,
         eventWaiter: waiter,
         eventPollIntervalMs: 10,
-        serverVersion: "0.0.0",
+        system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
       }).then(
         (server) => ({ case: "started", server }) as const,
         (error: unknown) => ({ case: "rejected", error }) as const,
@@ -287,12 +314,13 @@ async function startEventFixture(
   database: ManagedSqliteDatabase,
   waiter: EventCommitWaiter,
 ): Promise<RunningEventFixture> {
-  const server = await startSystemServer({
+  const server = await startDaemonServer({
+    mode: "host",
     port: 0,
     database,
     eventWaiter: waiter,
     eventPollIntervalMs: 10,
-    serverVersion: "0.0.0",
+    system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
   });
   return {
     server,

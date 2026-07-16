@@ -2,9 +2,11 @@
 // @generated from file minions/v1/system.proto (package minions.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../buf/validate/validate_pb.js";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { ApiVersion, ServerCapability } from "./common_pb.js";
 import { file_minions_v1_common } from "./common_pb.js";
 import type { Message } from "@bufbuild/protobuf";
@@ -13,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file minions/v1/system.proto.
  */
 export const file_minions_v1_system: GenFile = /*@__PURE__*/
-  fileDesc("ChdtaW5pb25zL3YxL3N5c3RlbS5wcm90bxIKbWluaW9ucy52MSKLAQoUR2V0U2VydmVySW5mb1JlcXVlc3QSPgoLY2xpZW50X25hbWUYASABKAlCKbpIJnIkEAEYgAEyHV5bQS1aYS16MC05XVtBLVphLXowLTkuXyAtXSokEjMKC2FwaV92ZXJzaW9uGAIgASgLMhYubWluaW9ucy52MS5BcGlWZXJzaW9uQga6SAPIAQEikgIKFUdldFNlcnZlckluZm9SZXNwb25zZRJ7Cg5zZXJ2ZXJfdmVyc2lvbhgBIAEoCUJjukhgcl4yXF4oMHxbMS05XVswLTldKilcLigwfFsxLTldWzAtOV0qKVwuKDB8WzEtOV1bMC05XSopKD86LVswLTlBLVphLXouLV0rKT8oPzpcK1swLTlBLVphLXouLV0rKT8kEjMKC2FwaV92ZXJzaW9uGAIgASgLMhYubWluaW9ucy52MS5BcGlWZXJzaW9uQga6SAPIAQESRwoMY2FwYWJpbGl0aWVzGAMgAygOMhwubWluaW9ucy52MS5TZXJ2ZXJDYXBhYmlsaXR5QhO6SBCSAQ0IARgBIgeCAQQQASAAMmUKDVN5c3RlbVNlcnZpY2USVAoNR2V0U2VydmVySW5mbxIgLm1pbmlvbnMudjEuR2V0U2VydmVySW5mb1JlcXVlc3QaIS5taW5pb25zLnYxLkdldFNlcnZlckluZm9SZXNwb25zZWIGcHJvdG8z", [file_buf_validate_validate, file_minions_v1_common]);
+  fileDesc("ChdtaW5pb25zL3YxL3N5c3RlbS5wcm90bxIKbWluaW9ucy52MSKLAQoUR2V0U2VydmVySW5mb1JlcXVlc3QSPgoLY2xpZW50X25hbWUYASABKAlCKbpIJnIkEAEYgAEyHV5bQS1aYS16MC05XVtBLVphLXowLTkuXyAtXSokEjMKC2FwaV92ZXJzaW9uGAIgASgLMhYubWluaW9ucy52MS5BcGlWZXJzaW9uQga6SAPIAQEikgIKFUdldFNlcnZlckluZm9SZXNwb25zZRJ7Cg5zZXJ2ZXJfdmVyc2lvbhgBIAEoCUJjukhgcl4yXF4oMHxbMS05XVswLTldKilcLigwfFsxLTldWzAtOV0qKVwuKDB8WzEtOV1bMC05XSopKD86LVswLTlBLVphLXouLV0rKT8oPzpcK1swLTlBLVphLXouLV0rKT8kEjMKC2FwaV92ZXJzaW9uGAIgASgLMhYubWluaW9ucy52MS5BcGlWZXJzaW9uQga6SAPIAQESRwoMY2FwYWJpbGl0aWVzGAMgAygOMhwubWluaW9ucy52MS5TZXJ2ZXJDYXBhYmlsaXR5QhO6SBCSAQ0IARgBIgeCAQQQASAAIhIKEEdldEhlYWx0aFJlcXVlc3QiyAEKEUdldEhlYWx0aFJlc3BvbnNlEh0KC2luc3RhbmNlX2lkGAEgASgJQgi6SAVyA7ABARIwCgRtb2RlGAIgASgOMhYubWluaW9ucy52MS5EYWVtb25Nb2RlQgq6SAeCAQQQASAAEh4KB2hvc3RfaWQYAyABKAlCCLpIBXIDsAEBSACIAQESNgoKc3RhcnRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBAUIKCghfaG9zdF9pZCISChBSdW5Eb2N0b3JSZXF1ZXN0In8KC0RvY3RvckNoZWNrEjUKBGtpbmQYASABKA4yGy5taW5pb25zLnYxLkRvY3RvckNoZWNrS2luZEIKukgHggEEEAEgABI5CgZzdGF0dXMYAiABKA4yHS5taW5pb25zLnYxLkRvY3RvckNoZWNrU3RhdHVzQgq6SAeCAQQQASAAInwKEVJ1bkRvY3RvclJlc3BvbnNlEjQKBnN0YXR1cxgBIAEoDjIYLm1pbmlvbnMudjEuRG9jdG9yU3RhdHVzQgq6SAeCAQQQASAAEjEKBmNoZWNrcxgCIAMoCzIXLm1pbmlvbnMudjEuRG9jdG9yQ2hlY2tCCLpIBZIBAggBKnIKCkRhZW1vbk1vZGUSGwoXREFFTU9OX01PREVfVU5TUEVDSUZJRUQQABIVChFEQUVNT05fTU9ERV9MT0NBTBABEhoKFkRBRU1PTl9NT0RFX1NVUEVSVklTT1IQAhIUChBEQUVNT05fTU9ERV9IT1NUEAMqogEKDERvY3RvclN0YXR1cxIdChlET0NUT1JfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGQoVRE9DVE9SX1NUQVRVU19IRUFMVEhZEAESHQoZRE9DVE9SX1NUQVRVU19VTkFWQUlMQUJMRRACEh4KGkRPQ1RPUl9TVEFUVVNfSU5DT01QQVRJQkxFEAMSGQoVRE9DVE9SX1NUQVRVU19DT1JSVVBUEAQq2QEKD0RvY3RvckNoZWNrS2luZBIhCh1ET0NUT1JfQ0hFQ0tfS0lORF9VTlNQRUNJRklFRBAAEiQKIERPQ1RPUl9DSEVDS19LSU5EX0xJRkVDWUNMRV9MT0NLEAESKQolRE9DVE9SX0NIRUNLX0tJTkRfU1VQRVJWSVNPUl9EQVRBQkFTRRACEiMKH0RPQ1RPUl9DSEVDS19LSU5EX0hPU1RfREFUQUJBU0UQAxItCilET0NUT1JfQ0hFQ0tfS0lORF9MT0NBTF9IT1NUX1JFR0lTVFJBVElPThAEKngKEURvY3RvckNoZWNrU3RhdHVzEiMKH0RPQ1RPUl9DSEVDS19TVEFUVVNfVU5TUEVDSUZJRUQQABIeChpET0NUT1JfQ0hFQ0tfU1RBVFVTX1BBU1NFRBABEh4KGkRPQ1RPUl9DSEVDS19TVEFUVVNfRkFJTEVEEAIy+QEKDVN5c3RlbVNlcnZpY2USVAoNR2V0U2VydmVySW5mbxIgLm1pbmlvbnMudjEuR2V0U2VydmVySW5mb1JlcXVlc3QaIS5taW5pb25zLnYxLkdldFNlcnZlckluZm9SZXNwb25zZRJICglHZXRIZWFsdGgSHC5taW5pb25zLnYxLkdldEhlYWx0aFJlcXVlc3QaHS5taW5pb25zLnYxLkdldEhlYWx0aFJlc3BvbnNlEkgKCVJ1bkRvY3RvchIcLm1pbmlvbnMudjEuUnVuRG9jdG9yUmVxdWVzdBodLm1pbmlvbnMudjEuUnVuRG9jdG9yUmVzcG9uc2ViBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_minions_v1_common]);
 
 /**
  * @generated from message minions.v1.GetServerInfoRequest
@@ -65,6 +67,237 @@ export const GetServerInfoResponseSchema: GenMessage<GetServerInfoResponse> = /*
   messageDesc(file_minions_v1_system, 1);
 
 /**
+ * @generated from message minions.v1.GetHealthRequest
+ */
+export type GetHealthRequest = Message<"minions.v1.GetHealthRequest"> & {
+};
+
+/**
+ * Describes the message minions.v1.GetHealthRequest.
+ * Use `create(GetHealthRequestSchema)` to create a new message.
+ */
+export const GetHealthRequestSchema: GenMessage<GetHealthRequest> = /*@__PURE__*/
+  messageDesc(file_minions_v1_system, 2);
+
+/**
+ * @generated from message minions.v1.GetHealthResponse
+ */
+export type GetHealthResponse = Message<"minions.v1.GetHealthResponse"> & {
+  /**
+   * @generated from field: string instance_id = 1;
+   */
+  instanceId: string;
+
+  /**
+   * @generated from field: minions.v1.DaemonMode mode = 2;
+   */
+  mode: DaemonMode;
+
+  /**
+   * @generated from field: optional string host_id = 3;
+   */
+  hostId?: string | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp started_at = 4;
+   */
+  startedAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message minions.v1.GetHealthResponse.
+ * Use `create(GetHealthResponseSchema)` to create a new message.
+ */
+export const GetHealthResponseSchema: GenMessage<GetHealthResponse> = /*@__PURE__*/
+  messageDesc(file_minions_v1_system, 3);
+
+/**
+ * @generated from message minions.v1.RunDoctorRequest
+ */
+export type RunDoctorRequest = Message<"minions.v1.RunDoctorRequest"> & {
+};
+
+/**
+ * Describes the message minions.v1.RunDoctorRequest.
+ * Use `create(RunDoctorRequestSchema)` to create a new message.
+ */
+export const RunDoctorRequestSchema: GenMessage<RunDoctorRequest> = /*@__PURE__*/
+  messageDesc(file_minions_v1_system, 4);
+
+/**
+ * @generated from message minions.v1.DoctorCheck
+ */
+export type DoctorCheck = Message<"minions.v1.DoctorCheck"> & {
+  /**
+   * @generated from field: minions.v1.DoctorCheckKind kind = 1;
+   */
+  kind: DoctorCheckKind;
+
+  /**
+   * @generated from field: minions.v1.DoctorCheckStatus status = 2;
+   */
+  status: DoctorCheckStatus;
+};
+
+/**
+ * Describes the message minions.v1.DoctorCheck.
+ * Use `create(DoctorCheckSchema)` to create a new message.
+ */
+export const DoctorCheckSchema: GenMessage<DoctorCheck> = /*@__PURE__*/
+  messageDesc(file_minions_v1_system, 5);
+
+/**
+ * @generated from message minions.v1.RunDoctorResponse
+ */
+export type RunDoctorResponse = Message<"minions.v1.RunDoctorResponse"> & {
+  /**
+   * @generated from field: minions.v1.DoctorStatus status = 1;
+   */
+  status: DoctorStatus;
+
+  /**
+   * @generated from field: repeated minions.v1.DoctorCheck checks = 2;
+   */
+  checks: DoctorCheck[];
+};
+
+/**
+ * Describes the message minions.v1.RunDoctorResponse.
+ * Use `create(RunDoctorResponseSchema)` to create a new message.
+ */
+export const RunDoctorResponseSchema: GenMessage<RunDoctorResponse> = /*@__PURE__*/
+  messageDesc(file_minions_v1_system, 6);
+
+/**
+ * @generated from enum minions.v1.DaemonMode
+ */
+export enum DaemonMode {
+  /**
+   * @generated from enum value: DAEMON_MODE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: DAEMON_MODE_LOCAL = 1;
+   */
+  LOCAL = 1,
+
+  /**
+   * @generated from enum value: DAEMON_MODE_SUPERVISOR = 2;
+   */
+  SUPERVISOR = 2,
+
+  /**
+   * @generated from enum value: DAEMON_MODE_HOST = 3;
+   */
+  HOST = 3,
+}
+
+/**
+ * Describes the enum minions.v1.DaemonMode.
+ */
+export const DaemonModeSchema: GenEnum<DaemonMode> = /*@__PURE__*/
+  enumDesc(file_minions_v1_system, 0);
+
+/**
+ * @generated from enum minions.v1.DoctorStatus
+ */
+export enum DoctorStatus {
+  /**
+   * @generated from enum value: DOCTOR_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: DOCTOR_STATUS_HEALTHY = 1;
+   */
+  HEALTHY = 1,
+
+  /**
+   * @generated from enum value: DOCTOR_STATUS_UNAVAILABLE = 2;
+   */
+  UNAVAILABLE = 2,
+
+  /**
+   * @generated from enum value: DOCTOR_STATUS_INCOMPATIBLE = 3;
+   */
+  INCOMPATIBLE = 3,
+
+  /**
+   * @generated from enum value: DOCTOR_STATUS_CORRUPT = 4;
+   */
+  CORRUPT = 4,
+}
+
+/**
+ * Describes the enum minions.v1.DoctorStatus.
+ */
+export const DoctorStatusSchema: GenEnum<DoctorStatus> = /*@__PURE__*/
+  enumDesc(file_minions_v1_system, 1);
+
+/**
+ * @generated from enum minions.v1.DoctorCheckKind
+ */
+export enum DoctorCheckKind {
+  /**
+   * @generated from enum value: DOCTOR_CHECK_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: DOCTOR_CHECK_KIND_LIFECYCLE_LOCK = 1;
+   */
+  LIFECYCLE_LOCK = 1,
+
+  /**
+   * @generated from enum value: DOCTOR_CHECK_KIND_SUPERVISOR_DATABASE = 2;
+   */
+  SUPERVISOR_DATABASE = 2,
+
+  /**
+   * @generated from enum value: DOCTOR_CHECK_KIND_HOST_DATABASE = 3;
+   */
+  HOST_DATABASE = 3,
+
+  /**
+   * @generated from enum value: DOCTOR_CHECK_KIND_LOCAL_HOST_REGISTRATION = 4;
+   */
+  LOCAL_HOST_REGISTRATION = 4,
+}
+
+/**
+ * Describes the enum minions.v1.DoctorCheckKind.
+ */
+export const DoctorCheckKindSchema: GenEnum<DoctorCheckKind> = /*@__PURE__*/
+  enumDesc(file_minions_v1_system, 2);
+
+/**
+ * @generated from enum minions.v1.DoctorCheckStatus
+ */
+export enum DoctorCheckStatus {
+  /**
+   * @generated from enum value: DOCTOR_CHECK_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: DOCTOR_CHECK_STATUS_PASSED = 1;
+   */
+  PASSED = 1,
+
+  /**
+   * @generated from enum value: DOCTOR_CHECK_STATUS_FAILED = 2;
+   */
+  FAILED = 2,
+}
+
+/**
+ * Describes the enum minions.v1.DoctorCheckStatus.
+ */
+export const DoctorCheckStatusSchema: GenEnum<DoctorCheckStatus> = /*@__PURE__*/
+  enumDesc(file_minions_v1_system, 3);
+
+/**
  * @generated from service minions.v1.SystemService
  */
 export const SystemService: GenService<{
@@ -75,6 +308,22 @@ export const SystemService: GenService<{
     methodKind: "unary";
     input: typeof GetServerInfoRequestSchema;
     output: typeof GetServerInfoResponseSchema;
+  },
+  /**
+   * @generated from rpc minions.v1.SystemService.GetHealth
+   */
+  getHealth: {
+    methodKind: "unary";
+    input: typeof GetHealthRequestSchema;
+    output: typeof GetHealthResponseSchema;
+  },
+  /**
+   * @generated from rpc minions.v1.SystemService.RunDoctor
+   */
+  runDoctor: {
+    methodKind: "unary";
+    input: typeof RunDoctorRequestSchema;
+    output: typeof RunDoctorResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_minions_v1_system, 0);

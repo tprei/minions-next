@@ -175,7 +175,7 @@ export function authorizeReaderAction(
   return constants.SQLITE_DENY;
 }
 
-function assertDatabaseIntegrity(database: DatabaseSync): void {
+export function assertDatabaseIntegrity(database: DatabaseSync): void {
   try {
     const rows = database.prepare("PRAGMA integrity_check").all();
     if (rows.length !== 1 || rows[0]?.["integrity_check"] !== "ok") {

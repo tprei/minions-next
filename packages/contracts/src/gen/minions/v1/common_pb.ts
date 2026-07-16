@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file minions/v1/common.proto.
  */
 export const file_minions_v1_common: GenFile = /*@__PURE__*/
-  fileDesc("ChdtaW5pb25zL3YxL2NvbW1vbi5wcm90bxIKbWluaW9ucy52MSJICgpBcGlWZXJzaW9uEhwKBW1ham9yGAEgASgNQg26SAoqCBj/////DygBEg0KBW1pbm9yGAIgASgNEg0KBXBhdGNoGAMgASgNKnwKEFNlcnZlckNhcGFiaWxpdHkSIQodU0VSVkVSX0NBUEFCSUxJVFlfVU5TUEVDSUZJRUQQABIhCh1TRVJWRVJfQ0FQQUJJTElUWV9TWVNURU1fSU5GTxABEiIKHlNFUlZFUl9DQVBBQklMSVRZX0VWRU5UX1NUUkVBTRACYgZwcm90bzM", [file_buf_validate_validate]);
+  fileDesc("ChdtaW5pb25zL3YxL2NvbW1vbi5wcm90bxIKbWluaW9ucy52MSJICgpBcGlWZXJzaW9uEhwKBW1ham9yGAEgASgNQg26SAoqCBj/////DygBEg0KBW1pbm9yGAIgASgNEg0KBXBhdGNoGAMgASgNKsYBChBTZXJ2ZXJDYXBhYmlsaXR5EiEKHVNFUlZFUl9DQVBBQklMSVRZX1VOU1BFQ0lGSUVEEAASIQodU0VSVkVSX0NBUEFCSUxJVFlfU1lTVEVNX0lORk8QARIiCh5TRVJWRVJfQ0FQQUJJTElUWV9FVkVOVF9TVFJFQU0QAhIjCh9TRVJWRVJfQ0FQQUJJTElUWV9IRUFMVEhfRE9DVE9SEAMSIwofU0VSVkVSX0NBUEFCSUxJVFlfSE9TVF9SRUdJU1RSWRAEYgZwcm90bzM", [file_buf_validate_validate]);
 
 /**
  * @generated from message minions.v1.ApiVersion
@@ -58,6 +58,16 @@ export enum ServerCapability {
    * @generated from enum value: SERVER_CAPABILITY_EVENT_STREAM = 2;
    */
   EVENT_STREAM = 2,
+
+  /**
+   * @generated from enum value: SERVER_CAPABILITY_HEALTH_DOCTOR = 3;
+   */
+  HEALTH_DOCTOR = 3,
+
+  /**
+   * @generated from enum value: SERVER_CAPABILITY_HOST_REGISTRY = 4;
+   */
+  HOST_REGISTRY = 4,
 }
 
 /**

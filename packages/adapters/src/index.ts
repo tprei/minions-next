@@ -1,3 +1,18 @@
+export { createSecureIdGenerator } from "./secure-id-generator.js";
+export {
+  acquireLifecycleLock,
+  daemonLifecyclePath,
+  inspectLifecycleLock,
+  LifecycleLockError,
+} from "./lifecycle-lock.js";
+export type {
+  AcquiredLifecycleLock,
+  AcquireLifecycleLockOptions,
+  DaemonLifecycleRecord,
+  DaemonModeName,
+  LifecycleLockErrorCode,
+  LifecycleLockInspection,
+} from "./lifecycle-lock.js";
 export { createEventCommitWaiter } from "./event-commit-waiter.js";
 export type {
   EventCommitWaiter,
@@ -27,6 +42,17 @@ export type {
   SqliteStoredEvent,
   SqliteTreeSummary,
 } from "./sqlite/event-store.js";
+export { createSupervisorHostRegistry, HostRegistryError } from "./sqlite/host-registry.js";
+export type {
+  CreateSupervisorHostRegistryOptions,
+  EnsureLocalHostInput,
+  ExecutionHostKind,
+  ExecutionHostRecord,
+  ExecutionHostState,
+  HostRegistryErrorCode,
+  ListExecutionHostsInput,
+  SupervisorHostRegistry,
+} from "./sqlite/host-registry.js";
 export { openHostDatabase, openSupervisorDatabase } from "./sqlite/database.js";
 export type {
   ManagedSqliteDatabase,

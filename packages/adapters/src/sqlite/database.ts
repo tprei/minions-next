@@ -14,6 +14,7 @@ import { SqliteDatabaseError } from "./error.js";
 import { hostMigrations, supervisorMigrations } from "./generated-migrations.js";
 import {
   applyReaderPolicy,
+  assertDatabaseIntegrity,
   authorizeReaderAction,
   type DatabaseKind,
   type MigrationReceipt,
@@ -62,6 +63,7 @@ export type OpenSqliteDatabaseOptions = Readonly<{
 export interface ManagedSqliteDatabase {
   readonly path: string;
   readonly migration: MigrationReceipt;
+  checkIntegrity(): void;
   read<T>(operation: (reader: SqliteReader) => T): T;
   snapshot<T>(operation: (reader: SqliteReader) => T): T;
   close(): Promise<void>;
@@ -100,6 +102,16 @@ class ManagedSqliteDatabaseInstance {
       this.#assertOpen();
     });
     this.#writerAuthorization = new WriterAuthorization(writerDatabase);
+  }
+
+  checkIntegrity(): void {
+    this.#assertOpen();
+    const database = new DatabaseSync(this.path, databaseOptions(true));
+    try {
+      assertDatabaseIntegrity(database);
+    } finally {
+      database.close();
+    }
   }
 
   read<T>(operation: (reader: SqliteReader) => T): T {
@@ -255,6 +267,10 @@ class ManagedSqliteDatabaseFacade implements ManagedSqliteDatabase {
     this.migration = instance.migration;
     this.#instance = instance;
     managedSqliteWriters.set(this, (operation) => instance.write(operation));
+  }
+
+  checkIntegrity(): void {
+    this.#instance.checkIntegrity();
   }
 
   read<T>(operation: (reader: SqliteReader) => T): T {
