@@ -2527,7 +2527,6 @@ BEGIN
   SELECT RAISE(ABORT, 'vcs change binding is durable');
 END;
 ```
-
 ## Supervisor database
 
 ### 0001 execution_hosts
