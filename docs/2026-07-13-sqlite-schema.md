@@ -2387,7 +2387,6 @@ BEGIN
   SELECT RAISE(ABORT, 'attempt checkpoint sequence is not monotonic');
 END;
 ```
-
 ## Supervisor database
 
 ### 0001 execution_hosts
