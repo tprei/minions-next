@@ -1,10 +1,12 @@
-import { create, toBinary } from "@bufbuild/protobuf";
+import { create, toBinary, type MessageShape } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import {
   createEventCommitWaiter,
+  createFileContentBlobStore,
   createPlanRegistry,
+  createSqliteArtifactRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
   openHostDatabase,
@@ -14,6 +16,9 @@ import {
 } from "@minions/adapters";
 import { executeTestSqliteWrite } from "@minions/adapters/sqlite-test-support";
 import {
+  ArtifactOutcomeSchema,
+  ArtifactRetention,
+  ArtifactSchema,
   AttentionKind,
   AttentionSummarySchema,
   CreateTreeRequestSchema,
@@ -27,14 +32,15 @@ import {
   EventService,
   GetHealthResponseSchema,
   ImplementationOutputContractSchema,
+  NodeOutcomeSchema,
   NodeState,
   NodeSummarySchema,
   PlanNodeMode,
   ProposePlanRequestSchema,
   ProposedNodeSchema,
   ProjectionChangeSchema,
-  RepairPlanRequestSchema,
   RepositorySummarySchema,
+  RepairPlanRequestSchema,
   RunDoctorResponseSchema,
   TreeBudgetSchema,
   TreeService,
@@ -55,6 +61,7 @@ import {
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
 
 import { startDaemonServer, type RunningDaemonServer } from "@minions/daemon";
 
@@ -86,6 +93,15 @@ const planArtifactTwoIdentifier = uuid(31);
 const planAttentionTwoIdentifier = uuid(32);
 const planChildTwoIdentifier = uuid(33);
 const planRepairTwoIdentifier = uuid(34);
+const snapshotArtifactIdentifier = uuid(40);
+const snapshotArtifactEvidenceIdentifier = uuid(41);
+const snapshotArtifactDigest = "ab".repeat(32);
+const snapshotOlderArtifactIdentifier = uuid(42);
+const snapshotOlderArtifactEvidenceIdentifier = uuid(49);
+const snapshotOlderArtifactCommandIdentifier = uuid(50);
+const snapshotRepositoryCommandIdentifier = uuid(43);
+const snapshotArtifactCommandIdentifier = uuid(44);
+const snapshotOutcomeCommandIdentifier = uuid(45);
 const planScope = ".";
 const planProfile = "event-plan";
 
@@ -271,6 +287,124 @@ describe("EventService integration", () => {
     }
   });
 
+  it("converges immutable artifacts and outcomes across a snapshot and watch cursor", async () => {
+    const clock = new FixedClock(now);
+    const temporary = await TemporarySqliteDatabase.create("host", clock);
+    const waiter = createEventCommitWaiter();
+    const commandStore = createSqliteCommandStore({
+      database: temporary.database,
+      ports: { clock, ids: new SequenceIdGenerator([]) },
+      notifier: waiter,
+    });
+    await seedArtifactSnapshotProjections(temporary.database);
+    const createdAt = create(TimestampSchema, {
+      seconds: BigInt(Math.floor(now / 1_000)),
+      nanos: (now % 1_000) * 1_000_000,
+    });
+    const verifiedAt = create(TimestampSchema, {
+      seconds: BigInt(Math.floor((now - 1) / 1_000)),
+      nanos: ((now - 1) % 1_000) * 1_000_000,
+    });
+    const olderCreatedAt = create(TimestampSchema, {
+      seconds: BigInt(Math.floor((now - 3) / 1_000)),
+      nanos: ((now - 3) % 1_000) * 1_000_000,
+    });
+    const artifact = create(ArtifactSchema, {
+      artifactId: snapshotArtifactIdentifier,
+      nodeId: rootNodeIdentifier,
+      treeId: treeIdentifier,
+      repositoryId: repositoryIdentifier,
+      hostId: hostIdentifier,
+      contentDigest: snapshotArtifactDigest,
+      sizeBytes: 7n,
+      mediaType: "text/plain",
+      artifactType: "plan",
+      evidenceId: snapshotArtifactEvidenceIdentifier,
+      retention: ArtifactRetention.ACTIVE,
+      createdAt,
+      verifiedAt,
+    });
+    const olderArtifact = create(ArtifactSchema, {
+      ...artifact,
+      artifactId: snapshotOlderArtifactIdentifier,
+      evidenceId: snapshotOlderArtifactEvidenceIdentifier,
+      createdAt: olderCreatedAt,
+    });
+    const outcome = create(NodeOutcomeSchema, {
+      nodeId: rootNodeIdentifier,
+      outcome: {
+        case: "artifact",
+        value: create(ArtifactOutcomeSchema, { artifactId: snapshotArtifactIdentifier }),
+      },
+      createdAt,
+    });
+    await appendSnapshotProjectionEvent(
+      temporary.database,
+      snapshotArtifactCommandIdentifier,
+      uuid(46),
+      "node",
+      rootNodeIdentifier,
+      1,
+      create(ProjectionChangeSchema, {
+        change: { case: "artifactUpserted", value: artifact },
+      }),
+    );
+    await appendSnapshotProjectionEvent(
+      temporary.database,
+      snapshotOlderArtifactCommandIdentifier,
+      uuid(51),
+      "node",
+      rootNodeIdentifier,
+      2,
+      create(ProjectionChangeSchema, {
+        change: { case: "artifactUpserted", value: olderArtifact },
+      }),
+    );
+    await appendSnapshotProjectionEvent(
+      temporary.database,
+      snapshotOutcomeCommandIdentifier,
+      uuid(47),
+      "node",
+      rootNodeIdentifier,
+      3,
+      create(ProjectionChangeSchema, {
+        change: { case: "nodeOutcomeUpserted", value: outcome },
+      }),
+    );
+    const running = await startEventFixture(temporary.database, waiter, commandStore, clock);
+    try {
+      const snapshotAtN = await running.client.getSnapshot({});
+      expect(snapshotAtN.lastSequence).toBe(3n);
+      expect(snapshotAtN.artifacts).toEqual([artifact, olderArtifact]);
+      expect(snapshotAtN.nodeOutcomes).toEqual([outcome]);
+
+      const stream = openStream(running.client, snapshotAtN.lastSequence);
+      const nextEvent = receiveNext(stream.iterator);
+      await executeTestSqliteWrite(temporary.database, (transaction) => {
+        transaction.run("UPDATE repositories SET version = 1 WHERE id = ?", [repositoryIdentifier]);
+      });
+      await appendSnapshotProjectionEvent(
+        temporary.database,
+        snapshotRepositoryCommandIdentifier,
+        uuid(48),
+        "repository",
+        repositoryIdentifier,
+        1,
+        repositoryProjection(1),
+      );
+      expect((await nextEvent).event?.sequence).toBe(4n);
+      stream.controller.abort();
+
+      const converged = await running.client.getSnapshot({});
+      expect(converged.artifacts).toEqual(snapshotAtN.artifacts);
+      expect(converged.nodeOutcomes).toEqual(snapshotAtN.nodeOutcomes);
+      expect(converged.repositories[0]?.version).toBe(1n);
+    } finally {
+      await running.server.close();
+      await temporary.dispose();
+    }
+  });
+
   it("rejects incompatible retained events before binding a listener", async () => {
     const clock = new FixedClock(now);
     const temporary = await TemporarySqliteDatabase.create("host", clock);
@@ -278,10 +412,21 @@ describe("EventService integration", () => {
     try {
       await seedSnapshotProjections(temporary.database);
       await seedIncompatibleEvent(temporary.database);
+      const ids = new SequenceIdGenerator([uuid(200)]);
       const commandStore = createSqliteCommandStore({
         database: temporary.database,
-        ports: { clock, ids: new SequenceIdGenerator([uuid(200)]) },
+        ports: { clock, ids },
         notifier: waiter,
+      });
+      const artifactRegistry = createSqliteArtifactRegistry({
+        database: temporary.database,
+        commandStore,
+        hostId: trustedHostId,
+      });
+      const blobStore = createFileContentBlobStore({
+        rootPath: join(dirname(temporary.database.path), "blobs"),
+        clock,
+        ids,
       });
       const planRegistry = createPlanRegistry({
         database: temporary.database,
@@ -301,6 +446,8 @@ describe("EventService integration", () => {
           commandStore,
           ports: { clock, ids: new SequenceIdGenerator([]) },
         }),
+        artifactRegistry,
+        blobStore,
         system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
       }).then(
         (server) => ({ case: "started", server }) as const,
@@ -545,6 +692,9 @@ describe("EventService integration", () => {
             case "nodeUpserted":
               streamedNodes.set(change.change.value.id, change.change.value);
               break;
+            case "artifactUpserted":
+            case "nodeOutcomeUpserted":
+              break;
             case "attentionUpserted":
               streamedAttention.set(change.change.value.nodeId, change.change.value);
               break;
@@ -617,6 +767,16 @@ async function startEventFixture(
     commandStore,
     hostId: trustedHostId,
   });
+  const artifactRegistry = createSqliteArtifactRegistry({
+    database,
+    commandStore,
+    hostId: trustedHostId,
+  });
+  const blobStore = createFileContentBlobStore({
+    rootPath: join(dirname(database.path), "blobs"),
+    clock,
+    ids: new SequenceIdGenerator([]),
+  });
   const server = await startDaemonServer({
     mode: "host",
     port: 0,
@@ -630,6 +790,8 @@ async function startEventFixture(
       commandStore,
       ports: { clock, ids: new SequenceIdGenerator([]) },
     }),
+    artifactRegistry,
+    blobStore,
     system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
   });
   const transport = createConnectTransport({
@@ -695,6 +857,179 @@ async function seedSnapshotProjections(database: ManagedSqliteDatabase): Promise
         rootObjective,
         blockerEvidenceIdentifier,
         now,
+        now,
+      ],
+    );
+  });
+}
+
+async function seedArtifactSnapshotProjections(database: ManagedSqliteDatabase): Promise<void> {
+  await executeTestSqliteWrite(database, (transaction) => {
+    transaction.run(
+      "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      [repositoryIdentifier, hostIdentifier, "/workspace/minions", now],
+    );
+    transaction.run(
+      `INSERT INTO trees (
+         id, repository_id, host_id, base_commit, goal, active_plan_revision_id,
+         root_node_id, version, created_at_ms, updated_at_ms, archived_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)`,
+      [
+        treeIdentifier,
+        repositoryIdentifier,
+        hostIdentifier,
+        baseCommit,
+        "Realtime supervision",
+        planRevisionIdentifier,
+        rootNodeIdentifier,
+        now,
+        now,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO plan_revisions (
+         id, tree_id, ordinal, goal, state_kind, version, created_at_ms,
+         approved_at_ms, superseded_at_ms
+       ) VALUES (?, ?, 1, ?, 'draft', 0, ?, NULL, NULL)`,
+      [planRevisionIdentifier, treeIdentifier, "Realtime supervision", now],
+    );
+    transaction.run(
+      `INSERT INTO content_blobs (
+         digest, size_bytes, media_type, relative_path, retention_kind, created_at_ms, verified_at_ms
+       ) VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+      [
+        snapshotArtifactDigest,
+        7,
+        "text/plain",
+        `sha256/${snapshotArtifactDigest.slice(0, 2)}/${snapshotArtifactDigest.slice(2, 4)}/${snapshotArtifactDigest}`,
+        now - 2,
+        now - 1,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO nodes (
+         id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+         mode, objective, output_kind, output_artifact_id, output_artifact_type,
+         state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+         blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+         outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+         outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+         version, created_at_ms, updated_at_ms
+       ) VALUES (?, ?, ?, ?, NULL, ?, 'plan', ?, 'artifact', ?, 'plan',
+         'active', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+         NULL, NULL, NULL, 0, ?, ?)`,
+      [
+        rootNodeIdentifier,
+        treeIdentifier,
+        repositoryIdentifier,
+        hostIdentifier,
+        planRevisionIdentifier,
+        rootObjective,
+        snapshotArtifactIdentifier,
+        now,
+        now,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO artifacts (
+         id, node_id, attempt_id, tree_id, repository_id, host_id,
+         content_digest, artifact_type, evidence_id, retention_kind, created_at_ms
+       ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+      [
+        snapshotArtifactIdentifier,
+        rootNodeIdentifier,
+        treeIdentifier,
+        repositoryIdentifier,
+        hostIdentifier,
+        snapshotArtifactDigest,
+        "plan",
+        snapshotArtifactEvidenceIdentifier,
+        now,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO artifacts (
+         id, node_id, attempt_id, tree_id, repository_id, host_id,
+         content_digest, artifact_type, evidence_id, retention_kind, created_at_ms
+       ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+      [
+        snapshotOlderArtifactIdentifier,
+        rootNodeIdentifier,
+        treeIdentifier,
+        repositoryIdentifier,
+        hostIdentifier,
+        snapshotArtifactDigest,
+        "plan",
+        snapshotOlderArtifactEvidenceIdentifier,
+        now - 3,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO node_outcome_records (
+         node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+       ) VALUES (?, 'artifact', ?, NULL, NULL, NULL, ?)`,
+      [rootNodeIdentifier, snapshotArtifactIdentifier, now],
+    );
+    transaction.run(
+      `UPDATE nodes
+          SET state_kind = 'succeeded', outcome_kind = 'artifact',
+              outcome_artifact_id = ?, outcome_content_hash = ?,
+              outcome_artifact_type = ?, outcome_evidence_id = ?,
+              version = 1, updated_at_ms = ?
+        WHERE id = ?`,
+      [
+        snapshotArtifactIdentifier,
+        snapshotArtifactDigest,
+        "plan",
+        snapshotArtifactEvidenceIdentifier,
+        now,
+        rootNodeIdentifier,
+      ],
+    );
+  });
+}
+
+async function appendSnapshotProjectionEvent(
+  database: ManagedSqliteDatabase,
+  commandIdentifier: string,
+  eventIdentifier: string,
+  aggregateKind: string,
+  aggregateIdentifier: string,
+  aggregateVersion: number,
+  projection: MessageShape<typeof ProjectionChangeSchema>,
+): Promise<void> {
+  const bytes = toBinary(ProjectionChangeSchema, projection);
+  await executeTestSqliteWrite(database, (transaction) => {
+    transaction.run(
+      `INSERT INTO operator_commands (
+         id, actor_session_id, aggregate_kind, aggregate_id, expected_version,
+         command_type, command_payload, state_kind, created_at_ms, acknowledged_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'applied', ?, ?)`,
+      [
+        commandIdentifier,
+        actorIdentifier,
+        aggregateKind,
+        aggregateIdentifier,
+        aggregateVersion - 1,
+        eventTypeName,
+        bytes,
+        now,
+        now,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO events (
+         event_id, command_id, aggregate_kind, aggregate_id, aggregate_version,
+         event_type, event_payload, occurred_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        eventIdentifier,
+        commandIdentifier,
+        aggregateKind,
+        aggregateIdentifier,
+        aggregateVersion,
+        eventTypeName,
+        bytes,
         now,
       ],
     );

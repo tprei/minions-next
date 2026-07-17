@@ -61,6 +61,7 @@ export type CommitOutcome = Readonly<{
 
 export type NoChangeOutcome = Readonly<{
   kind: "no_change";
+  revision: GitSha;
   evidenceId: EvidenceId;
   explanation: NonEmptyText;
 }>;
@@ -401,6 +402,7 @@ function validateOutcome(contract: TaskNodeOutputContract, outcome: TaskNodeOutc
       }
       return;
     case "no_change":
+      gitSha(outcome.revision);
       evidenceId(outcome.evidenceId);
       nonEmptyText(outcome.explanation, "no-change explanation");
       if (contract.kind !== "implementation") {

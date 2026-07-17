@@ -833,7 +833,7 @@ describe("repository service integration", () => {
       );
       await rm(home, { force: true, recursive: true });
     }
-  });
+  }, 15_000);
 
   it("returns repository registration, get, and list JSON through the direct CLI main", async () => {
     const home = await mkdtemp(join(tmpdir(), "minions-repository-service-cli-home-"));

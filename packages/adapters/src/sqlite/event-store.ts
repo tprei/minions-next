@@ -41,6 +41,45 @@ export type SqliteAttentionSummary = Readonly<{
   evidenceId: string | undefined;
 }>;
 
+type SqliteArtifactProjection = Readonly<{
+  id: string;
+  nodeId: string;
+  attemptId: string | undefined;
+  treeId: string;
+  repositoryId: string;
+  hostId: string;
+  contentDigest: string;
+  sizeBytes: bigint;
+  mediaType: string;
+  artifactType: string;
+  evidenceId: string;
+  retentionKind: "active" | "archived" | "purge_pending";
+  createdAtMs: bigint;
+  verifiedAtMs: bigint;
+}>;
+
+type SqliteNodeOutcomeProjection = Readonly<{
+  nodeId: string;
+  createdAtMs: bigint;
+}> &
+  (
+    | Readonly<{
+        kind: "artifact";
+        artifactId: string;
+      }>
+    | Readonly<{
+        kind: "no_change";
+        revision: string;
+        evidenceId: string;
+        explanation: string;
+      }>
+    | Readonly<{
+        kind: "commit";
+        revision: string;
+        evidenceId: string;
+      }>
+  );
+
 export type SqliteEventBounds = Readonly<{
   minimumAvailableSequence: bigint;
   lastSequence: bigint;
@@ -54,6 +93,8 @@ export type SqliteEventSnapshot = Readonly<{
   attention: readonly SqliteAttentionSummary[];
   minimumAvailableSequence: bigint;
   lastSequence: bigint;
+  artifacts: readonly SqliteArtifactProjection[];
+  nodeOutcomes: readonly SqliteNodeOutcomeProjection[];
 }>;
 
 export type SqliteStoredEvent = Readonly<{
@@ -160,6 +201,59 @@ class DefaultSqliteEventStore implements SqliteEventStore {
             ORDER BY ordered_at_ms, node_id`,
         )
         .map(toAttentionSummary);
+      const artifacts = reader
+        .all(
+          `SELECT a.id, a.node_id, a.attempt_id, a.tree_id, a.repository_id, a.host_id,
+                  a.content_digest, a.artifact_type, a.evidence_id, a.retention_kind,
+                  a.created_at_ms, c.digest AS blob_digest, c.size_bytes, c.media_type,
+                  c.relative_path, c.verified_at_ms,
+                  owner.id AS owner_node_id, owner.tree_id AS owner_tree_id,
+                  owner.repository_id AS owner_repository_id, owner.host_id AS owner_host_id,
+                  attempt.id AS attempt_row_id, attempt.node_id AS attempt_node_id,
+                  attempt.tree_id AS attempt_tree_id,
+                  attempt.repository_id AS attempt_repository_id,
+                  attempt.host_id AS attempt_host_id
+             FROM artifacts AS a
+             LEFT JOIN content_blobs AS c ON c.digest = a.content_digest
+             LEFT JOIN nodes AS owner ON owner.id = a.node_id
+             LEFT JOIN attempts AS attempt ON attempt.id = a.attempt_id
+            ORDER BY a.id`,
+        )
+        .map(toArtifactProjection);
+      const artifactsById = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
+      const missingOutcome = reader.get(
+        `SELECT nodes.id
+           FROM nodes
+          WHERE (nodes.state_kind = 'succeeded' OR nodes.outcome_kind IS NOT NULL)
+            AND NOT EXISTS (
+              SELECT 1 FROM node_outcome_records
+               WHERE node_outcome_records.node_id = nodes.id
+            )
+          LIMIT 1`,
+      );
+      if (missingOutcome !== undefined) {
+        throw corruptEventStore("succeeded node has no normalized outcome");
+      }
+      const nodeOutcomes = reader
+        .all(
+          `SELECT outcomes.node_id AS normalized_node_id,
+                  outcomes.outcome_kind AS normalized_outcome_kind,
+                  outcomes.artifact_id, outcomes.revision, outcomes.evidence_id,
+                  outcomes.explanation, outcomes.created_at_ms,
+                  owner.id AS owner_node_id, owner.state_kind AS node_state_kind,
+                  owner.outcome_kind AS node_outcome_kind,
+                  owner.outcome_artifact_id AS node_outcome_artifact_id,
+                  owner.outcome_content_hash AS node_outcome_content_hash,
+                  owner.outcome_artifact_type AS node_outcome_artifact_type,
+                  owner.outcome_commit AS node_outcome_commit,
+                  owner.outcome_evidence_id AS node_outcome_evidence_id,
+                  owner.outcome_explanation AS node_outcome_explanation
+             FROM node_outcome_records AS outcomes
+             LEFT JOIN nodes AS owner ON owner.id = outcomes.node_id
+            ORDER BY outcomes.node_id`,
+        )
+        .map((row) => toNodeOutcomeProjection(row, artifactsById));
+
       const bounds = readBounds(
         reader.get(
           "SELECT min(sequence) AS minimum_sequence, max(sequence) AS maximum_sequence FROM events",
@@ -173,6 +267,8 @@ class DefaultSqliteEventStore implements SqliteEventStore {
         trees: Object.freeze(trees),
         nodes: Object.freeze(nodes),
         attention: Object.freeze(attention),
+        artifacts: Object.freeze(artifacts),
+        nodeOutcomes: Object.freeze(nodeOutcomes),
         ...bounds,
       });
     });
@@ -209,6 +305,254 @@ class DefaultSqliteEventStore implements SqliteEventStore {
     );
     return Object.freeze(rows.map(toStoredEvent));
   }
+}
+
+const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const CONTENT_HASH_PATTERN = /^[0-9a-f]{64}$/u;
+const GIT_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
+
+function toArtifactProjection(row: SqliteRow): SqliteArtifactProjection {
+  const id = requiredUuid(row, "id");
+  const nodeId = requiredUuid(row, "node_id");
+  const treeId = requiredUuid(row, "tree_id");
+  const repositoryId = requiredUuid(row, "repository_id");
+  const hostId = requiredUuid(row, "host_id");
+  if (
+    nodeId !== requiredUuid(row, "owner_node_id") ||
+    treeId !== requiredUuid(row, "owner_tree_id") ||
+    repositoryId !== requiredUuid(row, "owner_repository_id") ||
+    hostId !== requiredUuid(row, "owner_host_id")
+  ) {
+    throw corruptEventStore("artifact ownership does not match its node");
+  }
+  const attemptId = optionalUuid(row, "attempt_id");
+  const attemptRowId = optionalUuid(row, "attempt_row_id");
+  if (attemptId !== attemptRowId) {
+    throw corruptEventStore("artifact attempt ownership is corrupt");
+  }
+  if (attemptId !== undefined) {
+    if (
+      nodeId !== requiredUuid(row, "attempt_node_id") ||
+      treeId !== requiredUuid(row, "attempt_tree_id") ||
+      repositoryId !== requiredUuid(row, "attempt_repository_id") ||
+      hostId !== requiredUuid(row, "attempt_host_id")
+    ) {
+      throw corruptEventStore("artifact attempt ownership is corrupt");
+    }
+  }
+  const contentDigest = requiredContentHash(row, "content_digest");
+  if (contentDigest !== requiredContentHash(row, "blob_digest")) {
+    throw corruptEventStore("artifact blob digest does not match its content digest");
+  }
+  const relativePath = requiredNonEmptyString(row, "relative_path");
+  if (relativePath !== canonicalBlobPath(contentDigest)) {
+    throw corruptEventStore("artifact blob path is not canonical");
+  }
+  const createdAtMs = nonNegativeBigint(row, "created_at_ms");
+  return Object.freeze({
+    id,
+    nodeId,
+    attemptId,
+    treeId,
+    repositoryId,
+    hostId,
+    contentDigest,
+    sizeBytes: nonNegativeBigint(row, "size_bytes"),
+    mediaType: requiredNonEmptyString(row, "media_type"),
+    artifactType: requiredNonEmptyString(row, "artifact_type"),
+    evidenceId: requiredUuid(row, "evidence_id"),
+    retentionKind: retentionKind(row, "retention_kind"),
+    createdAtMs,
+    verifiedAtMs: nonNegativeBigint(row, "verified_at_ms"),
+  });
+}
+
+function toNodeOutcomeProjection(
+  row: SqliteRow,
+  artifactsById: ReadonlyMap<string, SqliteArtifactProjection>,
+): SqliteNodeOutcomeProjection {
+  const nodeId = requiredUuid(row, "normalized_node_id");
+  if (nodeId !== requiredUuid(row, "owner_node_id")) {
+    throw corruptEventStore("node outcome ownership does not match its node");
+  }
+  if (requiredString(row, "node_state_kind") !== "succeeded") {
+    throw corruptEventStore("non-succeeded node has a normalized outcome");
+  }
+  const kind = requiredString(row, "normalized_outcome_kind");
+  if (kind !== requiredString(row, "node_outcome_kind")) {
+    throw corruptEventStore("node outcome normalization disagrees with node columns");
+  }
+  const artifactId = optionalUuid(row, "artifact_id");
+  const revision = optionalGitSha(row, "revision");
+  const evidenceId = optionalUuid(row, "evidence_id");
+  const explanation = optionalNonEmptyString(row, "explanation");
+  const nodeArtifactId = optionalUuid(row, "node_outcome_artifact_id");
+  const nodeContentHash = optionalContentHash(row, "node_outcome_content_hash");
+  const nodeArtifactType = optionalNonEmptyString(row, "node_outcome_artifact_type");
+  const nodeCommit = optionalGitSha(row, "node_outcome_commit");
+  const nodeEvidenceId = optionalUuid(row, "node_outcome_evidence_id");
+  const nodeExplanation = optionalNonEmptyString(row, "node_outcome_explanation");
+  const createdAtMs = nonNegativeBigint(row, "created_at_ms");
+
+  if (kind === "artifact") {
+    const artifact = artifactId === undefined ? undefined : artifactsById.get(artifactId);
+    if (artifact === undefined) {
+      throw corruptEventStore("artifact outcome normalization is corrupt");
+    }
+    if (
+      artifact.nodeId !== nodeId ||
+      revision !== undefined ||
+      evidenceId !== undefined ||
+      explanation !== undefined ||
+      nodeArtifactId !== artifact.id ||
+      nodeContentHash !== artifact.contentDigest ||
+      nodeArtifactType !== artifact.artifactType ||
+      nodeCommit !== undefined ||
+      nodeEvidenceId !== artifact.evidenceId ||
+      nodeExplanation !== undefined
+    ) {
+      throw corruptEventStore("artifact outcome normalization is corrupt");
+    }
+    return Object.freeze({
+      nodeId,
+      kind: "artifact",
+      artifactId: artifact.id,
+      createdAtMs,
+    });
+  }
+  if (kind === "no_change") {
+    if (
+      artifactId !== undefined ||
+      revision === undefined ||
+      evidenceId === undefined ||
+      explanation === undefined ||
+      nodeArtifactId !== undefined ||
+      nodeContentHash !== undefined ||
+      nodeArtifactType !== undefined ||
+      nodeCommit !== undefined ||
+      nodeEvidenceId !== evidenceId ||
+      nodeExplanation !== explanation
+    ) {
+      throw corruptEventStore("no-change outcome normalization is corrupt");
+    }
+    return Object.freeze({
+      nodeId,
+      kind: "no_change",
+      revision,
+      evidenceId,
+      explanation,
+      createdAtMs,
+    });
+  }
+  if (kind === "commit") {
+    if (
+      artifactId !== undefined ||
+      revision === undefined ||
+      evidenceId === undefined ||
+      explanation !== undefined ||
+      nodeArtifactId !== undefined ||
+      nodeContentHash !== undefined ||
+      nodeArtifactType !== undefined ||
+      nodeCommit !== revision ||
+      nodeEvidenceId !== evidenceId ||
+      nodeExplanation !== undefined
+    ) {
+      throw corruptEventStore("commit outcome normalization is corrupt");
+    }
+    return Object.freeze({
+      nodeId,
+      kind: "commit",
+      revision,
+      evidenceId,
+      createdAtMs,
+    });
+  }
+  throw corruptEventStore("node outcome record kind is invalid");
+}
+
+function requiredUuid(row: SqliteRow, key: string): string {
+  const value = requiredString(row, key);
+  if (!UUID_V7_PATTERN.test(value)) {
+    throw corruptEventStore(`${key} is not a lowercase UUIDv7`);
+  }
+  return value;
+}
+
+function optionalUuid(row: SqliteRow, key: string): string | undefined {
+  const value = optionalNonEmptyString(row, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!UUID_V7_PATTERN.test(value)) {
+    throw corruptEventStore(`${key} is not a lowercase UUIDv7`);
+  }
+  return value;
+}
+
+function requiredContentHash(row: SqliteRow, key: string): string {
+  const value = requiredString(row, key);
+  if (!CONTENT_HASH_PATTERN.test(value)) {
+    throw corruptEventStore(`${key} is not a lowercase content hash`);
+  }
+  return value;
+}
+
+function optionalContentHash(row: SqliteRow, key: string): string | undefined {
+  const value = optionalNonEmptyString(row, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!CONTENT_HASH_PATTERN.test(value)) {
+    throw corruptEventStore(`${key} is not a lowercase content hash`);
+  }
+  return value;
+}
+
+function optionalGitSha(row: SqliteRow, key: string): string | undefined {
+  const value = optionalNonEmptyString(row, key);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!GIT_SHA_PATTERN.test(value)) {
+    throw corruptEventStore(`${key} is not a lowercase Git SHA`);
+  }
+  return value;
+}
+
+function requiredNonEmptyString(row: SqliteRow, key: string): string {
+  const value = requiredString(row, key);
+  if (value.trim().length === 0) {
+    throw corruptEventStore(`${key} is empty`);
+  }
+  return value;
+}
+
+function optionalNonEmptyString(row: SqliteRow, key: string): string | undefined {
+  const value = row[key];
+  if (value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw corruptEventStore(`${key} is not null or a non-empty string`);
+  }
+  return value;
+}
+
+function retentionKind(row: SqliteRow, key: string): SqliteArtifactProjection["retentionKind"] {
+  switch (requiredString(row, key)) {
+    case "active":
+      return "active";
+    case "archived":
+      return "archived";
+    case "purge_pending":
+      return "purge_pending";
+    default:
+      throw corruptEventStore(`${key} is not a supported artifact retention kind`);
+  }
+}
+
+function canonicalBlobPath(contentDigest: string): string {
+  return `sha256/${contentDigest.slice(0, 2)}/${contentDigest.slice(2, 4)}/${contentDigest}`;
 }
 
 function readBounds(

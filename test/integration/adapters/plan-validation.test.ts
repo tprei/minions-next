@@ -1814,6 +1814,42 @@ async function markSucceededArtifact(
   at: Timestamp,
 ): Promise<void> {
   await fixture.temporary.database.write((transaction) => {
+    transaction.run("UPDATE nodes SET state_kind = 'active' WHERE id = ?", [nodeId]);
+    const contentDigest = "a".repeat(64);
+    transaction.run(
+      `INSERT INTO content_blobs (
+         digest, size_bytes, media_type, relative_path, retention_kind, created_at_ms, verified_at_ms
+       ) VALUES (?, 1, 'text/plain', ?, 'active', ?, ?)`,
+      [
+        contentDigest,
+        `sha256/${contentDigest.slice(0, 2)}/${contentDigest.slice(2, 4)}/${contentDigest}`,
+        at,
+        at,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO artifacts (
+         id, node_id, attempt_id, tree_id, repository_id, host_id,
+         content_digest, artifact_type, evidence_id, retention_kind, created_at_ms
+       ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+      [
+        artifactId,
+        nodeId,
+        TREE_ID,
+        REPOSITORY_ID,
+        HOST_ID,
+        contentDigest,
+        artifactType,
+        evidenceId,
+        at,
+      ],
+    );
+    transaction.run(
+      `INSERT INTO node_outcome_records (
+         node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+       ) VALUES (?, 'artifact', ?, NULL, NULL, NULL, ?)`,
+      [nodeId, artifactId, at],
+    );
     transaction.run(
       `UPDATE nodes
           SET state_kind = 'succeeded',

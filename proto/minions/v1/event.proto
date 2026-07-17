@@ -4,6 +4,7 @@ package minions.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
+import "minions/v1/artifact.proto";
 import "minions/v1/steering.proto";
 
 service EventService {
@@ -133,6 +134,8 @@ message ProjectionChange {
     ProjectionBatch batch = 8;
     NodeCommand node_command_upserted = 9;
     NodeAttention node_attention_upserted = 10;
+    Artifact artifact_upserted = 11;
+    NodeOutcome node_outcome_upserted = 12;
   }
 }
 
@@ -167,6 +170,8 @@ message GetSnapshotResponse {
   repeated AttentionSummary attention = 5;
   uint64 last_sequence = 6;
   uint64 minimum_available_sequence = 7 [(buf.validate.field).uint64.gte = 1];
+  repeated Artifact artifacts = 8;
+  repeated NodeOutcome node_outcomes = 9;
 }
 
 message WatchEventsRequest {

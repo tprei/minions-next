@@ -282,6 +282,25 @@ class DefaultSqliteSchedulerStore implements SchedulerStore {
   }
 }
 
+function normalizedOutcomePredicate(parentAlias: string, outcomeAlias: string): string {
+  return `(
+    (${outcomeAlias}.outcome_kind = 'artifact'
+      AND ${parentAlias}.outcome_kind = 'artifact'
+      AND ${parentAlias}.outcome_artifact_id = ${outcomeAlias}.artifact_id)
+    OR
+    (${outcomeAlias}.outcome_kind = 'commit'
+      AND ${parentAlias}.outcome_kind = 'commit'
+      AND ${parentAlias}.outcome_commit = ${outcomeAlias}.revision
+      AND ${parentAlias}.outcome_evidence_id = ${outcomeAlias}.evidence_id
+      AND ${parentAlias}.outcome_explanation IS NULL)
+    OR
+    (${outcomeAlias}.outcome_kind = 'no_change'
+      AND ${parentAlias}.outcome_kind = 'no_change'
+      AND ${parentAlias}.outcome_evidence_id = ${outcomeAlias}.evidence_id
+      AND ${parentAlias}.outcome_explanation = ${outcomeAlias}.explanation)
+  )`;
+}
+
 function selectEligibleNode(
   transaction: SqliteTransaction,
   maxActiveGlobal: number,
@@ -299,6 +318,18 @@ function selectEligibleNode(
         AND n.plan_revision_id = t.active_plan_revision_id
         AND t.archived_at_ms IS NULL
         AND r.archived_at_ms IS NULL
+        AND (
+          n.parent_node_id = t.root_node_id
+          OR EXISTS (
+            SELECT 1
+              FROM nodes parent
+              JOIN node_outcome_records outcome ON outcome.node_id = parent.id
+             WHERE parent.id = n.parent_node_id
+               AND parent.tree_id = n.tree_id
+               AND parent.state_kind = 'succeeded'
+               AND ${normalizedOutcomePredicate("parent", "outcome")}
+          )
+        )
         AND p.state_kind = 'approved'
         AND (SELECT count(*) FROM scheduler_leases l WHERE l.state_kind = 'active') < ?
         AND (
@@ -330,6 +361,7 @@ function projectReadyChildren(transaction: SqliteTransaction, at: number): void 
           SELECT 1
             FROM nodes parent
             JOIN trees tree ON tree.id = nodes.tree_id
+            JOIN node_outcome_records outcome ON outcome.node_id = parent.id
             JOIN repositories repository ON repository.id = nodes.repository_id
             JOIN plan_revisions revision
               ON revision.tree_id = tree.id
@@ -337,6 +369,7 @@ function projectReadyChildren(transaction: SqliteTransaction, at: number): void 
            WHERE parent.id = nodes.parent_node_id
              AND parent.tree_id = nodes.tree_id
              AND parent.state_kind = 'succeeded'
+             AND ${normalizedOutcomePredicate("parent", "outcome")}
              AND nodes.plan_revision_id = tree.active_plan_revision_id
              AND tree.archived_at_ms IS NULL
              AND repository.archived_at_ms IS NULL

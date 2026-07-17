@@ -1,0 +1,166 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+service ArtifactService {
+  rpc CreateArtifact(CreateArtifactRequest) returns (CreateArtifactResponse);
+  rpc GetArtifact(GetArtifactRequest) returns (GetArtifactResponse);
+  rpc ReadArtifact(ReadArtifactRequest) returns (ReadArtifactResponse);
+  rpc ListArtifacts(ListArtifactsRequest) returns (ListArtifactsResponse);
+  rpc RecordNodeOutcome(RecordNodeOutcomeRequest) returns (RecordNodeOutcomeResponse);
+  rpc GetNodeOutcome(GetNodeOutcomeRequest) returns (GetNodeOutcomeResponse);
+}
+
+enum ArtifactRetention {
+  ARTIFACT_RETENTION_UNSPECIFIED = 0;
+  ARTIFACT_RETENTION_ACTIVE = 1;
+  ARTIFACT_RETENTION_ARCHIVED = 2;
+  ARTIFACT_RETENTION_PURGE_PENDING = 3;
+}
+
+message Artifact {
+  string artifact_id = 1 [(buf.validate.field).string.uuid = true];
+  string node_id = 2 [(buf.validate.field).string.uuid = true];
+  optional string attempt_id = 3 [(buf.validate.field).string.uuid = true];
+  string tree_id = 4 [(buf.validate.field).string.uuid = true];
+  string repository_id = 5 [(buf.validate.field).string.uuid = true];
+  string host_id = 6 [(buf.validate.field).string.uuid = true];
+  string content_digest = 7 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  uint64 size_bytes = 8;
+  string media_type = 9 [(buf.validate.field).string = {min_len: 1}];
+  string artifact_type = 10 [(buf.validate.field).string = {min_len: 1}];
+  string evidence_id = 11 [(buf.validate.field).string.uuid = true];
+  ArtifactRetention retention = 12 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Timestamp created_at = 13 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp verified_at = 14 [(buf.validate.field).required = true];
+}
+message PersistArtifactCommand {
+  string artifact_id = 1 [(buf.validate.field).string.uuid = true];
+  string node_id = 2 [(buf.validate.field).string.uuid = true];
+  optional string attempt_id = 3 [(buf.validate.field).string.uuid = true];
+  string media_type = 4 [(buf.validate.field).string = {min_len: 1}];
+  string artifact_type = 5 [(buf.validate.field).string = {min_len: 1}];
+  string evidence_id = 6 [(buf.validate.field).string.uuid = true];
+  ArtifactRetention retention = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string content_digest = 8 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  uint64 size_bytes = 9;
+  string relative_path = 10 [(buf.validate.field).string = {min_len: 1}];
+  google.protobuf.Timestamp verified_at = 11 [(buf.validate.field).required = true];
+}
+
+message ArtifactOutcome {
+  string artifact_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message NoChangeOutcome {
+  string revision = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"];
+  string evidence_id = 2 [(buf.validate.field).string.uuid = true];
+  string explanation = 3 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message CommitOutcome {
+  string revision = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"];
+  string evidence_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message NodeOutcome {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    ArtifactOutcome artifact = 2;
+    NoChangeOutcome no_change = 3;
+    CommitOutcome commit = 4;
+  }
+  google.protobuf.Timestamp created_at = 5 [(buf.validate.field).required = true];
+}
+
+message CreateArtifactRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string artifact_id = 3 [(buf.validate.field).string.uuid = true];
+  string node_id = 4 [(buf.validate.field).string.uuid = true];
+  optional string attempt_id = 5 [(buf.validate.field).string.uuid = true];
+  optional uint64 expected_node_version = 6;
+  string media_type = 7 [(buf.validate.field).string = {min_len: 1}];
+  string artifact_type = 8 [(buf.validate.field).string = {min_len: 1}];
+  string evidence_id = 9 [(buf.validate.field).string.uuid = true];
+  ArtifactRetention retention = 10 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  bytes content = 11 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 67108864
+  }];
+}
+
+message CreateArtifactResponse {
+  Artifact artifact = 1 [(buf.validate.field).required = true];
+}
+
+message GetArtifactRequest {
+  string artifact_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetArtifactResponse {
+  Artifact artifact = 1 [(buf.validate.field).required = true];
+}
+
+message ReadArtifactRequest {
+  string artifact_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message ReadArtifactResponse {
+  Artifact artifact = 1 [(buf.validate.field).required = true];
+  bytes content = 2 [(buf.validate.field).bytes = {min_len: 1}];
+}
+
+message ListArtifactsRequest {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  optional string after_artifact_id = 2 [(buf.validate.field).string.uuid = true];
+  uint32 page_size = 3 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 200
+  }];
+}
+
+message ListArtifactsResponse {
+  repeated Artifact artifacts = 1;
+  optional string next_artifact_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message RecordNodeOutcomeRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string node_id = 3 [(buf.validate.field).string.uuid = true];
+  uint64 expected_node_version = 4;
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+
+    ArtifactOutcome artifact = 5;
+    NoChangeOutcome no_change = 6;
+    CommitOutcome commit = 7;
+  }
+}
+
+message RecordNodeOutcomeResponse {
+  NodeOutcome outcome = 1 [(buf.validate.field).required = true];
+}
+
+message GetNodeOutcomeRequest {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetNodeOutcomeResponse {
+  NodeOutcome outcome = 1 [(buf.validate.field).required = true];
+}

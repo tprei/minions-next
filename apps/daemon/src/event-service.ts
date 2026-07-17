@@ -20,8 +20,12 @@ import type {
 } from "@minions/adapters";
 import {
   AggregateKind,
+  ArtifactOutcomeSchema,
+  ArtifactRetention,
+  ArtifactSchema,
   AttentionKind,
   AttentionSummarySchema,
+  CommitOutcomeSchema,
   decodeProjectionChange,
   ErrorDetailSchema,
   EventCursorExpiredSchema,
@@ -29,8 +33,10 @@ import {
   EventService,
   GetSnapshotResponseSchema,
   HostSummarySchema,
+  NodeOutcomeSchema,
   NodeState,
   NodeSummarySchema,
+  NoChangeOutcomeSchema,
   ProjectionChangeSchema,
   RepositorySummarySchema,
   TreeState,
@@ -124,6 +130,8 @@ function createSnapshotResponse(snapshot: SqliteEventSnapshot) {
     trees: snapshot.trees.map(toTreeSummary),
     nodes: snapshot.nodes.map(toNodeSummary),
     attention: snapshot.attention.map(toAttentionSummary),
+    artifacts: snapshot.artifacts.map(toArtifact),
+    nodeOutcomes: snapshot.nodeOutcomes.map(toNodeOutcome),
     lastSequence: snapshot.lastSequence,
     minimumAvailableSequence: snapshot.minimumAvailableSequence,
   });
@@ -208,6 +216,68 @@ function toAttentionSummary(summary: SqliteAttentionSummary) {
     kind: toAttentionKind(summary.kind),
     evidenceId: summary.evidenceId,
   });
+}
+
+function toArtifact(artifact: SqliteEventSnapshot["artifacts"][number]) {
+  return create(ArtifactSchema, {
+    artifactId: artifact.id,
+    nodeId: artifact.nodeId,
+    ...(artifact.attemptId === undefined ? {} : { attemptId: artifact.attemptId }),
+    treeId: artifact.treeId,
+    repositoryId: artifact.repositoryId,
+    hostId: artifact.hostId,
+    contentDigest: artifact.contentDigest,
+    sizeBytes: artifact.sizeBytes,
+    mediaType: artifact.mediaType,
+    artifactType: artifact.artifactType,
+    evidenceId: artifact.evidenceId,
+    retention: toArtifactRetention(artifact.retentionKind),
+    createdAt: timestampFromMilliseconds(artifact.createdAtMs),
+    verifiedAt: timestampFromMilliseconds(artifact.verifiedAtMs),
+  });
+}
+
+function toNodeOutcome(outcome: SqliteEventSnapshot["nodeOutcomes"][number]) {
+  const encoded =
+    outcome.kind === "artifact"
+      ? {
+          case: "artifact" as const,
+          value: create(ArtifactOutcomeSchema, { artifactId: outcome.artifactId }),
+        }
+      : outcome.kind === "no_change"
+        ? {
+            case: "noChange" as const,
+            value: create(NoChangeOutcomeSchema, {
+              revision: outcome.revision,
+              evidenceId: outcome.evidenceId,
+              explanation: outcome.explanation,
+            }),
+          }
+        : {
+            case: "commit" as const,
+            value: create(CommitOutcomeSchema, {
+              revision: outcome.revision,
+              evidenceId: outcome.evidenceId,
+            }),
+          };
+  return create(NodeOutcomeSchema, {
+    nodeId: outcome.nodeId,
+    outcome: encoded,
+    createdAt: timestampFromMilliseconds(outcome.createdAtMs),
+  });
+}
+
+function toArtifactRetention(retention: string): ArtifactRetention {
+  switch (retention) {
+    case "active":
+      return ArtifactRetention.ACTIVE;
+    case "archived":
+      return ArtifactRetention.ARCHIVED;
+    case "purge_pending":
+      return ArtifactRetention.PURGE_PENDING;
+    default:
+      throw new ConnectError("stored artifact retention is not supported", Code.Internal);
+  }
 }
 
 function toAggregateKind(kind: string): AggregateKind {

@@ -7,8 +7,10 @@ import { join, resolve } from "node:path";
 import {
   acquireLifecycleLock,
   createEventCommitWaiter,
+  createFileContentBlobStore,
   createPlanRegistry,
   createRepositoryRegistry,
+  createSqliteArtifactRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
   createSecureIdGenerator,
@@ -43,7 +45,10 @@ import {
 import {
   hostId,
   timestampFromEpochMilliseconds,
+  type ArtifactRegistry,
   type Clock,
+  type ContentBlobStore,
+  type ContentHash,
   type HostId,
   type IdGenerator,
   type SteeringCommandStore,
@@ -52,6 +57,29 @@ import {
 
 import type { StructuredLogger } from "./logger.js";
 import { startDaemonServer, type RunningDaemonServer } from "./server.js";
+
+export type DaemonStartupErrorCode = "blob_reconciliation_failed";
+
+export class DaemonStartupError extends Error {
+  readonly code: DaemonStartupErrorCode;
+  readonly missingDigests: readonly ContentHash[];
+  readonly corruptDigests: readonly ContentHash[];
+
+  constructor(
+    missingDigests: readonly ContentHash[],
+    corruptDigests: readonly ContentHash[],
+    options?: ErrorOptions,
+  ) {
+    super(
+      `content blob reconciliation failed (missing: ${missingDigests.join(", ") || "none"}; corrupt: ${corruptDigests.join(", ") || "none"})`,
+      options,
+    );
+    this.name = "DaemonStartupError";
+    this.code = "blob_reconciliation_failed";
+    this.missingDigests = Object.freeze([...missingDigests]);
+    this.corruptDigests = Object.freeze([...corruptDigests]);
+  }
+}
 
 export type DaemonRuntimeOptions = Readonly<{
   home: string;
@@ -98,6 +126,8 @@ export async function startDaemonRuntime(
   let repositoryRegistry: RepositoryRegistry | undefined;
   let planRegistry: PlanRegistry | undefined;
   let steeringStore: SteeringCommandStore | undefined;
+  let artifactRegistry: ArtifactRegistry | undefined;
+  let blobStore: ContentBlobStore | undefined;
   let localHostId: HostId | undefined;
   let server: RunningDaemonServer | undefined;
 
@@ -144,6 +174,16 @@ export async function startDaemonRuntime(
         ports: { clock: options.clock, ids: options.ids },
         notifier: eventWaiter,
       });
+      blobStore = createFileContentBlobStore({
+        rootPath: join(hostDirectory, "blobs"),
+        clock: options.clock,
+        ids: options.ids,
+      });
+      artifactRegistry = createSqliteArtifactRegistry({
+        database: hostDatabase,
+        commandStore,
+        hostId: activeHostId,
+      });
       steeringStore = createSqliteSteeringCommandStore({
         database: hostDatabase,
         commandStore,
@@ -161,6 +201,15 @@ export async function startDaemonRuntime(
       });
     }
     options.signal?.throwIfAborted();
+    if (options.mode !== "supervisor") {
+      const reconciliation = await requireBlobStore(blobStore).reconcile(
+        requireArtifactRegistry(artifactRegistry).expectedBlobs(),
+      );
+      if (reconciliation.missingDigests.length > 0 || reconciliation.corruptDigests.length > 0) {
+        throw new DaemonStartupError(reconciliation.missingDigests, reconciliation.corruptDigests);
+      }
+      options.signal?.throwIfAborted();
+    }
 
     const health = createHealth(lifecycle, localHostId, startedAt);
     const runDoctor = createDoctor({
@@ -182,6 +231,8 @@ export async function startDaemonRuntime(
         planRegistry: requirePlanRegistry(planRegistry),
         clock: options.clock,
         steeringStore: requireSteeringStore(steeringStore),
+        artifactRegistry: requireArtifactRegistry(artifactRegistry),
+        blobStore: requireBlobStore(blobStore),
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -200,6 +251,8 @@ export async function startDaemonRuntime(
         planRegistry: requirePlanRegistry(planRegistry),
         clock: options.clock,
         steeringStore: requireSteeringStore(steeringStore),
+        artifactRegistry: requireArtifactRegistry(artifactRegistry),
+        blobStore: requireBlobStore(blobStore),
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -610,6 +663,20 @@ function requireSteeringStore(value: SteeringCommandStore | undefined): Steering
 function requirePlanRegistry(value: PlanRegistry | undefined): PlanRegistry {
   if (value === undefined) {
     throw new Error("plan registry is not initialized");
+  }
+  return value;
+}
+
+function requireArtifactRegistry(value: ArtifactRegistry | undefined): ArtifactRegistry {
+  if (value === undefined) {
+    throw new Error("artifact registry is not initialized");
+  }
+  return value;
+}
+
+function requireBlobStore(value: ContentBlobStore | undefined): ContentBlobStore {
+  if (value === undefined) {
+    throw new Error("content blob store is not initialized");
   }
   return value;
 }

@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import {
@@ -9,7 +9,7 @@ import {
   type SupervisorHostRegistry,
   type RepositoryRegistry,
 } from "@minions/adapters";
-
+import { createContextValues, type Interceptor } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { createValidateInterceptor } from "@connectrpc/validate";
 import {
@@ -17,9 +17,14 @@ import {
   type GetHealthResponse,
   type RunDoctorResponse,
 } from "@minions/contracts";
-import type { Clock, SteeringCommandStore } from "@minions/core";
-
+import type {
+  ArtifactRegistry,
+  Clock,
+  ContentBlobStore,
+  SteeringCommandStore,
+} from "@minions/core";
 import { createErrorDetailInterceptor } from "./error-detail-interceptor.js";
+import { registerArtifactService } from "./artifact-service.js";
 import { registerEventService } from "./event-service.js";
 import { registerHostService } from "./host-service.js";
 import { registerRepositoryService } from "./repository-service.js";
@@ -55,6 +60,8 @@ export type DaemonServerOptions =
         planRegistry: PlanRegistry;
         clock: Clock;
         steeringStore: SteeringCommandStore;
+        artifactRegistry: ArtifactRegistry;
+        blobStore: ContentBlobStore;
         repository?: DaemonRepositoryOptions;
       }>)
   | (BaseDaemonServerOptions &
@@ -71,6 +78,8 @@ export type DaemonServerOptions =
         planRegistry: PlanRegistry;
         clock: Clock;
         steeringStore: SteeringCommandStore;
+        artifactRegistry: ArtifactRegistry;
+        blobStore: ContentBlobStore;
         repository?: DaemonRepositoryOptions;
         hostRegistry: SupervisorHostRegistry;
       }>);
@@ -84,13 +93,30 @@ export type RunningDaemonServer = Readonly<{
 export async function startDaemonServer(
   options: DaemonServerOptions,
 ): Promise<RunningDaemonServer> {
+  const shutdownController = new AbortController();
+  const pendingBodyRequests = new Set<PendingBodyRequest>();
+  const inFlightHandlers = new Set<Promise<unknown>>();
   const handler = connectNodeAdapter({
+    readMaxBytes: DAEMON_MESSAGE_MAX_BYTES,
+    writeMaxBytes: DAEMON_MESSAGE_MAX_BYTES,
+    jsonOptions: { ignoreUnknownFields: false },
+    shutdownSignal: shutdownController.signal,
+    contextValues: (request) =>
+      createContextValues().set(
+        isLoopbackContextKey,
+        isLoopbackAddress(request.socket.remoteAddress),
+      ),
     routes: (router) => {
       registerSystemService(router, {
         ...options.system,
         capabilities: capabilitiesForOptions(options),
       });
       if (options.mode !== "supervisor") {
+        registerArtifactService(router, {
+          registry: options.artifactRegistry,
+          blobStore: options.blobStore,
+          clock: options.clock,
+        });
         registerEventService(router, {
           store: createSqliteEventStore({ database: options.database }),
           waiter: options.eventWaiter,
@@ -116,9 +142,17 @@ export async function startDaemonServer(
       createErrorDetailInterceptor(),
       createUnknownFieldInterceptor(),
       createValidateInterceptor(),
+      createInFlightInterceptor(inFlightHandlers),
     ],
   });
-  const server = createServer(handler);
+  const server = createServer((request, response) => {
+    if (shutdownController.signal.aborted) {
+      request.destroy();
+      return;
+    }
+    trackPendingBodyRequest(request, pendingBodyRequests);
+    handler(request, response);
+  });
 
   await new Promise<void>((resolve, reject) => {
     const rejectOnError = (error: Error): void => {
@@ -137,23 +171,78 @@ export async function startDaemonServer(
     throw new Error("daemon server did not bind to a TCP address");
   }
 
+  let closePromise: Promise<void> | undefined;
   return {
     baseUrl: toBaseUrl(address),
     port: address.port,
-    close: async () => {
-      closeEventWaiter(options);
-      const { promise, resolve, reject } = Promise.withResolvers<undefined>();
-      server.close((error) => {
-        if (error === undefined) {
-          resolve(undefined);
-          return;
-        }
-        reject(error);
-      });
-      server.closeAllConnections();
-      await promise;
+    close: () => {
+      closePromise ??= (async () => {
+        shutdownController.abort();
+        closeEventWaiter(options);
+        abortPendingBodyRequests(pendingBodyRequests);
+        const { promise, resolve, reject } = Promise.withResolvers<undefined>();
+        server.close((error) => {
+          if (error === undefined) {
+            resolve(undefined);
+            return;
+          }
+          reject(error);
+        });
+        await promise;
+        await drainInFlightHandlers(inFlightHandlers);
+        server.closeIdleConnections();
+      })();
+      return closePromise;
     },
   };
+}
+
+type PendingBodyRequest = Readonly<{
+  request: IncomingMessage;
+}>;
+
+function trackPendingBodyRequest(
+  request: IncomingMessage,
+  pendingRequests: Set<PendingBodyRequest>,
+): void {
+  if (request.complete) {
+    return;
+  }
+  const pending = { request };
+  pendingRequests.add(pending);
+  const clear = (): void => {
+    pendingRequests.delete(pending);
+  };
+  request.once("end", clear);
+  request.once("close", clear);
+}
+
+function abortPendingBodyRequests(pendingRequests: ReadonlySet<PendingBodyRequest>): void {
+  for (const pending of pendingRequests) {
+    pending.request.destroy();
+  }
+}
+
+function createInFlightInterceptor(inFlight: Set<Promise<unknown>>): Interceptor {
+  return (next) => (request) => {
+    const promise = Promise.resolve().then(() => next(request));
+    inFlight.add(promise);
+    void promise.then(
+      () => {
+        inFlight.delete(promise);
+      },
+      () => {
+        inFlight.delete(promise);
+      },
+    );
+    return promise;
+  };
+}
+
+async function drainInFlightHandlers(inFlight: Set<Promise<unknown>>): Promise<void> {
+  while (inFlight.size > 0) {
+    await Promise.allSettled([...inFlight]);
+  }
 }
 
 function capabilitiesForOptions(options: DaemonServerOptions): readonly ServerCapability[] {
@@ -166,6 +255,7 @@ function capabilitiesForOptions(options: DaemonServerOptions): readonly ServerCa
       ServerCapability.EVENT_STREAM,
       ServerCapability.TREE_PLANNING,
       ServerCapability.STEERING,
+      ServerCapability.ARTIFACTS,
     );
     if (options.repository !== undefined) {
       capabilities.push(ServerCapability.REPOSITORY_REGISTRY);
@@ -176,6 +266,8 @@ function capabilitiesForOptions(options: DaemonServerOptions): readonly ServerCa
   }
   return Object.freeze(capabilities);
 }
+
+const DAEMON_MESSAGE_MAX_BYTES = 86 * 1024 * 1024;
 
 function closeEventWaiter(options: DaemonServerOptions): void {
   if (options.mode !== "supervisor") {

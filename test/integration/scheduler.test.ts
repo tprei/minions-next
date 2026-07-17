@@ -1,6 +1,7 @@
 import { create } from "@bufbuild/protobuf";
 import {
   ApprovePlanRequestSchema,
+  ArtifactOutputContractSchema,
   CreateTreeRequestSchema,
   ImplementationOutputContractSchema,
   PlanNodeMode,
@@ -57,11 +58,11 @@ const BASE_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const OWNER_A = schedulerOwnerId("scheduler-a");
 const OWNER_B = schedulerOwnerId("scheduler-b");
 const temporaries: TemporarySqliteDatabase[] = [];
-
 interface NodeSpec {
   readonly id: TaskNodeId;
   readonly parentNodeId: TaskNodeId;
   readonly objective: string;
+  readonly output?: Readonly<{ id: ArtifactId; type: string }>;
 }
 interface PlanSpec {
   readonly treeId: TaskTreeId;
@@ -96,10 +97,14 @@ interface Fixture {
 function uuid(seed: number): string {
   return `01900000-0000-7000-8000-${seed.toString(16).padStart(12, "0")}`;
 }
-
 function planSpec(
   seed: number,
-  children: readonly Readonly<{ offset: number; parentOffset?: number; objective?: string }>[],
+  children: readonly Readonly<{
+    offset: number;
+    parentOffset?: number;
+    objective?: string;
+    artifact?: Readonly<{ id: ArtifactId; type: string }>;
+  }>[],
   options: Readonly<{
     maxConcurrency?: number;
     maxAttemptsPerNode?: number;
@@ -118,6 +123,7 @@ function planSpec(
       id: taskNodeId(uuid(seed + child.offset)),
       parentNodeId: taskNodeId(uuid(seed + (child.parentOffset ?? 2))),
       objective: child.objective ?? `execute node ${String(child.offset)}`,
+      ...(child.artifact === undefined ? {} : { output: child.artifact }),
     })),
     maxConcurrency: options.maxConcurrency ?? 8,
     maxAttemptsPerNode: options.maxAttemptsPerNode ?? 2,
@@ -228,14 +234,23 @@ async function createFixture(): Promise<Fixture> {
             create(ProposedNodeSchema, {
               nodeId: node.id,
               parentNodeId: node.parentNodeId,
-              mode: PlanNodeMode.IMPLEMENTATION,
+              mode: node.output === undefined ? PlanNodeMode.IMPLEMENTATION : PlanNodeMode.EXPLORE,
               objective: node.objective,
               acceptanceCriteria: [`${node.objective} succeeds`],
               inputs: [],
-              outputContract: {
-                case: "implementation",
-                value: create(ImplementationOutputContractSchema, {}),
-              },
+              outputContract:
+                node.output === undefined
+                  ? {
+                      case: "implementation",
+                      value: create(ImplementationOutputContractSchema, {}),
+                    }
+                  : {
+                      case: "artifact",
+                      value: create(ArtifactOutputContractSchema, {
+                        artifactId: node.output.id,
+                        artifactType: node.output.type,
+                      }),
+                    },
               allowedRepositoryPaths: ["."],
               checkProfile: "scheduler-node",
             }),
@@ -293,14 +308,23 @@ async function createDraftPlan(fixture: Fixture, spec: PlanSpec): Promise<void> 
         create(ProposedNodeSchema, {
           nodeId: node.id,
           parentNodeId: node.parentNodeId,
-          mode: PlanNodeMode.IMPLEMENTATION,
+          mode: node.output === undefined ? PlanNodeMode.IMPLEMENTATION : PlanNodeMode.EXPLORE,
           objective: node.objective,
           acceptanceCriteria: [`${node.objective} succeeds`],
           inputs: [],
-          outputContract: {
-            case: "implementation",
-            value: create(ImplementationOutputContractSchema, {}),
-          },
+          outputContract:
+            node.output === undefined
+              ? {
+                  case: "implementation",
+                  value: create(ImplementationOutputContractSchema, {}),
+                }
+              : {
+                  case: "artifact",
+                  value: create(ArtifactOutputContractSchema, {
+                    artifactId: node.output.id,
+                    artifactType: node.output.type,
+                  }),
+                },
           allowedRepositoryPaths: ["."],
           checkProfile: "scheduler-node",
         }),
@@ -367,6 +391,12 @@ async function finishAttempt(
     );
     if (state === "succeeded") {
       transaction.run(
+        `INSERT INTO node_outcome_records (
+           node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+         ) VALUES (?, 'no_change', NULL, ?, ?, 'completed by integration fixture', ?)`,
+        [lease.nodeId, BASE_COMMIT, evidence, at],
+      );
+      transaction.run(
         `UPDATE nodes
             SET state_kind = 'succeeded', outcome_kind = 'no_change', outcome_evidence_id = ?,
                 outcome_explanation = 'completed by integration fixture', version = version + 1,
@@ -383,6 +413,104 @@ async function finishAttempt(
         [evidence, at, lease.nodeId],
       );
     }
+  });
+}
+
+type OutcomeKind = "artifact" | "no_change" | "commit";
+type ArtifactOutput = Readonly<{ id: ArtifactId; type: string }>;
+
+async function directSucceeded(
+  fixture: Fixture,
+  lease: SchedulerLease,
+  at: number,
+  outcomeKind: OutcomeKind | undefined,
+  artifact?: ArtifactOutput,
+): Promise<void> {
+  const evidence = evidenceId(uuid(0x210000 + Number(lease.fencingToken)));
+  await fixture.writable.write((transaction) => {
+    transaction.run(
+      "UPDATE attempts SET state_kind = 'succeeded', finished_at_ms = ?, evidence_id = ?, version = version + 1 WHERE id = ?",
+      [at, evidence, lease.attemptId],
+    );
+    if (outcomeKind === undefined) {
+      transaction.run(
+        `UPDATE nodes
+            SET state_kind = 'succeeded', outcome_kind = 'no_change', outcome_evidence_id = ?,
+                outcome_explanation = 'legacy direct success', version = version + 1,
+                updated_at_ms = ?
+          WHERE id = ?`,
+        [evidence, at, lease.nodeId],
+      );
+      return;
+    }
+    if (outcomeKind === "artifact") {
+      if (artifact === undefined) {
+        throw new Error("artifact outcome requires artifact metadata");
+      }
+      const digest = "a".repeat(64);
+      const relativePath = `sha256/${digest.slice(0, 2)}/${digest.slice(2, 4)}/${digest}`;
+      transaction.run(
+        `INSERT INTO content_blobs (
+           digest, size_bytes, media_type, relative_path, retention_kind, created_at_ms, verified_at_ms
+         ) VALUES (?, 0, 'application/octet-stream', ?, 'active', ?, ?)`,
+        [digest, relativePath, at, at],
+      );
+      transaction.run(
+        `INSERT INTO artifacts (
+           id, node_id, attempt_id, tree_id, repository_id, host_id, content_digest,
+           artifact_type, evidence_id, retention_kind, created_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+        [
+          artifact.id,
+          lease.nodeId,
+          lease.attemptId,
+          lease.treeId,
+          lease.repositoryId,
+          lease.hostId,
+          digest,
+          artifact.type,
+          evidence,
+          at,
+        ],
+      );
+      transaction.run(
+        `INSERT INTO node_outcome_records (
+           node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+         ) VALUES (?, 'artifact', ?, NULL, NULL, NULL, ?)`,
+        [lease.nodeId, artifact.id, at],
+      );
+      transaction.run(
+        `UPDATE nodes
+            SET state_kind = 'succeeded', outcome_kind = 'artifact',
+                outcome_artifact_id = ?, outcome_content_hash = ?, outcome_artifact_type = ?,
+                outcome_evidence_id = ?, version = version + 1, updated_at_ms = ?
+          WHERE id = ?`,
+        [artifact.id, digest, artifact.type, evidence, at, lease.nodeId],
+      );
+      return;
+    }
+    const explanation = outcomeKind === "no_change" ? "normalized no-change success" : null;
+    transaction.run(
+      `INSERT INTO node_outcome_records (
+         node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+       ) VALUES (?, ?, NULL, ?, ?, ?, ?)`,
+      [lease.nodeId, outcomeKind, BASE_COMMIT, evidence, explanation, at],
+    );
+    transaction.run(
+      `UPDATE nodes
+          SET state_kind = 'succeeded', outcome_kind = ?, outcome_commit = ?,
+              outcome_evidence_id = ?, outcome_explanation = ?, version = version + 1,
+              updated_at_ms = ?
+        WHERE id = ?`,
+      [
+        outcomeKind,
+        outcomeKind === "commit" ? BASE_COMMIT : null,
+        evidence,
+        explanation,
+        at,
+        lease.nodeId,
+      ],
+    );
   });
 }
 
@@ -410,7 +538,6 @@ describe("SQLite scheduler leases", () => {
     const plan = await fixture.addPlan(planSpec(0x1000, [{ offset: 10 }]));
     const first = scheduler(fixture, 0x300000);
     const second = scheduler(fixture, 0x310000);
-
     const [a, b] = await Promise.all([
       first.claimNext(claimRequest(OWNER_A, START + 10)),
       second.claimNext(claimRequest(OWNER_B, START + 10)),
@@ -494,6 +621,129 @@ describe("SQLite scheduler leases", () => {
     ).toEqual({
       state_kind: "active",
     });
+  });
+
+  it.each(["artifact", "no_change", "commit"] as const)(
+    "readies a child for a normalized %s parent outcome",
+    async (outcomeKind) => {
+      const fixture = await createFixture();
+      const artifact =
+        outcomeKind === "artifact"
+          ? { id: artifactId(uuid(0x220000)), type: "scheduler/artifact" }
+          : undefined;
+      const plan = await fixture.addPlan(
+        planSpec(0x4100, [
+          { offset: 10, ...(artifact === undefined ? {} : { artifact }) },
+          { offset: 11, parentOffset: 10 },
+        ]),
+      );
+      if (artifact !== undefined) {
+        await fixture.writable.write((transaction) => {
+          transaction.run(
+            "UPDATE nodes SET state_kind = 'ready', version = version + 1, updated_at_ms = ? WHERE id = ?",
+            [START + 41, nodeId(plan, 0)],
+          );
+        });
+      }
+      const store = scheduler(fixture, 0x331000);
+      const parent = requireLease(await store.claimNext(claimRequest(OWNER_A, START + 42)));
+      expect(parent.nodeId).toBe(nodeId(plan, 0));
+      await directSucceeded(fixture, parent, START + 43, outcomeKind, artifact);
+
+      const child = await store.claimNext(claimRequest(OWNER_A, START + 44));
+      expect(child?.nodeId).toBe(nodeId(plan, 1));
+      expect(
+        row(fixture.database, "SELECT state_kind FROM nodes WHERE id = ?", [nodeId(plan, 1)]),
+      ).toEqual({
+        state_kind: "active",
+      });
+    },
+  );
+
+  it("does not ready or claim a child for a legacy parent success or an unrelated sibling outcome", async () => {
+    const fixture = await createFixture();
+    const plan = await fixture.addPlan(
+      planSpec(0x4200, [{ offset: 10 }, { offset: 11, parentOffset: 10 }, { offset: 12 }]),
+    );
+    const store = scheduler(fixture, 0x332000);
+    const parent = requireLease(await store.claimNext(claimRequest(OWNER_A, START + 45)));
+    expect(parent.nodeId).toBe(nodeId(plan, 0));
+    const sibling = requireLease(await store.claimNext(claimRequest(OWNER_B, START + 45)));
+    expect(sibling.nodeId).toBe(nodeId(plan, 2));
+    await expect(directSucceeded(fixture, parent, START + 46, undefined)).rejects.toThrow();
+    await directSucceeded(fixture, sibling, START + 46, "no_change");
+
+    expect(await store.claimNext(claimRequest(OWNER_A, START + 47))).toBeUndefined();
+    expect(
+      row(fixture.database, "SELECT state_kind FROM nodes WHERE id = ?", [nodeId(plan, 1)]),
+    ).toEqual({
+      state_kind: "planned",
+    });
+    await fixture.writable.write((transaction) => {
+      transaction.run(
+        "UPDATE nodes SET state_kind = 'ready', version = version + 1, updated_at_ms = ? WHERE id = ?",
+        [START + 48, nodeId(plan, 1)],
+      );
+    });
+    expect(await store.claimNext(claimRequest(OWNER_A, START + 49))).toBeUndefined();
+    expect(
+      row(fixture.database, "SELECT state_kind FROM nodes WHERE id = ?", [nodeId(plan, 1)]),
+    ).toEqual({
+      state_kind: "ready",
+    });
+    expect(
+      row(
+        fixture.database,
+        "SELECT count(*) AS count FROM node_outcome_records WHERE node_id = ?",
+        [parent.nodeId],
+      ),
+    ).toEqual({
+      count: 0n,
+    });
+  });
+
+  it("rejects direct node success when normalized outcome metadata does not match", async () => {
+    const fixture = await createFixture();
+    const plan = await fixture.addPlan(planSpec(0x4300, [{ offset: 10 }]));
+    const store = scheduler(fixture, 0x333000);
+    const parent = requireLease(await store.claimNext(claimRequest(OWNER_A, START + 48)));
+    expect(parent.nodeId).toBe(nodeId(plan, 0));
+    const normalizedEvidence = evidenceId(uuid(0x230000));
+    const mismatchedEvidence = evidenceId(uuid(0x230001));
+
+    await expect(
+      fixture.writable.write((transaction) => {
+        transaction.run(
+          `INSERT INTO node_outcome_records (
+             node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+           ) VALUES (?, 'no_change', NULL, ?, ?, ?, ?)`,
+          [parent.nodeId, BASE_COMMIT, normalizedEvidence, "normalized", START + 49],
+        );
+        transaction.run(
+          `UPDATE nodes
+              SET state_kind = 'succeeded', outcome_kind = 'no_change',
+                  outcome_evidence_id = ?, outcome_explanation = ?, version = version + 1,
+                  updated_at_ms = ?
+            WHERE id = ?`,
+          [mismatchedEvidence, "normalized", START + 49, parent.nodeId],
+        );
+      }),
+    ).rejects.toThrow();
+    expect(
+      row(fixture.database, "SELECT state_kind, outcome_kind FROM nodes WHERE id = ?", [
+        parent.nodeId,
+      ]),
+    ).toEqual({
+      state_kind: "active",
+      outcome_kind: null,
+    });
+    expect(
+      row(
+        fixture.database,
+        "SELECT count(*) AS count FROM node_outcome_records WHERE node_id = ?",
+        [parent.nodeId],
+      ),
+    ).toEqual({ count: 0n });
   });
 
   it("blocks descendants after parent expiry failure while an unrelated sibling continues", async () => {
@@ -593,35 +843,7 @@ describe("SQLite scheduler leases", () => {
     const spec = planSpec(0xc000, [{ offset: 10 }]);
     await createDraftPlan(fixture, spec);
     const plan: ApprovedPlan = { spec, nodeIds: spec.children.map((node) => node.id) };
-    const rootEvidence = evidenceId(uuid(0xc010));
-    await fixture.writable.write((transaction) => {
-      transaction.run(
-        `UPDATE nodes
-            SET state_kind = 'succeeded', outcome_kind = 'artifact',
-                outcome_artifact_id = ?, outcome_content_hash = ?, outcome_artifact_type = 'plan',
-                outcome_evidence_id = ?, version = version + 1, updated_at_ms = ?
-          WHERE id = ?`,
-        [spec.rootArtifactId, "a".repeat(64), rootEvidence, START + 1, spec.rootNodeId],
-      );
-    });
     const store = scheduler(fixture, 0x3a0000);
-    expect(await store.claimNext(claimRequest(OWNER_A, START + 3))).toBeUndefined();
-    expect(
-      row(fixture.database, "SELECT state_kind FROM nodes WHERE id = ?", [nodeId(plan, 0)]),
-    ).toEqual({
-      state_kind: "planned",
-    });
-    await fixture.writable.write((transaction) => {
-      transaction.run(
-        `UPDATE nodes
-            SET state_kind = 'planned', outcome_kind = NULL, outcome_artifact_id = NULL,
-                outcome_content_hash = NULL, outcome_artifact_type = NULL, outcome_commit = NULL,
-                outcome_evidence_id = NULL, outcome_explanation = NULL, terminal_evidence_id = NULL,
-                version = version + 1, updated_at_ms = ?
-          WHERE id = ?`,
-        [START + 2, spec.rootNodeId],
-      );
-    });
     await fixture.registry.approve({
       request: create(ApprovePlanRequestSchema, {
         commandId: spec.approveCommandId,

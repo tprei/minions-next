@@ -48,8 +48,10 @@ import {
 } from "@minions/core";
 import {
   createEventCommitWaiter,
+  createFileContentBlobStore,
   createPlanRegistry,
   createRepositoryRegistry,
+  createSqliteArtifactRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
   type EventCommitWaiter,
@@ -60,6 +62,7 @@ import {
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { afterEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
 
 import { startDaemonServer, type RunningDaemonServer } from "@minions/daemon";
 
@@ -254,6 +257,16 @@ async function createFixture(): Promise<SteeringServiceFixture> {
     choices: ["yes", "no"],
     at: queueAt,
   });
+  const artifactRegistry = createSqliteArtifactRegistry({
+    database,
+    commandStore,
+    hostId: hostIdentifier,
+  });
+  const blobStore = createFileContentBlobStore({
+    rootPath: join(dirname(database.path), "blobs"),
+    clock,
+    ids: ports.ids,
+  });
   const server = await startDaemonServer({
     mode: "host",
     port: 0,
@@ -263,6 +276,8 @@ async function createFixture(): Promise<SteeringServiceFixture> {
     planRegistry,
     clock,
     steeringStore,
+    artifactRegistry,
+    blobStore,
     system: {
       serverVersion: "0.0.0",
       health,
