@@ -2,11 +2,13 @@ export * from "./attempt.js";
 export * from "./artifact.js";
 export * from "./command.js";
 export * from "./domain-error.js";
+export * from "./git.js";
 export * from "./harness.js";
 export * from "./ports.js";
 export * from "./repository.js";
 export * from "./scheduler.js";
 export * from "./steering.js";
+export * from "./workspace.js";
 export {
   isTerminalNode,
   transitionTaskNode,
