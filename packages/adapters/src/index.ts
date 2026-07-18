@@ -169,3 +169,21 @@ export {
   supervisorMigrations,
 } from "./sqlite/generated-migrations.js";
 export type { DatabaseKind, MigrationReceipt, SqliteMigration } from "./sqlite/migration.js";
+export {
+  createSandboxPolicyFingerprinter,
+  fingerprintSandboxPolicy,
+  SandboxPolicyError,
+  SandboxPolicyFingerprinter,
+  serializeSandboxPolicy,
+  validateSandboxPolicy,
+} from "./sandbox-policy.js";
+export type { SandboxPolicyErrorCode } from "./sandbox-policy.js";
+export {
+  createProductionSandboxLifecycle,
+  ProductionSandboxLifecycleError,
+} from "./sandbox-lifecycle.js";
+export type {
+  CreateProductionSandboxLifecycleOptions,
+  ProductionSandboxLifecycle,
+  ProductionSandboxLifecycleErrorCode,
+} from "./sandbox-lifecycle.js";
