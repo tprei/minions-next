@@ -70,6 +70,60 @@ export type SandboxCapabilitySet = Readonly<{
   supportedNetworkProfiles: readonly SandboxNetworkProfile[];
 }>;
 
+export type SandboxDenialCode =
+  | "backend_unavailable"
+  | "backend_unconfined"
+  | "policy_fingerprint_mismatch"
+  | "idempotency_conflict"
+  | "instance_not_found"
+  | "invalid_state"
+  | "invalid_policy"
+  | "absolute_host_path"
+  | "path_traversal"
+  | "symlink_escape"
+  | "sibling_workspace"
+  | "home_credentials"
+  | "control_socket"
+  | "device"
+  | "process_escape"
+  | "git_commit_blocked"
+  | "git_branch_blocked"
+  | "git_remote_blocked"
+  | "git_push_blocked"
+  | "git_fetch_blocked"
+  | "git_worktree_blocked"
+  | "git_credential_blocked"
+  | "network_private"
+  | "network_loopback"
+  | "network_link_local"
+  | "network_metadata"
+  | "network_host_denied"
+  | "read_only_mount"
+  | "mount_not_allowed"
+  | "executable_not_allowed"
+  | "output_limit"
+  | "timeout_limit"
+  | "resource_limit";
+
+export class SandboxDeniedError extends Error {
+  readonly code: SandboxDenialCode;
+  readonly operation: string;
+  readonly details: Readonly<Record<string, string | number>>;
+
+  constructor(
+    code: SandboxDenialCode,
+    operation: string,
+    message: string,
+    details: Readonly<Record<string, string | number>> = {},
+  ) {
+    super(message);
+    this.name = "SandboxDeniedError";
+    this.code = code;
+    this.operation = operation;
+    this.details = Object.freeze({ ...details });
+  }
+}
+
 export type SandboxCapabilityProbe =
   | Readonly<{
       available: true;
@@ -117,6 +171,29 @@ export type ExecuteSandboxRequest = Readonly<{
   timeoutMs: number;
   maxOutputBytes: number;
 }>;
+export type SandboxCommandKind = "generic" | "node" | "curl" | "git";
+
+export type SandboxValidatedCommand = Readonly<{
+  executable: string;
+  arguments: readonly string[];
+  kind: SandboxCommandKind;
+}>;
+
+export type SandboxCommandDenial = Readonly<{
+  code: SandboxDenialCode;
+  message: string;
+  details: Readonly<Record<string, string | number>>;
+}>;
+
+export type SandboxCommandValidationResult =
+  | Readonly<{
+      allowed: true;
+      command: SandboxValidatedCommand;
+    }>
+  | Readonly<{
+      allowed: false;
+      denial: SandboxCommandDenial;
+    }>;
 
 export type SandboxExecutionResult = Readonly<{
   exitCode: number;

@@ -19,6 +19,7 @@ describe("sandbox policy contract", () => {
       const report = await executeSandboxContract(lifecycle, fixture, fingerprinter);
 
       expect(report.scenarioCount).toBe(sandboxContractScenarios.length);
+      expect(report.results.filter((result) => !result.passed)).toEqual([]);
       expect(report.passed).toBe(true);
       expect(report.results).toHaveLength(sandboxContractScenarios.length);
       expect(report.results.every((result) => result.passed)).toBe(true);
