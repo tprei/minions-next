@@ -15,13 +15,31 @@ export { createSchedulerLoop } from "./scheduler.js";
 export type { CreateSchedulerLoopOptions } from "./scheduler.js";
 export { startDaemonServer } from "./server.js";
 export type { CreateStructuredLoggerOptions, StructuredLogger } from "./logger.js";
+export { DaemonStartupError, AuthRuntimeStartupError } from "./runtime.js";
 export type {
+  AuthBrokerRuntimeOptions,
+  AuthRuntimeStartupErrorCode,
   DaemonRuntimeOptions,
   DaemonStartupErrorCode,
+  RemoteAccessRuntimeOptions,
+  RunningAuthRuntime,
   RunningDaemonRuntime,
 } from "./runtime.js";
 export { DaemonStartupError } from "./runtime.js";
-export type { DaemonServerOptions, RunningDaemonServer } from "./server.js";
+export type {
+  DaemonServerOptions,
+  RemoteAccessServerOptions,
+  RunningDaemonServer,
+} from "./server.js";
+export { createDeviceSessionStore } from "./device-session-store.js";
+export type { DeviceSessionStore } from "./device-session-store.js";
+export {
+  createRemoteAccessInterceptor,
+  isLoopbackAddress,
+  isLoopbackContextKey,
+  PHONE_REMOTE_ACCESS_POLICY,
+} from "./remote-access-interceptor.js";
+export type { RemoteAccessPolicy } from "./remote-access-interceptor.js";
 
 export async function main(argv: readonly string[]): Promise<number> {
   const logger = createStructuredLogger({ stream: process.stderr, now: Date.now });

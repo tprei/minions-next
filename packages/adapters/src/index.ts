@@ -222,3 +222,51 @@ export type {
   OmpAcpAdapterErrorCode,
 } from "./omp-acp-adapter.js";
 export { decodeAcpFrame, normalizeAcpNotification } from "./omp-acp-adapter.js";
+export { CredentialVaultError, createCredentialVault } from "./credential-vault.js";
+export type {
+  CredentialVault,
+  CredentialVaultBackend,
+  CredentialVaultErrorCode,
+  CredentialVaultOptions,
+  CredentialVaultProbeResult,
+  SystemdCredsKeyMode,
+} from "./credential-vault.js";
+export {
+  AuthBrokerError,
+  createAuthBrokerManager,
+  parseJsonObject,
+  reserveLoopbackPort,
+  runOmp,
+  runOmpJson,
+} from "./auth-broker.js";
+export type {
+  AuthBrokerHealth,
+  AuthBrokerLogger,
+  AuthBrokerLoginOptions,
+  AuthBrokerManager,
+  AuthBrokerManagerOptions,
+  OmpJsonResult,
+} from "./auth-broker.js";
+export { AuthGatewayError, createAuthGatewayManager } from "./auth-gateway.js";
+export type {
+  AttemptCapability,
+  AuthGatewayHealth,
+  AuthGatewayLogger,
+  AuthGatewayManager,
+  AuthGatewayManagerOptions,
+} from "./auth-gateway.js";
+export {
+  defaultSecretPatterns,
+  redactObject,
+  redactSecrets,
+  scanForSecrets,
+} from "./secret-redaction.js";
+export type {
+  KnownSecret,
+  RedactOptions,
+  ScanOptions,
+  SecretPattern,
+  SecretScanHit,
+  SecretScanTarget,
+  SecretScanTargetKind,
+} from "./secret-redaction.js";

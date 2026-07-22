@@ -1,5 +1,7 @@
 import type { Writable } from "node:stream";
 
+import { redactObject } from "@minions/adapters";
+
 type LogLevel = "error" | "info" | "warn";
 type LogFields = Readonly<Record<string, unknown>>;
 
@@ -31,44 +33,31 @@ class JsonStructuredLogger implements StructuredLogger {
     if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
       throw new TypeError("log timestamp must be a non-negative safe integer");
     }
+    // Delegate redaction to the library `redactObject` so the daemon shares the
+    // same string-shape pass + secret-key coverage (`api_key`, `bearer`, …) as
+    // every other Minions surface. The library returns `unknown` (bigint and
+    // other non-JSON leaves pass through verbatim); cast for the spread and let
+    // the inline replacer below keep JSON.stringify from throwing on bigint.
+    const redactedFields = redactObject(fields) as Record<string, unknown>;
     const record = {
       timestamp_ms: timestamp,
       level,
       event,
-      ...redactObject(fields),
+      ...redactedFields,
     };
-    this.#options.stream.write(`${JSON.stringify(record)}\n`);
+    this.#options.stream.write(`${JSON.stringify(record, jsonReplacer)}\n`);
   }
 }
 
-function redactObject(value: object): Record<string, unknown> {
-  const redacted: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    redacted[key] = secretKeyPattern.test(key) ? "[REDACTED]" : redactValue(entry);
-  }
-  return redacted;
-}
-
-function redactValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(redactValue);
-  }
-  if (typeof value === "object" && value !== null) {
-    return redactObject(value);
-  }
-  if (typeof value === "bigint") {
-    return value.toString();
-  }
-  if (
-    value === null ||
-    typeof value === "boolean" ||
-    typeof value === "number" ||
-    typeof value === "string"
-  ) {
-    return value;
-  }
-  return typeof value;
+// `redactObject` returns `unknown`; bigint and other non-JSON leaves pass through
+// verbatim. JSON.stringify would throw on bigint, so coerce the unsafe leaves to
+// JSON-safe strings here (matches the prior local redactor's behaviour).
+function jsonReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "function") return "function";
+  if (typeof value === "symbol") return "symbol";
+  if (value === undefined) return "undefined";
+  return value;
 }
 
 const eventPattern = /^[a-z][a-z0-9_]*$/u;
-const secretKeyPattern = /authorization|cookie|credential|password|secret|token/iu;

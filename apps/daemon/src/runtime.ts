@@ -6,6 +6,11 @@ import { join, resolve } from "node:path";
 
 import {
   acquireLifecycleLock,
+  AuthBrokerError,
+  AuthGatewayError,
+  createAuthBrokerManager,
+  createAuthGatewayManager,
+  createCredentialVault,
   createEventCommitWaiter,
   createFileContentBlobStore,
   createPlanRegistry,
@@ -22,6 +27,9 @@ import {
   openSupervisorDatabase,
   SqliteDatabaseError,
   type AcquiredLifecycleLock,
+  type AuthBrokerManager,
+  type AuthGatewayManager,
+  type CredentialVault,
   type DaemonLifecycleRecord,
   type DaemonModeName,
   type EventCommitWaiter,
@@ -29,6 +37,7 @@ import {
   type PlanRegistry,
   type RepositoryRegistry,
   type SupervisorHostRegistry,
+  type SystemdCredsKeyMode,
 } from "@minions/adapters";
 import {
   DaemonMode,
@@ -58,7 +67,23 @@ import {
 import type { StructuredLogger } from "./logger.js";
 import { startDaemonServer, type RunningDaemonServer } from "./server.js";
 
-export type DaemonStartupErrorCode = "blob_reconciliation_failed";
+export type DaemonStartupErrorCode = "blob_reconciliation_failed" | "auth_runtime_failed";
+
+/**
+ * PR 19 auth-broker/gateway startup failure. Carries a stable `code` so the daemon
+ * start-failed log line distinguishes vault- unavailable from broker-spawn-failed.
+ */
+export class AuthRuntimeStartupError extends Error {
+  readonly code: AuthRuntimeStartupErrorCode;
+
+  constructor(code: AuthRuntimeStartupErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "AuthRuntimeStartupError";
+    this.code = code;
+  }
+}
+
+export type AuthRuntimeStartupErrorCode = "vault_unavailable" | "broker_failed" | "gateway_failed";
 
 export class DaemonStartupError extends Error {
   readonly code: DaemonStartupErrorCode;
@@ -92,6 +117,38 @@ export type DaemonRuntimeOptions = Readonly<{
   hostId?: HostId;
   displayName?: string;
   signal?: AbortSignal;
+  /**
+   * OPTIONAL per-host OMP auth-broker + auth-gateway startup ordering (PR 19).
+   * When enabled, the daemon boots the broker → gateway → harnesses sequence and
+   * recovers the control bearer noninteractively from the credential vault. If
+   * the vault backend is unavailable the daemon fails closed BEFORE accepting any
+   * harness session (acceptance 11: missing secure storage fails registration).
+   * When omitted/`enabled === false`, daemon behaviour is unchanged.
+   */
+  authBroker?: AuthBrokerRuntimeOptions;
+}>;
+
+export type AuthBrokerRuntimeOptions = Readonly<{
+  enabled: true;
+  /** Host identifier whose vault namespace holds the control bearer. */
+  hostId: HostId;
+  /** Absolute path to the `omp` executable. */
+  ompPath: string;
+  /** Optional vault store directory override (systemd-creds backend). */
+  vaultStoreDirectory?: string;
+  /** Optional override for the systemd-creds binary path (testing/diagnostics). */
+  vaultSystemdCredsPath?: string;
+  /** Optional `systemd-creds --with-key=` mode override (default `host`). */
+  vaultKeyMode?: SystemdCredsKeyMode;
+  /** Bind host for the broker + gateway loopback listeners (default 127.0.0.1). */
+  bindHost?: string;
+}>;
+
+/** Auth subsystem handles held by {@link startDaemonRuntime} for graceful close. */
+export type RunningAuthRuntime = Readonly<{
+  broker: AuthBrokerManager;
+  gateway: AuthGatewayManager;
+  close: () => Promise<void>;
 }>;
 
 export type RunningDaemonRuntime = Readonly<{
@@ -130,6 +187,10 @@ export async function startDaemonRuntime(
   let blobStore: ContentBlobStore | undefined;
   let localHostId: HostId | undefined;
   let server: RunningDaemonServer | undefined;
+  let authRuntime: RunningAuthRuntime | undefined;
+  let authVault: CredentialVault | undefined;
+  let authBrokerHealth: (() => Promise<unknown>) | undefined;
+  let authGatewayHealth: (() => Promise<unknown>) | undefined;
 
   try {
     options.signal?.throwIfAborted();
@@ -210,6 +271,118 @@ export async function startDaemonRuntime(
       options.signal?.throwIfAborted();
     }
 
+    options.signal?.throwIfAborted();
+    if (options.authBroker?.enabled) {
+      // PR 19: per-host broker → gateway → harnesses startup ordering. The vault
+      // must be available BEFORE we touch harness sessions — acceptance 11 fail-closed.
+      const authOptions = options.authBroker;
+      const vaultOptions: {
+        storeDirectory?: string;
+        systemdCredsPath?: string;
+        systemdCredsKeyMode?: SystemdCredsKeyMode;
+      } = {};
+      if (authOptions.vaultStoreDirectory !== undefined) {
+        vaultOptions.storeDirectory = authOptions.vaultStoreDirectory;
+      }
+      if (authOptions.vaultSystemdCredsPath !== undefined) {
+        vaultOptions.systemdCredsPath = authOptions.vaultSystemdCredsPath;
+      }
+      if (authOptions.vaultKeyMode !== undefined) {
+        vaultOptions.systemdCredsKeyMode = authOptions.vaultKeyMode;
+      }
+      const vault = createCredentialVault(authOptions.hostId, vaultOptions);
+      authVault = vault;
+      const probe = vault.probe();
+      if (!probe.available) {
+        throw new AuthRuntimeStartupError(
+          "vault_unavailable",
+          `credential vault unavailable for host ${authOptions.hostId}: ${probe.detail}`,
+        );
+      }
+      try {
+        const brokerOptions: {
+          ompPath: string;
+          hostId: HostId;
+          vault: CredentialVault;
+          readinessTimeoutMs: number;
+          bindHost?: string;
+        } = {
+          ompPath: authOptions.ompPath,
+          hostId: authOptions.hostId,
+          vault,
+          readinessTimeoutMs: 30_000,
+        };
+        if (authOptions.bindHost !== undefined) {
+          brokerOptions.bindHost = authOptions.bindHost;
+        }
+        const broker = createAuthBrokerManager(brokerOptions);
+        await broker.start();
+        options.logger.log("info", "auth_broker_started", {
+          host_id: authOptions.hostId,
+          endpoint: broker.endpoint,
+        });
+        const controlBearer = await vault.get("auth-broker.token");
+        const controlBearerText = new TextDecoder().decode(controlBearer);
+        const gatewayOptions: {
+          ompPath: string;
+          brokerEndpoint: string;
+          brokerControlToken: string;
+          readinessTimeoutMs: number;
+          bindHost?: string;
+        } = {
+          ompPath: authOptions.ompPath,
+          brokerEndpoint: broker.endpoint ?? "",
+          brokerControlToken: controlBearerText,
+          readinessTimeoutMs: 30_000,
+        };
+        if (authOptions.bindHost !== undefined) {
+          gatewayOptions.bindHost = authOptions.bindHost;
+        }
+        const gateway = createAuthGatewayManager(gatewayOptions);
+        try {
+          await gateway.start();
+        } catch (gatewayError) {
+          // Best-effort: stop the broker before propagating so we leave no orphan.
+          await broker.stop().catch(() => undefined);
+          throw gatewayError instanceof AuthGatewayError
+            ? new AuthRuntimeStartupError(
+                "gateway_failed",
+                `auth-gateway failed to start: ${gatewayError.message}`,
+                { cause: gatewayError },
+              )
+            : gatewayError;
+        }
+        options.logger.log("info", "auth_gateway_started", {
+          host_id: authOptions.hostId,
+          endpoint: gateway.endpoint,
+        });
+        authBrokerHealth = () => broker.health();
+        authGatewayHealth = () => gateway.health();
+        authRuntime = Object.freeze({
+          broker,
+          gateway,
+          close: () => Promise.all([gateway.stop(), broker.stop()]).then(() => undefined),
+        });
+        // F2: ensure the detached auth subprocesses are signaled when the daemon
+        // itself exits (hard crash, uncaught throw, or `process.exit` from a
+        // downstream library). `stop()` is async and cannot run inside the exit
+        // handler, so we register a one-shot SYNC SIGKILL of both process groups.
+        // Best-effort and idempotent at the process level.
+        registerAuthExitCleanup(authRuntime);
+      } catch (brokerError) {
+        if (brokerError instanceof AuthRuntimeStartupError) throw brokerError;
+        if (brokerError instanceof AuthBrokerError) {
+          throw new AuthRuntimeStartupError(
+            "broker_failed",
+            `auth-broker failed to start: ${brokerError.message}`,
+            { cause: brokerError },
+          );
+        }
+        throw brokerError;
+      }
+    }
+    options.signal?.throwIfAborted();
+
     const health = createHealth(lifecycle, localHostId, startedAt);
     const runDoctor = createDoctor({
       mode: options.mode,
@@ -218,7 +391,17 @@ export async function startDaemonRuntime(
       hostDatabase,
       registry: hostRegistry,
       hostId: localHostId,
+      authVault,
+      authBrokerHealth,
+      authGatewayHealth,
+      authEnabled: options.authBroker?.enabled ?? false,
     });
+
+    const remoteAccess =
+      options.remoteAccess?.enabled === true
+        ? { sessionStore: createDeviceSessionStore() }
+        : undefined;
+
     if (options.mode === "local") {
       server = await startDaemonServer({
         mode: "local",
@@ -293,6 +476,7 @@ export async function startDaemonRuntime(
           lock,
           logger: options.logger,
           instanceId: lifecycle.instanceId,
+          authRuntime,
         });
         return closePromise;
       },
@@ -309,6 +493,7 @@ export async function startDaemonRuntime(
         hostId: localHostId,
         observedAt: timestampFromEpochMilliseconds(options.clock.now()),
         lock,
+        authRuntime,
       });
     } catch (cleanupError) {
       failure = new AggregateError([error, cleanupError], "daemon startup and cleanup failed");
@@ -352,10 +537,15 @@ async function closeRuntime(
     lock: AcquiredLifecycleLock;
     logger: StructuredLogger;
     instanceId: string;
+    authRuntime: RunningAuthRuntime | undefined;
   }>,
 ): Promise<void> {
   const errors: unknown[] = [];
   await captureFailure(errors, async () => input.server.close());
+  if (input.authRuntime !== undefined) {
+    unregisterAuthExitCleanup(input.authRuntime);
+    await captureFailure(errors, input.authRuntime.close);
+  }
   if (input.registry !== undefined && input.hostId !== undefined) {
     await captureFailure(errors, async () =>
       input.registry?.markOffline(requireHostId(input.hostId), input.observedAt),
@@ -381,10 +571,14 @@ async function cleanupFailedStart(
     hostId: HostId | undefined;
     observedAt: Timestamp;
     lock: AcquiredLifecycleLock;
+    authRuntime: RunningAuthRuntime | undefined;
   }>,
 ): Promise<void> {
   const errors: unknown[] = [];
-  await captureFailure(errors, async () => input.server?.close());
+  if (input.authRuntime !== undefined) {
+    unregisterAuthExitCleanup(input.authRuntime);
+    await captureFailure(errors, input.authRuntime.close);
+  }
   if (input.registry !== undefined && input.hostId !== undefined) {
     await captureFailure(errors, async () =>
       input.registry?.markOffline(requireHostId(input.hostId), input.observedAt),
@@ -454,9 +648,13 @@ function createDoctor(
     hostDatabase: ManagedSqliteDatabase | undefined;
     registry: SupervisorHostRegistry | undefined;
     hostId: HostId | undefined;
+    authVault: CredentialVault | undefined;
+    authBrokerHealth: (() => Promise<unknown>) | undefined;
+    authGatewayHealth: (() => Promise<unknown>) | undefined;
+    authEnabled: boolean;
   }>,
 ): () => Promise<RunDoctorResponse> {
-  return () => {
+  return async () => {
     const probes: DoctorProbe[] = [probeLifecycle(input.lock)];
     if (input.mode !== "host") {
       probes.push(
@@ -474,12 +672,21 @@ function createDoctor(
     if (input.mode === "local") {
       probes.push(probeRegistration(requireRegistry(input.registry), requireHostId(input.hostId)));
     }
-    return Promise.resolve(
-      create(RunDoctorResponseSchema, {
-        status: aggregateDoctorStatus(probes),
-        checks: probes.map((probe) => probe.check),
-      }),
-    );
+    if (input.authEnabled) {
+      if (input.authVault !== undefined) {
+        probes.push(probeAuthVault(input.authVault));
+      }
+      if (input.authBrokerHealth !== undefined) {
+        probes.push(await probeAuthBroker(input.authBrokerHealth));
+      }
+      if (input.authGatewayHealth !== undefined) {
+        probes.push(await probeAuthGateway(input.authGatewayHealth));
+      }
+    }
+    return create(RunDoctorResponseSchema, {
+      status: aggregateDoctorStatus(probes),
+      checks: probes.map((probe) => probe.check),
+    });
   };
 }
 
@@ -527,6 +734,39 @@ function probeRegistration(registry: SupervisorHostRegistry, currentHostId: Host
       return doctorProbe(DoctorCheckKind.LOCAL_HOST_REGISTRATION, false, DoctorStatus.UNAVAILABLE);
     }
     throw error;
+  }
+}
+
+function probeAuthVault(vault: CredentialVault): DoctorProbe {
+  try {
+    const probe = vault.probe();
+    return doctorProbe(DoctorCheckKind.CREDENTIAL_VAULT, probe.available, DoctorStatus.UNAVAILABLE);
+  } catch {
+    return doctorProbe(DoctorCheckKind.CREDENTIAL_VAULT, false, DoctorStatus.UNAVAILABLE);
+  }
+}
+
+async function probeAuthBroker(health: () => Promise<unknown>): Promise<DoctorProbe> {
+  try {
+    const result = await health();
+    const ok =
+      typeof result === "object" && result !== null && "ok" in result ? result.ok === true : false;
+    return doctorProbe(DoctorCheckKind.AUTH_BROKER, ok, DoctorStatus.UNAVAILABLE);
+  } catch {
+    return doctorProbe(DoctorCheckKind.AUTH_BROKER, false, DoctorStatus.UNAVAILABLE);
+  }
+}
+
+async function probeAuthGateway(health: () => Promise<unknown>): Promise<DoctorProbe> {
+  try {
+    const result = await health();
+    const ok =
+      typeof result === "object" && result !== null && "ready" in result
+        ? result.ready === true
+        : false;
+    return doctorProbe(DoctorCheckKind.AUTH_GATEWAY, ok, DoctorStatus.UNAVAILABLE);
+  } catch {
+    return doctorProbe(DoctorCheckKind.AUTH_GATEWAY, false, DoctorStatus.UNAVAILABLE);
   }
 }
 
@@ -726,6 +966,44 @@ function errorCode(error: unknown): string {
     }
   }
   return "unknown_error";
+}
+
+// -------------------------------------------------------------------------------------------------
+// F2: process-level cleanup for detached auth subprocesses.
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Live auth runtimes whose broker/gateway process groups must be signaled when
+ * the daemon exits. The broker + gateway spawn with `detached: true` so the
+ * daemon can signal their whole process group; without this best-effort exit
+ * handler a hard crash (uncaught throw, OOM kill of a child leaving the daemon
+ * in a half-down state, or a downstream `process.exit`) would orphan them.
+ */
+const authExitCleanups = new Set<RunningAuthRuntime>();
+let authExitHandlerInstalled = false;
+
+function registerAuthExitCleanup(runtime: RunningAuthRuntime): void {
+  authExitCleanups.add(runtime);
+  if (authExitHandlerInstalled) return;
+  authExitHandlerInstalled = true;
+  process.on("exit", () => {
+    for (const entry of authExitCleanups) {
+      try {
+        entry.broker.killSync();
+      } catch {
+        // best-effort: keep going so we still signal the other subprocess
+      }
+      try {
+        entry.gateway.killSync();
+      } catch {
+        // best-effort
+      }
+    }
+  });
+}
+
+function unregisterAuthExitCleanup(runtime: RunningAuthRuntime): void {
+  authExitCleanups.delete(runtime);
 }
 
 const supervisorSchemaQueries = [
