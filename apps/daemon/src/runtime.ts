@@ -22,6 +22,7 @@ import {
   createSecureIdGenerator,
   createSupervisorHostRegistry,
   daemonLifecyclePath,
+  ensureJjCapability,
   HostRegistryError,
   inspectLifecycleLock,
   openHostDatabase,
@@ -35,6 +36,7 @@ import {
   type DaemonLifecycleRecord,
   type DaemonModeName,
   type EventCommitWaiter,
+  type JjCapabilityErrorCode,
   type ManagedSqliteDatabase,
   type PlanRegistry,
   type ProviderAdmissionProxy,
@@ -141,6 +143,27 @@ export type DaemonRuntimeOptions = Readonly<{
    * daemon behaviour is unchanged.
    */
   providerAdmission?: ProviderAdmissionRuntimeOptions;
+  /**
+   * OPTIONAL per-host engine-managed jj capability probe (PR 21 / GIT-14). When enabled, the
+   * daemon doctor runs {@link ensureJjCapability} against the host tools directory (downloading
+   * and digest-verifying the pinned jj binary on demand) and reports jj health. The probe is
+   * opt-in; omitted, daemon and doctor behaviour is unchanged. Node-start gating lands in a
+   * later PR — for PR 21 this only reports health via the doctor.
+   */
+  jjCapability?: JjCapabilityRuntimeOptions;
+  /**
+   * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing). When
+   * enabled, the daemon constructs a process-lifetime {@link DeviceSessionStore},
+   * shares it between the pairing RPCs and the remote-access interceptor, and binds
+   * every interface instead of loopback only (see `server.ts`'s `remoteAccess` doc for
+   * the full security model). Only meaningful for "local"/"host" mode, which is where
+   * the mutation RPCs a phone session gates actually live; ignored for "supervisor"
+   * mode. Omitted, daemon behaviour is unchanged (REMOTE-01's loopback-only default).
+   */
+  remoteAccess?: RemoteAccessRuntimeOptions;
+}>;
+export type RemoteAccessRuntimeOptions = Readonly<{
+  enabled: true;
 }>;
 export type ProviderAdmissionRuntimeOptions = Readonly<{
   enabled: true;
@@ -166,6 +189,12 @@ export type AuthBrokerRuntimeOptions = Readonly<{
   vaultKeyMode?: SystemdCredsKeyMode;
   /** Bind host for the broker + gateway loopback listeners (default 127.0.0.1). */
   bindHost?: string;
+}>;
+
+export type JjCapabilityRuntimeOptions = Readonly<{
+  enabled: true;
+  /** Absolute host-local directory the engine owns for the pinned jj tool install. */
+  toolsDirectory: string;
 }>;
 
 /** Auth subsystem handles held by {@link startDaemonRuntime} for graceful close. */
@@ -444,6 +473,9 @@ export async function startDaemonRuntime(
       authBrokerHealth,
       authGatewayHealth,
       authEnabled: options.authBroker?.enabled ?? false,
+      jjToolsDirectory: options.jjCapability?.enabled
+        ? options.jjCapability.toolsDirectory
+        : undefined,
     });
     if (options.mode === "local") {
       server = await startDaemonServer({
@@ -563,6 +595,8 @@ export function defaultRuntimeOptions(
     logger: StructuredLogger;
     hostId?: HostId;
     signal?: AbortSignal;
+    jjCapability?: JjCapabilityRuntimeOptions;
+    remoteAccess?: RemoteAccessRuntimeOptions;
   }>,
 ): DaemonRuntimeOptions {
   const clock: Clock = { now: () => timestampFromEpochMilliseconds(Date.now()) };
@@ -808,6 +842,7 @@ function createDoctor(
     authBrokerHealth: (() => Promise<unknown>) | undefined;
     authGatewayHealth: (() => Promise<unknown>) | undefined;
     authEnabled: boolean;
+    jjToolsDirectory: string | undefined;
   }>,
 ): () => Promise<RunDoctorResponse> {
   return async () => {
@@ -838,6 +873,9 @@ function createDoctor(
       if (input.authGatewayHealth !== undefined) {
         probes.push(await probeAuthGateway(input.authGatewayHealth));
       }
+    }
+    if (input.jjToolsDirectory !== undefined) {
+      probes.push(await probeJjCapability(input.jjToolsDirectory));
     }
     return create(RunDoctorResponseSchema, {
       status: aggregateDoctorStatus(probes),
@@ -923,6 +961,35 @@ async function probeAuthGateway(health: () => Promise<unknown>): Promise<DoctorP
     return doctorProbe(DoctorCheckKind.AUTH_GATEWAY, ok, DoctorStatus.UNAVAILABLE);
   } catch {
     return doctorProbe(DoctorCheckKind.AUTH_GATEWAY, false, DoctorStatus.UNAVAILABLE);
+  }
+}
+
+async function probeJjCapability(toolsDirectory: string): Promise<DoctorProbe> {
+  try {
+    const probe = await ensureJjCapability({ toolsDirectory });
+    if (probe.available) {
+      return doctorProbe(DoctorCheckKind.JJ_CAPABILITY, true, DoctorStatus.HEALTHY);
+    }
+    return doctorProbe(DoctorCheckKind.JJ_CAPABILITY, false, jjFailureStatus(probe.failureCode));
+  } catch {
+    return doctorProbe(DoctorCheckKind.JJ_CAPABILITY, false, DoctorStatus.UNAVAILABLE);
+  }
+}
+
+function jjFailureStatus(code: JjCapabilityErrorCode): DoctorStatus {
+  switch (code) {
+    case "corrupt_binary":
+      return DoctorStatus.CORRUPT;
+    case "digest_mismatch":
+    case "version_mismatch":
+    case "capability_missing":
+      return DoctorStatus.INCOMPATIBLE;
+    case "invalid_options":
+    case "download_failed":
+    case "extract_failed":
+    case "probe_failed":
+    case "filesystem_error":
+      return DoctorStatus.UNAVAILABLE;
   }
 }
 
