@@ -258,6 +258,12 @@ export type {
   AuthGatewayManager,
   AuthGatewayManagerOptions,
 } from "./auth-gateway.js";
+export { ProviderAdmissionError, createProviderAdmissionProxy } from "./provider-admission.js";
+export type {
+  ProviderAdmissionErrorCode,
+  ProviderAdmissionProxy,
+  ProviderAdmissionProxyOptions,
+} from "./provider-admission.js";
 export {
   defaultSecretPatterns,
   redactObject,
