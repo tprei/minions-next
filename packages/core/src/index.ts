@@ -4,6 +4,7 @@ export * from "./artifact.js";
 export * from "./command.js";
 export * from "./domain-error.js";
 export * from "./git.js";
+export * from "./vcs-backend.js";
 export * from "./harness.js";
 export * from "./ports.js";
 export * from "./repository.js";
