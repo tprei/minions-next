@@ -74,11 +74,12 @@ afterAll(() => {
 });
 
 function baseOptions(overrides: Partial<OmpAcpAdapterOptions> = {}): OmpAcpAdapterOptions {
-  if (ompPath === undefined) {
-    throw new Error("omp binary not available for live tests");
-  }
+  // Construction-validation tests (HAR-04 forbidden-tool rejection) don't spawn omp;
+  // use a fallback path so they pass on CI where omp isn't installed. Tests that
+  // actually spawn omp are gated by `it.runIf(live)`.
+  const resolvedOmpPath = ompPath ?? "/usr/local/bin/omp";
   return {
-    ompPath,
+    ompPath: resolvedOmpPath,
     expectedVersion: "17.0.4",
     cwd: tmpdir(),
     sessionDirectory: makeSessionDirectory(),
