@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+
+// A quality-gate category. Each repository gate profile MUST declare at least
+// one required category and provide a structured command for every required
+// category. An agent can never remove a required category from an active tree.
+enum GateCategory {
+  GATE_CATEGORY_UNSPECIFIED = 0;
+  GATE_CATEGORY_LINT = 1;
+  GATE_CATEGORY_TYPECHECK = 2;
+  GATE_CATEGORY_TESTS = 3;
+  GATE_CATEGORY_BUILD = 4;
+  GATE_CATEGORY_SECURITY_REVIEW = 5;
+}
+
+// A structured gate command. The executable is a single program name (never a
+// shell pipeline). Arguments and the environment-variable allowlist are
+// explicit string arrays so no shell interpolation can occur.
+message GateCommand {
+  string executable = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+  }];
+  repeated string args = 2 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  repeated string env_allowlist = 3 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 256
+  }];
+}
+
+// A single gate entry binding a category to its structured command.
+message GateEntry {
+  GateCategory category = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  GateCommand command = 2 [(buf.validate.field).required = true];
+}
+
+// Path policy for the gate profile. Allowed paths constrain where gate
+// commands may read/write; blocked paths are always denied.
+message GatePathPolicy {
+  repeated string allowed_paths = 1 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 1024
+  }];
+  repeated string blocked_paths = 2 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 1024
+  }];
+}
+
+// Environment-variable policy. Denied keys are always stripped from the gate
+// command environment; allowed keys are the only keys that may be forwarded.
+message GateEnvPolicy {
+  repeated string allowed_keys = 1 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 256
+  }];
+  repeated string denied_keys = 2 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 256
+  }];
+}
+
+// Network policy. An empty allowed_hosts list means no outbound network is
+// permitted. The metadata endpoint (169.254.169.254) is always denied.
+message GateNetworkPolicy {
+  repeated string allowed_hosts = 1 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// Worktree policy. When weakening_permitted is false (the default and required
+// value for the host minimum), an agent cannot relax the active gate policy by
+// editing the worktree copy of .minions/gates.yaml.
+message GateWorktreePolicy {
+  bool weakening_permitted = 1;
+}
+
+// An immutable, human-approved quality-gate profile for a repository. The
+// profile_hash is a sha256 over the canonical serialization of every field
+// except profile_hash itself. Once snapshotted at tree creation the active
+// policy cannot be weakened.
+message GateProfile {
+  repeated GateCategory required_categories = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {
+      enum: {
+        defined_only: true
+        not_in: 0
+      }
+    }
+  }];
+  repeated GateEntry gates = 2 [(buf.validate.field).repeated.min_items = 1];
+  GatePathPolicy path_policy = 3;
+  GateEnvPolicy env_policy = 4;
+  GateNetworkPolicy network_policy = 5;
+  GateWorktreePolicy worktree_policy = 6 [(buf.validate.field).required = true];
+  string profile_hash = 7 [(buf.validate.field).string.max_len = 64];
+}

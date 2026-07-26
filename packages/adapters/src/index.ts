@@ -302,3 +302,29 @@ export type {
   SecretScanTarget,
   SecretScanTargetKind,
 } from "./secret-redaction.js";
+export {
+  assertProfileDoesNotWeaken,
+  computeGateProfileHash,
+  GateProfileError,
+  gateCategoryFromName,
+  gateCategoryName,
+  loadGateProfile,
+  parseGateProfile,
+  profileWeakensBaseline,
+  serializeGateProfile,
+  validateGateProfile,
+} from "./gate-profile.js";
+export type {
+  GateCommandLike,
+  GateEntryLike,
+  GateEnvPolicyLike,
+  GateNetworkPolicyLike,
+  GatePathPolicyLike,
+  GateProfileInput,
+  GateProfileLike,
+  GateValidatedEntry,
+  GateWorktreePolicyLike,
+  GateProfileErrorCode,
+  HostGateMinimum,
+  LoadedGateProfile,
+} from "./gate-profile.js";
