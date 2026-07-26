@@ -170,6 +170,21 @@ export {
   supervisorMigrations,
 } from "./sqlite/generated-migrations.js";
 export type { DatabaseKind, MigrationReceipt, SqliteMigration } from "./sqlite/migration.js";
+export { createSqliteTranscriptStore, SqliteTranscriptError } from "./sqlite/transcript-store.js";
+export type {
+  CreateSqliteTranscriptStoreOptions,
+  SqliteTranscriptErrorCode,
+} from "./sqlite/transcript-store.js";
+export { createSqliteCheckpointStore, SqliteCheckpointError } from "./sqlite/checkpoint-store.js";
+export type {
+  CreateSqliteCheckpointStoreOptions,
+  SqliteCheckpointErrorCode,
+} from "./sqlite/checkpoint-store.js";
+export { createExecutionCoordinator, ExecutionCoordinatorError } from "./execution-coordinator.js";
+export type {
+  ExecutionCoordinatorOptions,
+  ExecutionCoordinatorErrorCode,
+} from "./execution-coordinator.js";
 export {
   createSandboxPolicyFingerprinter,
   fingerprintSandboxPolicy,

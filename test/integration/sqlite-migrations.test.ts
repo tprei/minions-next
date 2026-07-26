@@ -623,6 +623,57 @@ function createHostV7OutcomeBackfillFixture(
   }
 }
 
+function createHostV9TranscriptFixture(path: string, appliedAtMs: number): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const migration of hostMigrations.slice(0, 9)) {
+      database.exec(migration.sql);
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .run(migration.version, migration.name, migration.checksum, appliedAtMs);
+    }
+    database
+      .prepare(
+        "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      )
+      .run(planRepositoryId, planHostId, "/workspace/plan", appliedAtMs);
+  } finally {
+    database.close();
+  }
+}
+
+function createHostV10CheckpointFixture(path: string, appliedAtMs: number): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const migration of hostMigrations.slice(0, 10)) {
+      database.exec(migration.sql);
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .run(migration.version, migration.name, migration.checksum, appliedAtMs);
+    }
+    database
+      .prepare(
+        "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      )
+      .run(planRepositoryId, planHostId, "/workspace/plan", appliedAtMs);
+    database
+      .prepare(
+        `INSERT INTO attempt_transcript_chunks (
+           attempt_id, sequence, occurred_at_ms, payload_kind, payload_json, recorded_at_ms
+         ) VALUES (?, 0, ?, 'message', '{}', ?)`,
+      )
+      .run(harnessAttemptId, appliedAtMs, appliedAtMs);
+  } finally {
+    database.close();
+  }
+}
+
 function tamperHostV1Checksum(path: string, checksum: string): void {
   const database = new DatabaseSync(path);
   try {
@@ -934,8 +985,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 9,
-          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9],
+          currentVersion: 11,
+          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1157,7 +1208,7 @@ describe("SQLite migration integration", () => {
           .prepare(
             "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
           )
-          .run(10, "future_state", "f".repeat(64), fixedTimestamp);
+          .run(12, "future_state", "f".repeat(64), fixedTimestamp);
       } finally {
         futureDatabase.close();
       }
@@ -1176,7 +1227,7 @@ describe("SQLite migration integration", () => {
       ).toEqual([
         ...expectedHistory(hostMigrations, fixedTimestamp),
         {
-          version: 10n,
+          version: 12n,
           name: "future_state",
           checksum: "f".repeat(64),
           applied_at_ms: BigInt(fixedTimestamp),
@@ -1222,8 +1273,8 @@ describe("SQLite v7 durable steering schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 9,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        currentVersion: 11,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
         backupPath: null,
       });
       expect(
@@ -1297,8 +1348,8 @@ describe("SQLite v7 durable steering schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 6,
-          currentVersion: 9,
-          appliedVersions: [7, 8, 9],
+          currentVersion: 11,
+          appliedVersions: [7, 8, 9, 10, 11],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1352,8 +1403,8 @@ describe("SQLite v6 scheduler lease schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 9,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        currentVersion: 11,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
         backupPath: null,
       });
       expect(
@@ -1419,8 +1470,8 @@ describe("SQLite v6 scheduler lease schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 5,
-          currentVersion: 9,
-          appliedVersions: [6, 7, 8, 9],
+          currentVersion: 11,
+          appliedVersions: [6, 7, 8, 9, 10, 11],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -2899,8 +2950,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 9,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        currentVersion: 11,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
         backupPath: null,
       });
       expect(
@@ -3037,8 +3088,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 9,
-          appliedVersions: [8, 9],
+          currentVersion: 11,
+          appliedVersions: [8, 9, 10, 11],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3139,8 +3190,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 9,
-          appliedVersions: [8, 9],
+          currentVersion: 11,
+          appliedVersions: [8, 9, 10, 11],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3598,6 +3649,485 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
           explanation: "inherited unchanged output",
         },
       ]);
+    } finally {
+      await temporary.dispose();
+    }
+  });
+});
+
+describe("SQLite v10 attempt transcript schema", () => {
+  it("creates attempt transcript chunks table, index, and stability trigger on a fresh host database", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      expect(temporary.database.migration).toEqual({
+        databaseKind: "host",
+        previousVersion: 0,
+        currentVersion: 11,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        backupPath: null,
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader.all(
+            `SELECT type, name
+               FROM sqlite_schema
+              WHERE name IN (
+                'attempt_transcript_chunks',
+                'attempt_transcript_chunks_attempt',
+                'attempt_transcript_chunk_payload_is_stable'
+              )
+              ORDER BY type, name`,
+          ),
+        ),
+      ).toEqual([
+        { type: "index", name: "attempt_transcript_chunks_attempt" },
+        { type: "table", name: "attempt_transcript_chunks" },
+        { type: "trigger", name: "attempt_transcript_chunk_payload_is_stable" },
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA table_info(attempt_transcript_chunks)")
+            .all()
+            .map((row) => [row["name"], row["type"], row["notnull"], row["pk"]]),
+        ),
+      ).toEqual([
+        ["attempt_id", "TEXT", 1n, 1n],
+        ["sequence", "INTEGER", 1n, 2n],
+        ["occurred_at_ms", "INTEGER", 1n, 0n],
+        ["payload_kind", "TEXT", 1n, 0n],
+        ["payload_json", "TEXT", 1n, 0n],
+        ["recorded_at_ms", "INTEGER", 1n, 0n],
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA index_info(attempt_transcript_chunks_attempt)")
+            .all()
+            .map((row) => [row["seqno"], row["name"]]),
+        ),
+      ).toEqual([
+        [0n, "attempt_id"],
+        [1n, "sequence"],
+      ]);
+      const tableSql = temporary.database.read(
+        (reader) =>
+          reader.get(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'attempt_transcript_chunks'",
+          )?.["sql"],
+      );
+      expect(tableSql).toEqual(expect.stringContaining("STRICT"));
+      expect(tableSql).toEqual(expect.stringContaining("PRIMARY KEY (attempt_id, sequence)"));
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT COUNT(*) AS chunks FROM attempt_transcript_chunks"),
+        ),
+      ).toEqual({ chunks: 0n });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+
+  it("upgrades a v9 host database and preserves existing rows", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-transcript-migration-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV9TranscriptFixture(path, fixedTimestamp);
+      const database = await openHostDatabase({
+        path,
+        clock: new FixedClock(fixedTimestamp),
+        backupPath,
+      });
+      try {
+        expect(database.migration).toEqual({
+          databaseKind: "host",
+          previousVersion: 9,
+          currentVersion: 11,
+          appliedVersions: [10, 11],
+          backupPath: resolve(backupPath),
+        });
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT id, host_id, root_path, version FROM repositories WHERE id = ?", [
+              planRepositoryId,
+            ]),
+          ),
+        ).toEqual({
+          id: planRepositoryId,
+          host_id: planHostId,
+          root_path: "/workspace/plan",
+          version: 0n,
+        });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            ),
+          ),
+        ).toEqual(expectedHistory(hostMigrations, fixedTimestamp));
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'attempt_transcript_chunks'",
+            ),
+          ),
+        ).toEqual([{ name: "attempt_transcript_chunks" }]);
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT COUNT(*) AS chunks FROM attempt_transcript_chunks"),
+          ),
+        ).toEqual({ chunks: 0n });
+      } finally {
+        await database.close();
+      }
+      expect(
+        withReadOnlyDatabase(backupPath, (backup) =>
+          backup
+            .prepare(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            )
+            .all(),
+        ),
+      ).toEqual(expectedHistory(hostMigrations.slice(0, 9), fixedTimestamp));
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps attempt transcript chunk payloads stable for a sequence", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      const insertChunk = (
+        attemptId: string,
+        sequence: number,
+        payloadKind: string,
+        payloadJson: string,
+      ): Promise<void> =>
+        temporary.database.write((transaction) => {
+          transaction.run(
+            `INSERT INTO attempt_transcript_chunks (
+               attempt_id, sequence, occurred_at_ms, payload_kind, payload_json, recorded_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?)`,
+            [attemptId, sequence, fixedTimestamp, payloadKind, payloadJson, fixedTimestamp],
+          );
+        });
+      await insertChunk(harnessAttemptId, 0, "message", `{"role":"user"}`);
+      await expectSqliteFailure(
+        () => insertChunk(harnessAttemptId, 0, "message", `{"role":"assistant"}`),
+        "transaction_failed",
+      );
+      expect(
+        temporary.database.read((reader) =>
+          reader.get(
+            "SELECT payload_kind, payload_json FROM attempt_transcript_chunks WHERE attempt_id = ? AND sequence = 0",
+            [harnessAttemptId],
+          ),
+        ),
+      ).toEqual({ payload_kind: "message", payload_json: `{"role":"user"}` });
+      await expectSqliteFailure(
+        () => insertChunk("too-short", 1, "message", "{}"),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertChunk(secondHarnessAttemptId, 1, "", "{}"),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertChunk(schedulerChildAttemptId, -1, "message", "{}"),
+        "transaction_failed",
+      );
+    } finally {
+      await temporary.dispose();
+    }
+  });
+});
+
+describe("SQLite v11 attempt checkpoint schema", () => {
+  it("creates attempt checkpoints table and identity triggers on a fresh host database", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      expect(temporary.database.migration).toEqual({
+        databaseKind: "host",
+        previousVersion: 0,
+        currentVersion: 11,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        backupPath: null,
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader.all(
+            `SELECT type, name
+               FROM sqlite_schema
+              WHERE name IN (
+                'attempt_checkpoints',
+                'attempt_checkpoint_identity_is_immutable',
+                'attempt_checkpoint_sequence_is_monotonic'
+              )
+              ORDER BY type, name`,
+          ),
+        ),
+      ).toEqual([
+        { type: "table", name: "attempt_checkpoints" },
+        { type: "trigger", name: "attempt_checkpoint_identity_is_immutable" },
+        { type: "trigger", name: "attempt_checkpoint_sequence_is_monotonic" },
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA table_info(attempt_checkpoints)")
+            .all()
+            .map((row) => [row["name"], row["type"], row["notnull"], row["pk"]]),
+        ),
+      ).toEqual([
+        ["attempt_id", "TEXT", 1n, 1n],
+        ["node_id", "TEXT", 1n, 0n],
+        ["sequence", "INTEGER", 1n, 0n],
+        ["phase", "TEXT", 1n, 0n],
+        ["harness_id", "TEXT", 1n, 0n],
+        ["session_id", "TEXT", 1n, 0n],
+        ["sandbox_instance_id", "TEXT", 1n, 0n],
+        ["sandbox_backend_kind", "TEXT", 1n, 0n],
+        ["sandbox_policy_digest", "TEXT", 1n, 0n],
+        ["sandbox_state", "TEXT", 1n, 0n],
+        ["context_digest", "TEXT", 1n, 0n],
+        ["recorded_at_ms", "INTEGER", 1n, 0n],
+      ]);
+      const tableSql = temporary.database.read(
+        (reader) =>
+          reader.get(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'attempt_checkpoints'",
+          )?.["sql"],
+      );
+      expect(tableSql).toEqual(expect.stringContaining("STRICT"));
+      expect(tableSql).toEqual(expect.stringContaining("phase IN ("));
+      expect(tableSql).toEqual(expect.stringContaining("'claimed'"));
+      expect(tableSql).toEqual(expect.stringContaining("'finalizing'"));
+      expect(tableSql).toEqual(
+        expect.stringContaining("sandbox_state IN ('created', 'running', 'stopped')"),
+      );
+      expect(tableSql).toEqual(expect.stringContaining("length(sandbox_policy_digest) = 64"));
+      expect(tableSql).toEqual(
+        expect.stringContaining("sandbox_policy_digest NOT GLOB '*[^0-9a-f]*'"),
+      );
+      expect(tableSql).toEqual(expect.stringContaining("length(context_digest) = 64"));
+      expect(tableSql).toEqual(expect.stringContaining("context_digest NOT GLOB '*[^0-9a-f]*'"));
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT COUNT(*) AS checkpoints FROM attempt_checkpoints"),
+        ),
+      ).toEqual({ checkpoints: 0n });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+
+  it("upgrades a v10 host database and preserves transcript rows", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-checkpoint-migration-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV10CheckpointFixture(path, fixedTimestamp);
+      const database = await openHostDatabase({
+        path,
+        clock: new FixedClock(fixedTimestamp),
+        backupPath,
+      });
+      try {
+        expect(database.migration).toEqual({
+          databaseKind: "host",
+          previousVersion: 10,
+          currentVersion: 11,
+          appliedVersions: [11],
+          backupPath: resolve(backupPath),
+        });
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT id, host_id, root_path, version FROM repositories WHERE id = ?", [
+              planRepositoryId,
+            ]),
+          ),
+        ).toEqual({
+          id: planRepositoryId,
+          host_id: planHostId,
+          root_path: "/workspace/plan",
+          version: 0n,
+        });
+        expect(
+          database.read((reader) =>
+            reader.get(
+              "SELECT attempt_id, sequence, payload_kind, payload_json FROM attempt_transcript_chunks WHERE attempt_id = ?",
+              [harnessAttemptId],
+            ),
+          ),
+        ).toEqual({
+          attempt_id: harnessAttemptId,
+          sequence: 0n,
+          payload_kind: "message",
+          payload_json: "{}",
+        });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'attempt_checkpoints'",
+            ),
+          ),
+        ).toEqual([{ name: "attempt_checkpoints" }]);
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT COUNT(*) AS checkpoints FROM attempt_checkpoints"),
+          ),
+        ).toEqual({ checkpoints: 0n });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            ),
+          ),
+        ).toEqual(expectedHistory(hostMigrations, fixedTimestamp));
+      } finally {
+        await database.close();
+      }
+      expect(
+        withReadOnlyDatabase(backupPath, (backup) =>
+          backup
+            .prepare(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            )
+            .all(),
+        ),
+      ).toEqual(expectedHistory(hostMigrations.slice(0, 10), fixedTimestamp));
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  }, 30_000);
+
+  it("enforces checkpoint identity immutability, monotonic sequence, and column checks", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      const insertCheckpoint = (
+        attemptId: string,
+        overrides: {
+          node_id?: string;
+          sequence?: number;
+          phase?: string;
+          harness_id?: string;
+          session_id?: string;
+          sandbox_instance_id?: string;
+          sandbox_backend_kind?: string;
+          sandbox_policy_digest?: string;
+          sandbox_state?: string;
+          context_digest?: string;
+          recorded_at_ms?: number;
+        } = {},
+      ): Promise<void> => {
+        const values = {
+          node_id: planRootNodeId,
+          sequence: 5,
+          phase: "claimed",
+          harness_id: "harness-1",
+          session_id: "session-1",
+          sandbox_instance_id: "sandbox-1",
+          sandbox_backend_kind: "podman",
+          sandbox_policy_digest: harnessPolicyDigest,
+          sandbox_state: "created",
+          context_digest: planContentDigest,
+          recorded_at_ms: fixedTimestamp,
+          ...overrides,
+        };
+        return temporary.database.write((transaction) => {
+          transaction.run(
+            `INSERT INTO attempt_checkpoints (
+               attempt_id, node_id, sequence, phase, harness_id, session_id,
+               sandbox_instance_id, sandbox_backend_kind, sandbox_policy_digest,
+               sandbox_state, context_digest, recorded_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              attemptId,
+              values.node_id,
+              values.sequence,
+              values.phase,
+              values.harness_id,
+              values.session_id,
+              values.sandbox_instance_id,
+              values.sandbox_backend_kind,
+              values.sandbox_policy_digest,
+              values.sandbox_state,
+              values.context_digest,
+              values.recorded_at_ms,
+            ],
+          );
+        });
+      };
+      await insertCheckpoint(harnessAttemptId);
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE attempt_checkpoints SET harness_id = ? WHERE attempt_id = ?", [
+              "harness-2",
+              harnessAttemptId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE attempt_checkpoints SET context_digest = ? WHERE attempt_id = ?",
+              ["c".repeat(64), harnessAttemptId],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE attempt_checkpoints SET sequence = 3 WHERE attempt_id = ?", [
+              harnessAttemptId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run("UPDATE attempt_checkpoints SET sequence = 6 WHERE attempt_id = ?", [
+          harnessAttemptId,
+        ]);
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT sequence FROM attempt_checkpoints WHERE attempt_id = ?", [
+            harnessAttemptId,
+          ]),
+        ),
+      ).toEqual({ sequence: 6n });
+      await expectSqliteFailure(
+        () => insertCheckpoint(secondHarnessAttemptId, { phase: "bogus" }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertCheckpoint(schedulerChildAttemptId, { sandbox_state: "bogus" }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertCheckpoint(schedulerSecondChildAttemptId, {
+            sandbox_policy_digest: "a".repeat(63),
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertCheckpoint(schedulerThirdChildAttemptId, { context_digest: "g".repeat(64) }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertCheckpoint(legacyCommitNodeId, { node_id: "too-short" }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertCheckpoint(legacyNoChangeNodeId, { recorded_at_ms: -1 }),
+        "transaction_failed",
+      );
     } finally {
       await temporary.dispose();
     }

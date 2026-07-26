@@ -2282,6 +2282,98 @@ BEGIN
 END;
 `,
   }),
+  Object.freeze({
+    version: 10,
+    name: "attempt_transcripts",
+    checksum: "5bc0fb5a3408ab90276f0ea1067eff724ea53687569eeeddc3873d6d27aaa24e",
+    sql: `CREATE TABLE attempt_transcript_chunks (
+  attempt_id TEXT NOT NULL CHECK (length(attempt_id) = 36),
+  sequence INTEGER NOT NULL CHECK (sequence >= 0),
+  occurred_at_ms INTEGER NOT NULL CHECK (occurred_at_ms >= 0),
+  payload_kind TEXT NOT NULL CHECK (length(payload_kind) > 0),
+  payload_json TEXT NOT NULL CHECK (length(payload_json) > 0),
+  recorded_at_ms INTEGER NOT NULL CHECK (recorded_at_ms >= 0),
+  PRIMARY KEY (attempt_id, sequence)
+) STRICT;
+
+CREATE INDEX attempt_transcript_chunks_attempt
+  ON attempt_transcript_chunks (attempt_id, sequence);
+
+CREATE TRIGGER attempt_transcript_chunk_payload_is_stable
+BEFORE INSERT ON attempt_transcript_chunks
+WHEN EXISTS (
+  SELECT 1 FROM attempt_transcript_chunks AS existing
+  WHERE existing.attempt_id = NEW.attempt_id
+    AND existing.sequence = NEW.sequence
+    AND (
+      existing.payload_kind <> NEW.payload_kind
+      OR existing.payload_json <> NEW.payload_json
+    )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'attempt transcript chunk payload is not stable for sequence');
+END;
+`,
+  }),
+  Object.freeze({
+    version: 11,
+    name: "attempt_checkpoints",
+    checksum: "cf31dc635de38539d299172d29c8a39563734fc6da455fc211e5a3d43eacc6ac",
+    sql: `CREATE TABLE attempt_checkpoints (
+  attempt_id TEXT PRIMARY KEY CHECK (length(attempt_id) = 36),
+  node_id TEXT NOT NULL CHECK (length(node_id) = 36),
+  sequence INTEGER NOT NULL CHECK (sequence >= 0),
+  phase TEXT NOT NULL CHECK (
+    phase IN (
+      'claimed',
+      'sandbox_created',
+      'workspace_prepared',
+      'harness_started',
+      'context_sent',
+      'streaming',
+      'finalizing'
+    )
+  ),
+  harness_id TEXT NOT NULL CHECK (length(harness_id) > 0),
+  session_id TEXT NOT NULL CHECK (length(session_id) > 0),
+  sandbox_instance_id TEXT NOT NULL CHECK (length(sandbox_instance_id) > 0),
+  sandbox_backend_kind TEXT NOT NULL CHECK (length(sandbox_backend_kind) > 0),
+  sandbox_policy_digest TEXT NOT NULL CHECK (
+    length(sandbox_policy_digest) = 64
+    AND sandbox_policy_digest NOT GLOB '*[^0-9a-f]*'
+  ),
+  sandbox_state TEXT NOT NULL CHECK (
+    sandbox_state IN ('created', 'running', 'stopped')
+  ),
+  context_digest TEXT NOT NULL CHECK (
+    length(context_digest) = 64
+    AND context_digest NOT GLOB '*[^0-9a-f]*'
+  ),
+  recorded_at_ms INTEGER NOT NULL CHECK (recorded_at_ms >= 0)
+) STRICT;
+
+CREATE TRIGGER attempt_checkpoint_identity_is_immutable
+BEFORE UPDATE OF harness_id, session_id, sandbox_instance_id, sandbox_backend_kind,
+  sandbox_policy_digest, context_digest
+ON attempt_checkpoints
+WHEN NEW.harness_id <> OLD.harness_id
+  OR NEW.session_id <> OLD.session_id
+  OR NEW.sandbox_instance_id <> OLD.sandbox_instance_id
+  OR NEW.sandbox_backend_kind <> OLD.sandbox_backend_kind
+  OR NEW.sandbox_policy_digest <> OLD.sandbox_policy_digest
+  OR NEW.context_digest <> OLD.context_digest
+BEGIN
+  SELECT RAISE(ABORT, 'attempt checkpoint identity is immutable');
+END;
+
+CREATE TRIGGER attempt_checkpoint_sequence_is_monotonic
+BEFORE UPDATE OF sequence ON attempt_checkpoints
+WHEN NEW.sequence < OLD.sequence
+BEGIN
+  SELECT RAISE(ABORT, 'attempt checkpoint sequence is not monotonic');
+END;
+`,
+  }),
 ]) satisfies readonly SqliteMigration[];
 
 export const supervisorMigrations = Object.freeze([

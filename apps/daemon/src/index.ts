@@ -21,11 +21,13 @@ export type {
   AuthRuntimeStartupErrorCode,
   DaemonRuntimeOptions,
   DaemonStartupErrorCode,
+  NodeExecutionRuntimeOptions,
   ProviderAdmissionRuntimeOptions,
   RunningAuthRuntime,
   RunningDaemonRuntime,
 } from "./runtime.js";
 export type { DaemonServerOptions, RunningDaemonServer } from "./server.js";
+export type { ExecutionCoordinator } from "@minions/core";
 
 export async function main(argv: readonly string[]): Promise<number> {
   const logger = createStructuredLogger({ stream: process.stderr, now: Date.now });
