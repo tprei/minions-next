@@ -328,3 +328,37 @@ export type {
   HostGateMinimum,
   LoadedGateProfile,
 } from "./gate-profile.js";
+export { createGateRunner } from "./gate-runner-adapter.js";
+export type { CreateGateRunnerOptions } from "./gate-runner-adapter.js";
+export { createSqliteGateReceiptStore } from "./sqlite/gate-receipt-store.js";
+export type { CreateSqliteGateReceiptStoreOptions } from "./sqlite/gate-receipt-store.js";
+export {
+  classifyOutcome,
+  computeEnvironmentDigest,
+  GateReceiptStoreError,
+  GateRunnerError,
+  isReceiptStale,
+  probeGateCommand,
+  validateGateReceipts,
+  validateGateRunRequest,
+} from "@minions/core";
+export type {
+  GateAbortListener,
+  GateAbortOptions,
+  GateAbortSignal,
+  GateCategoryValue,
+  GateCommandDescriptor,
+  GateOutcome,
+  GateReceipt,
+  GateReceiptBindings,
+  GateReceiptExpectation,
+  GateReceiptRecord,
+  GateReceiptStore,
+  GateReceiptStoreErrorCode,
+  GateRunner,
+  GateRunnerErrorCode,
+  GateRunnerPorts,
+  GateRunRequest,
+  GateValidation,
+  GateValidationProblem,
+} from "@minions/core";

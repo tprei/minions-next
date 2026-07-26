@@ -674,6 +674,37 @@ function createHostV10CheckpointFixture(path: string, appliedAtMs: number): void
   }
 }
 
+function createHostV11GateReceiptsFixture(path: string, appliedAtMs: number): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const migration of hostMigrations.slice(0, 11)) {
+      database.exec(migration.sql);
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .run(migration.version, migration.name, migration.checksum, appliedAtMs);
+    }
+    database
+      .prepare(
+        "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      )
+      .run(planRepositoryId, planHostId, "/workspace/plan", appliedAtMs);
+    database
+      .prepare(
+        `INSERT INTO attempt_checkpoints (
+           attempt_id, node_id, sequence, phase, harness_id, session_id,
+           sandbox_instance_id, sandbox_backend_kind, sandbox_policy_digest,
+           sandbox_state, context_digest, recorded_at_ms
+         ) VALUES (?, ?, 0, 'claimed', 'harness-1', 'session-1', 'sandbox-1', 'podman', ?, 'created', ?, ?)`,
+      )
+      .run(harnessAttemptId, planRootNodeId, harnessPolicyDigest, planContentDigest, appliedAtMs);
+  } finally {
+    database.close();
+  }
+}
+
 function tamperHostV1Checksum(path: string, checksum: string): void {
   const database = new DatabaseSync(path);
   try {
@@ -985,8 +1016,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 11,
-          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+          currentVersion: 12,
+          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1208,7 +1239,7 @@ describe("SQLite migration integration", () => {
           .prepare(
             "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
           )
-          .run(12, "future_state", "f".repeat(64), fixedTimestamp);
+          .run(13, "future_state", "f".repeat(64), fixedTimestamp);
       } finally {
         futureDatabase.close();
       }
@@ -1227,7 +1258,7 @@ describe("SQLite migration integration", () => {
       ).toEqual([
         ...expectedHistory(hostMigrations, fixedTimestamp),
         {
-          version: 12n,
+          version: 13n,
           name: "future_state",
           checksum: "f".repeat(64),
           applied_at_ms: BigInt(fixedTimestamp),
@@ -1273,8 +1304,8 @@ describe("SQLite v7 durable steering schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 11,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        currentVersion: 12,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         backupPath: null,
       });
       expect(
@@ -1348,8 +1379,8 @@ describe("SQLite v7 durable steering schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 6,
-          currentVersion: 11,
-          appliedVersions: [7, 8, 9, 10, 11],
+          currentVersion: 12,
+          appliedVersions: [7, 8, 9, 10, 11, 12],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1403,8 +1434,8 @@ describe("SQLite v6 scheduler lease schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 11,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        currentVersion: 12,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         backupPath: null,
       });
       expect(
@@ -1470,8 +1501,8 @@ describe("SQLite v6 scheduler lease schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 5,
-          currentVersion: 11,
-          appliedVersions: [6, 7, 8, 9, 10, 11],
+          currentVersion: 12,
+          appliedVersions: [6, 7, 8, 9, 10, 11, 12],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -2950,8 +2981,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 11,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        currentVersion: 12,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         backupPath: null,
       });
       expect(
@@ -3088,8 +3119,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 11,
-          appliedVersions: [8, 9, 10, 11],
+          currentVersion: 12,
+          appliedVersions: [8, 9, 10, 11, 12],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3190,8 +3221,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 11,
-          appliedVersions: [8, 9, 10, 11],
+          currentVersion: 12,
+          appliedVersions: [8, 9, 10, 11, 12],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3662,8 +3693,8 @@ describe("SQLite v10 attempt transcript schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 11,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        currentVersion: 12,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         backupPath: null,
       });
       expect(
@@ -3743,8 +3774,8 @@ describe("SQLite v10 attempt transcript schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 9,
-          currentVersion: 11,
-          appliedVersions: [10, 11],
+          currentVersion: 12,
+          appliedVersions: [10, 11, 12],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3850,8 +3881,8 @@ describe("SQLite v11 attempt checkpoint schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 11,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        currentVersion: 12,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         backupPath: null,
       });
       expect(
@@ -3937,8 +3968,8 @@ describe("SQLite v11 attempt checkpoint schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 10,
-          currentVersion: 11,
-          appliedVersions: [11],
+          currentVersion: 12,
+          appliedVersions: [11, 12],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -4128,6 +4159,321 @@ describe("SQLite v11 attempt checkpoint schema", () => {
         () => insertCheckpoint(legacyNoChangeNodeId, { recorded_at_ms: -1 }),
         "transaction_failed",
       );
+    } finally {
+      await temporary.dispose();
+    }
+  });
+});
+
+describe("SQLite v12 gate receipts schema", () => {
+  it("creates gate receipts table, indexes, and triggers on a fresh host database", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      expect(temporary.database.migration).toEqual({
+        databaseKind: "host",
+        previousVersion: 0,
+        currentVersion: 12,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        backupPath: null,
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader.all(
+            `SELECT type, name
+               FROM sqlite_schema
+              WHERE name IN (
+                'gate_receipts',
+                'gate_receipts_node_sequence',
+                'gate_receipts_node_gate_sequence',
+                'gate_receipt_is_immutable',
+                'gate_receipt_is_durable'
+              )
+              ORDER BY type, name`,
+          ),
+        ),
+      ).toEqual([
+        { type: "index", name: "gate_receipts_node_gate_sequence" },
+        { type: "index", name: "gate_receipts_node_sequence" },
+        { type: "table", name: "gate_receipts" },
+        { type: "trigger", name: "gate_receipt_is_durable" },
+        { type: "trigger", name: "gate_receipt_is_immutable" },
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA table_info(gate_receipts)")
+            .all()
+            .map((row) => [row["name"], row["type"], row["notnull"], row["pk"]]),
+        ),
+      ).toEqual([
+        ["id", "INTEGER", 0n, 1n],
+        ["node_id", "TEXT", 1n, 0n],
+        ["attempt_id", "TEXT", 0n, 0n],
+        ["gate_name", "TEXT", 1n, 0n],
+        ["category", "INTEGER", 1n, 0n],
+        ["outcome", "TEXT", 1n, 0n],
+        ["exit_code", "INTEGER", 0n, 0n],
+        ["duration_ms", "INTEGER", 1n, 0n],
+        ["stdout_digest", "TEXT", 1n, 0n],
+        ["stderr_digest", "TEXT", 1n, 0n],
+        ["head_commit", "TEXT", 1n, 0n],
+        ["profile_hash", "TEXT", 1n, 0n],
+        ["environment_digest", "TEXT", 1n, 0n],
+        ["captured_at_ms", "INTEGER", 1n, 0n],
+        ["sequence", "INTEGER", 1n, 0n],
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA index_info(gate_receipts_node_sequence)")
+            .all()
+            .map((row) => [row["seqno"], row["name"]]),
+        ),
+      ).toEqual([
+        [0n, "node_id"],
+        [1n, "sequence"],
+        [2n, "gate_name"],
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA index_info(gate_receipts_node_gate_sequence)")
+            .all()
+            .map((row) => [row["seqno"], row["name"]]),
+        ),
+      ).toEqual([
+        [0n, "node_id"],
+        [1n, "gate_name"],
+        [2n, "sequence"],
+      ]);
+      const tableSql = temporary.database.read(
+        (reader) =>
+          reader.get(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'gate_receipts'",
+          )?.["sql"],
+      );
+      expect(tableSql).toEqual(expect.stringContaining("STRICT"));
+      expect(tableSql).toEqual(expect.stringContaining("length(node_id) = 36"));
+      expect(tableSql).toEqual(
+        expect.stringContaining("attempt_id IS NULL OR length(attempt_id) = 36"),
+      );
+      expect(tableSql).toEqual(expect.stringContaining("length(gate_name) > 0"));
+      expect(tableSql).toEqual(expect.stringContaining("category >= 0"));
+      expect(tableSql).toEqual(expect.stringContaining("outcome IN ("));
+      expect(tableSql).toEqual(expect.stringContaining("'missing_executable'"));
+      expect(tableSql).toEqual(expect.stringContaining("duration_ms >= 0"));
+      expect(tableSql).toEqual(expect.stringContaining("length(stdout_digest) = 64"));
+      expect(tableSql).toEqual(expect.stringContaining("stdout_digest NOT GLOB '*[^0-9a-f]*'"));
+      expect(tableSql).toEqual(expect.stringContaining("length(stderr_digest) = 64"));
+      expect(tableSql).toEqual(expect.stringContaining("stderr_digest NOT GLOB '*[^0-9a-f]*'"));
+      expect(tableSql).toEqual(expect.stringContaining("length(head_commit) IN (40, 64)"));
+      expect(tableSql).toEqual(expect.stringContaining("head_commit NOT GLOB '*[^0-9a-f]*'"));
+      expect(tableSql).toEqual(expect.stringContaining("length(profile_hash) = 64"));
+      expect(tableSql).toEqual(expect.stringContaining("profile_hash NOT GLOB '*[^0-9a-f]*'"));
+      expect(tableSql).toEqual(expect.stringContaining("length(environment_digest) = 64"));
+      expect(tableSql).toEqual(
+        expect.stringContaining("environment_digest NOT GLOB '*[^0-9a-f]*'"),
+      );
+      expect(tableSql).toEqual(expect.stringContaining("captured_at_ms >= 0"));
+      expect(tableSql).toEqual(expect.stringContaining("sequence >= 0"));
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT COUNT(*) AS receipts FROM gate_receipts"),
+        ),
+      ).toEqual({ receipts: 0n });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+
+  it("upgrades a v11 host database and preserves existing rows", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-gate-receipt-migration-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV11GateReceiptsFixture(path, fixedTimestamp);
+      const database = await openHostDatabase({
+        path,
+        clock: new FixedClock(fixedTimestamp),
+        backupPath,
+      });
+      try {
+        expect(database.migration).toEqual({
+          databaseKind: "host",
+          previousVersion: 11,
+          currentVersion: 12,
+          appliedVersions: [12],
+          backupPath: resolve(backupPath),
+        });
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT id, host_id, root_path, version FROM repositories WHERE id = ?", [
+              planRepositoryId,
+            ]),
+          ),
+        ).toEqual({
+          id: planRepositoryId,
+          host_id: planHostId,
+          root_path: "/workspace/plan",
+          version: 0n,
+        });
+        expect(
+          database.read((reader) =>
+            reader.get(
+              "SELECT attempt_id, node_id, phase, sandbox_state FROM attempt_checkpoints WHERE attempt_id = ?",
+              [harnessAttemptId],
+            ),
+          ),
+        ).toEqual({
+          attempt_id: harnessAttemptId,
+          node_id: planRootNodeId,
+          phase: "claimed",
+          sandbox_state: "created",
+        });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'gate_receipts'",
+            ),
+          ),
+        ).toEqual([{ name: "gate_receipts" }]);
+        expect(
+          database.read((reader) => reader.get("SELECT COUNT(*) AS receipts FROM gate_receipts")),
+        ).toEqual({ receipts: 0n });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            ),
+          ),
+        ).toEqual(expectedHistory(hostMigrations, fixedTimestamp));
+      } finally {
+        await database.close();
+      }
+      expect(
+        withReadOnlyDatabase(backupPath, (backup) =>
+          backup
+            .prepare(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            )
+            .all(),
+        ),
+      ).toEqual(expectedHistory(hostMigrations.slice(0, 11), fixedTimestamp));
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("enforces gate receipt immutability, durability, and column checks", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      const insertReceipt = (
+        overrides: {
+          node_id?: string;
+          attempt_id?: string;
+          gate_name?: string;
+          category?: number;
+          outcome?: string;
+          exit_code?: number;
+          duration_ms?: number;
+          stdout_digest?: string;
+          stderr_digest?: string;
+          head_commit?: string;
+          profile_hash?: string;
+          environment_digest?: string;
+          captured_at_ms?: number;
+          sequence?: number;
+        } = {},
+      ): Promise<void> => {
+        const values = {
+          node_id: planRootNodeId,
+          attempt_id: harnessAttemptId,
+          gate_name: "typecheck",
+          category: 0,
+          outcome: "passed",
+          exit_code: 0,
+          duration_ms: 100,
+          stdout_digest: planContentDigest,
+          stderr_digest: planContentDigest,
+          head_commit: planBaseCommit,
+          profile_hash: harnessPolicyDigest,
+          environment_digest: harnessPolicyDigest,
+          captured_at_ms: fixedTimestamp,
+          sequence: 0,
+          ...overrides,
+        };
+        return temporary.database.write((transaction) => {
+          transaction.run(
+            `INSERT INTO gate_receipts (
+               node_id, attempt_id, gate_name, category, outcome, exit_code,
+               duration_ms, stdout_digest, stderr_digest, head_commit,
+               profile_hash, environment_digest, captured_at_ms, sequence
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              values.node_id,
+              values.attempt_id,
+              values.gate_name,
+              values.category,
+              values.outcome,
+              values.exit_code,
+              values.duration_ms,
+              values.stdout_digest,
+              values.stderr_digest,
+              values.head_commit,
+              values.profile_hash,
+              values.environment_digest,
+              values.captured_at_ms,
+              values.sequence,
+            ],
+          );
+        });
+      };
+      await insertReceipt();
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE gate_receipts SET exit_code = 1 WHERE id = ?", [1]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM gate_receipts WHERE id = ?", [1]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertReceipt({ node_id: "too-short" }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertReceipt({ attempt_id: "too-short" }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(() => insertReceipt({ gate_name: "" }), "transaction_failed");
+      await expectSqliteFailure(() => insertReceipt({ category: -1 }), "transaction_failed");
+      await expectSqliteFailure(() => insertReceipt({ outcome: "bogus" }), "transaction_failed");
+      await expectSqliteFailure(() => insertReceipt({ duration_ms: -1 }), "transaction_failed");
+      await expectSqliteFailure(
+        () => insertReceipt({ stdout_digest: "a".repeat(63) }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertReceipt({ stderr_digest: "g".repeat(64) }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () => insertReceipt({ head_commit: "a".repeat(39) }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(() => insertReceipt({ captured_at_ms: -1 }), "transaction_failed");
+      await expectSqliteFailure(() => insertReceipt({ sequence: -1 }), "transaction_failed");
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT COUNT(*) AS receipts FROM gate_receipts"),
+        ),
+      ).toEqual({ receipts: 1n });
     } finally {
       await temporary.dispose();
     }
