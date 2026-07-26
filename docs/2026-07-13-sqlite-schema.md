@@ -2453,6 +2453,7 @@ BEGIN
   SELECT RAISE(ABORT, 'gate receipt is durable');
 END;
 ```
+
 ## Supervisor database
 
 ### 0001 execution_hosts
