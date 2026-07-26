@@ -240,6 +240,7 @@ export {
   runOmpJson,
 } from "./auth-broker.js";
 export type {
+  AuthBrokerErrorCode,
   AuthBrokerHealth,
   AuthBrokerLogger,
   AuthBrokerLoginOptions,
@@ -250,6 +251,7 @@ export type {
 export { AuthGatewayError, createAuthGatewayManager } from "./auth-gateway.js";
 export type {
   AttemptCapability,
+  AuthGatewayErrorCode,
   AuthGatewayHealth,
   AuthGatewayLogger,
   AuthGatewayManager,
