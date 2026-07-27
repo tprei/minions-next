@@ -3,6 +3,7 @@ export * from "./attempt.js";
 export * from "./artifact.js";
 export * from "./gate-runner.js";
 export * from "./execution.js";
+export * from "./repair.js";
 export * from "./command.js";
 export * from "./domain-error.js";
 export * from "./git.js";
