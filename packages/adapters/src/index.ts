@@ -180,6 +180,22 @@ export type {
   CreateSqliteCheckpointStoreOptions,
   SqliteCheckpointErrorCode,
 } from "./sqlite/checkpoint-store.js";
+export { createSqliteVcsChangeBindingStore } from "./sqlite/vcs-change-binding-store.js";
+export type { CreateSqliteVcsChangeBindingStoreOptions } from "./sqlite/vcs-change-binding-store.js";
+export {
+  bindingFingerprint,
+  CONFLICT_STATES,
+  isValidConflictTransition,
+  validateVcsChangeBinding,
+  VcsChangeBindingStoreError,
+} from "@minions/core";
+export type {
+  ConflictState,
+  RewriteGeneration,
+  VcsChangeBinding,
+  VcsChangeBindingStore,
+  VcsChangeBindingStoreErrorCode,
+} from "@minions/core";
 export { createExecutionCoordinator, ExecutionCoordinatorError } from "./execution-coordinator.js";
 export type {
   ExecutionCoordinatorOptions,

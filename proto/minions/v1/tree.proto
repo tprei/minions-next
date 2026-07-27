@@ -43,6 +43,13 @@ enum PlanAttentionState {
   PLAN_ATTENTION_STATE_RESOLVED = 2;
 }
 
+enum VcsConflictState {
+  VCS_CONFLICT_STATE_UNSPECIFIED = 0;
+  VCS_CONFLICT_STATE_CLEAN = 1;
+  VCS_CONFLICT_STATE_CONFLICT = 2;
+  VCS_CONFLICT_STATE_RESOLVED = 3;
+}
+
 message TreeBudget {
   uint32 max_depth = 1 [(buf.validate.field).uint32.gte = 1];
   uint32 max_fan_out = 2 [(buf.validate.field).uint32.gte = 1];
@@ -66,6 +73,22 @@ message ArtifactOutputContract {
 }
 
 message ImplementationOutputContract {}
+
+message VcsChangeBinding {
+  string jj_change_id = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string current_commit_id = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"];
+  optional string parent_change_id = 3 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  optional string bookmark = 4 [(buf.validate.field).string.max_len = 512];
+  uint32 rewrite_generation = 5;
+  string last_jj_operation_id = 6 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  optional string last_pushed_commit_id = 7 [
+    (buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"
+  ];
+  optional string last_reviewed_commit_id = 8 [
+    (buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"
+  ];
+  VcsConflictState conflict_state = 9 [(buf.validate.field).enum.defined_only = true];
+}
 
 message ProposedNode {
   string node_id = 1 [(buf.validate.field).string.uuid = true];
@@ -162,6 +185,7 @@ message TaskNode {
     max_len: 512
   }];
   NodeBudget budget = 19 [(buf.validate.field).required = true];
+  optional VcsChangeBinding vcs_change_binding = 20;
 }
 
 message PlanAttention {
