@@ -310,6 +310,7 @@ export {
   pathContainsDotJj,
 } from "./jj-working-copy.js";
 export type {
+  AuthorIdentity,
   JjCommitReceipt,
   JjNewChangeReceipt,
   JjRevisionDescriptor,
@@ -318,10 +319,29 @@ export type {
   JjWorkingCopy,
   JjWorkingCopyDiff,
   JjWorkingCopyErrorCode,
+  JjWorkingCopyHead,
   JjWorkingCopyManager,
   JjWorkingCopyManagerOptions,
   JjWorkingCopyStatus,
 } from "./jj-working-copy.js";
+export {
+  createCommitCaptureManager,
+  CommitCaptureError,
+  DETERMINISTIC_ENGINE_IDENTITY,
+} from "./commit-capture.js";
+export type {
+  ChildBaseResolution,
+  CommitCaptureInput,
+  CommitCaptureManager,
+  CommitCaptureManagerOptions,
+  CommitCaptureNodeKind,
+  CommitCaptureReceipt,
+  CommitCaptureErrorCode,
+  CommitCaptureLogger,
+  CommitCaptureTree,
+  CommitCaptureWorkingCopy,
+  StaleDescendant,
+} from "./commit-capture.js";
 export { checkJjCompatibility } from "./jj-capability-gates.js";
 export type {
   JjCompatibilityDenial,
