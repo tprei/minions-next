@@ -26,6 +26,7 @@ import {
   createSupervisorHostRegistry,
   daemonLifecyclePath,
   ensureJjCapability,
+  createJjCentralRepoManager,
   HostRegistryError,
   inspectLifecycleLock,
   openHostDatabase,
@@ -40,6 +41,7 @@ import {
   type DaemonModeName,
   type EventCommitWaiter,
   type JjCapabilityErrorCode,
+  type JjCentralRepoManager,
   type ManagedSqliteDatabase,
   type PlanRegistry,
   type ProviderAdmissionProxy,
@@ -522,6 +524,32 @@ export async function startDaemonRuntime(
         ? options.jjCapability.toolsDirectory
         : undefined,
     });
+    let jjCentralRepo: Readonly<{ manager: JjCentralRepoManager }> | undefined;
+    if (options.jjCapability?.enabled) {
+      // Fail-closed (GIT-14): the operator enabled jj gating, so the pinned jj binary MUST be
+      // available before the daemon will accept repository registrations. An unavailable probe
+      // aborts startup rather than running in a half-gated state.
+      const probe = await ensureJjCapability({
+        toolsDirectory: options.jjCapability.toolsDirectory,
+      });
+      if (!probe.available) {
+        throw new Error(
+          `jj capability unavailable (${probe.failureCode}); cannot enable repository jj gating: ${probe.message}`,
+        );
+      }
+      jjCentralRepo = {
+        manager: createJjCentralRepoManager({
+          jjBinaryPath: probe.binaryPath,
+          hostRoot: join(home, "jj-repos"),
+          clock: options.clock,
+          ids: options.ids,
+        }),
+      };
+      options.logger.log("info", "jj_central_repo_enabled", {
+        jj_binary: probe.binaryPath,
+        jj_version: probe.version,
+      });
+    }
 
     if (options.mode === "local") {
       server = await startDaemonServer({
@@ -540,6 +568,7 @@ export async function startDaemonRuntime(
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
           clock: options.clock,
+          ...(jjCentralRepo !== undefined ? { jjCentralRepo } : {}),
         },
         hostRegistry: requireRegistry(hostRegistry),
       });
@@ -560,6 +589,7 @@ export async function startDaemonRuntime(
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
           clock: options.clock,
+          ...(jjCentralRepo !== undefined ? { jjCentralRepo } : {}),
         },
       });
     } else {

@@ -2,12 +2,15 @@ import { create } from "@bufbuild/protobuf";
 import { createValidator } from "@bufbuild/protovalidate";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import {
+  checkJjCompatibility,
   GateProfileError,
   inspectRepository,
+  JjCentralRepoError,
   loadGateProfile,
   RepositoryInspectionError,
   RepositoryRegistryError,
   type HostGateMinimum,
+  type JjCentralRepoManager,
   type RepositoryRegistration,
   type RepositoryRegistry,
 } from "@minions/adapters";
@@ -26,6 +29,12 @@ export type RepositoryServiceOptions = Readonly<{
   clock: Clock;
   registry: RepositoryRegistry;
   hostMinimum?: HostGateMinimum;
+  /**
+   * OPTIONAL host-owned colocated jj gate (PR 27 / GIT-14). When provided, registration runs
+   * {@link checkJjCompatibility} and bootstraps a host-owned jj repo for compatible repositories,
+   * failing closed with a typed denial otherwise. Omitted, registration behaviour is unchanged.
+   */
+  jjCentralRepo?: Readonly<{ manager: JjCentralRepoManager }>;
 }>;
 
 export function registerRepositoryService(
@@ -39,6 +48,25 @@ export function registerRepositoryService(
         assertRegistrationPolicy(inspection);
         assertRepositoryLocation(options.home, inspection.canonicalRoot);
         await loadGateProfile(inspection.canonicalRoot, options.hostMinimum);
+        if (options.jjCentralRepo !== undefined) {
+          // Fail-closed (GIT-14): a repository needing submodules, LFS, .gitattributes-dependent
+          // behaviour, a partial clone, a linked worktree, a dirty checkout, or a symlink alias is
+          // denied with a typed code before it can register against the host-owned jj store.
+          const report = await checkJjCompatibility(inspection.canonicalRoot);
+          if (!report.compatible) {
+            throw new ConnectError(
+              `repository is not jj-compatible: ${report.denials.map((denial) => denial.code).join(", ")}`,
+              Code.FailedPrecondition,
+              undefined,
+              undefined,
+              report.denials,
+            );
+          }
+          await options.jjCentralRepo.manager.bootstrap(
+            inspection.canonicalRoot,
+            repositoryId(request.repositoryId),
+          );
+        }
         const registration = await options.registry.register({
           request,
           inspection,
@@ -154,6 +182,10 @@ function toConnectError(error: unknown): ConnectError {
   }
   if (error instanceof RepositoryInspectionError) {
     const code = error.code === "invalid_root" ? Code.InvalidArgument : Code.FailedPrecondition;
+    return new ConnectError(error.message, code, undefined, undefined, error);
+  }
+  if (error instanceof JjCentralRepoError) {
+    const code = error.code === "invalid_options" ? Code.InvalidArgument : Code.FailedPrecondition;
     return new ConnectError(error.message, code, undefined, undefined, error);
   }
   if (error instanceof GateProfileError) {
