@@ -491,6 +491,20 @@ export type {
   GitHubRulesetTarget,
   GitHubUser,
   GitHubUserType,
+  GitHubCheckConclusion,
+  GitHubCheckRun,
+  GitHubCheckStatus,
+  GitHubCombinedStatus,
+  GitHubCombinedStatusState,
+  GitHubCreatePullRequestInput,
+  GitHubGitRef,
+  GitHubPullRequest,
+  GitHubPullRequestListOptions,
+  GitHubPullRequestListState,
+  GitHubPullRequestState,
+  GitHubReview,
+  GitHubReviewState,
+  GitHubUpdatePullRequestInput,
 } from "./github-client.js";
 export { GitHubAppAuthError, createGitHubAppAuth } from "./github-app-auth.js";
 export type {
@@ -530,3 +544,27 @@ export type {
   OnboardRepositoryOptions,
   RepositoryOnboardingReceipt,
 } from "./github-ruleset.js";
+export { PushError, createPushManager } from "./github-push.js";
+export type {
+  PushAction,
+  PushErrorCode,
+  PushInput,
+  PushManager,
+  PushManagerOptions,
+  PushReceipt,
+  PushWorkingCopy,
+} from "./github-push.js";
+export { PullRequestError, createPullRequestManager } from "./github-pull-request.js";
+export type {
+  CheckObservation,
+  CheckState,
+  PullRequestAction,
+  PullRequestErrorCode,
+  PullRequestInput,
+  PullRequestManager,
+  PullRequestManagerOptions,
+  PullRequestReceipt,
+  ReviewApprovalSummary,
+  ReviewObservation,
+  ReviewState,
+} from "./github-pull-request.js";
