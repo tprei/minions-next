@@ -291,6 +291,16 @@ export class TestSandboxLifecycle implements SandboxLifecycle {
           "sandbox mount paths must be absolute",
         );
       }
+      // GIT-15: jj metadata (`.jj`) must never be mounted into any sandbox. The test
+      // sandbox enforces the same exclusion as the production policy validator so the
+      // masked jj working copy (PR 28) is isolated in the test environment too.
+      if (mountContainsDotJj(mount.sourcePath) || mountContainsDotJj(mount.targetPath)) {
+        throw new SandboxDeniedError(
+          "invalid_policy",
+          "create",
+          "sandbox mount path traverses '.jj' metadata which is denied (GIT-15)",
+        );
+      }
     }
     if (policy.network.allowedHosts.some((host) => host.trim().length === 0)) {
       throw new SandboxDeniedError("invalid_policy", "create", "sandbox network policy is invalid");
@@ -685,6 +695,10 @@ function parseGitSubcommand(arguments_: readonly string[]): string | undefined {
 
 function hasParentTraversal(path: string): boolean {
   return path.split(/[\\/]/u).some((part) => part === "..");
+}
+
+function mountContainsDotJj(path: string): boolean {
+  return path.split(/[\\/]/u).some((part) => part === ".jj");
 }
 
 function isPathCandidate(value: string): boolean {

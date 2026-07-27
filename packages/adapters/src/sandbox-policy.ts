@@ -1015,6 +1015,15 @@ function validateMountPath(value: unknown, field: string): string {
   if (segments.some((segment) => segment === ".." || segment === ".")) {
     throw new SandboxPolicyError("mount_path_traversal", `${field} contains traversal segments`);
   }
+  // GIT-15: jj metadata (`.jj`) must never be reachable inside any sandbox. Reject any
+  // mount whose source or target path touches a `.jj` segment — this is the production
+  // enforcement that pairs with the masked jj working copy (PR 28).
+  if (segments.some((segment) => segment === ".jj")) {
+    throw new SandboxPolicyError(
+      "mount_path_invalid",
+      `${field} traverses '.jj' metadata which is denied inside any sandbox (GIT-15)`,
+    );
+  }
   const normalized = posix.normalize(value);
   if (normalized !== value) {
     throw new SandboxPolicyError("mount_path_invalid", `${field} must be normalized`);
