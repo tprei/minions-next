@@ -195,6 +195,10 @@ export interface GitHubPullRequest {
   readonly body: string | null;
   readonly state: GitHubPullRequestState;
   readonly merged: boolean;
+  /** The merge-commit SHA, present only after the PR is merged (squash/merge/rebase). */
+  readonly mergeCommitSha: string | null;
+  /** ISO-8601 timestamp the PR was merged, or null when unmerged. */
+  readonly mergedAt: string | null;
   readonly draft: boolean;
   readonly headRefName: string;
   readonly baseRefName: string;
@@ -266,6 +270,27 @@ export interface GitHubCombinedStatus {
 export interface GitHubGitRef {
   readonly ref: string;
   readonly sha: string;
+}
+
+export type GitHubMergeMethod = "merge" | "squash" | "rebase";
+
+/** Input to `PUT /repos/{owner}/{repo}/pulls/{number}/merge`. */
+export interface GitHubMergePullRequestInput {
+  readonly commitTitle: string | undefined;
+  readonly commitMessage: string | undefined;
+  readonly mergeMethod: GitHubMergeMethod;
+  /** Expected head SHA; GitHub rejects with 409 if the head has since moved. */
+  readonly sha: string | undefined;
+}
+
+/** Response from the merge endpoint: the merge-commit SHA plus GitHub's status. */
+export interface GitHubMergeResult {
+  /** SHA of the merge commit produced on the base branch, null when not merged. */
+  readonly sha: string | null;
+  /** `true` iff this call performed the merge; `false` when already merged. */
+  readonly merged: boolean;
+  /** GitHub's human-readable status message. */
+  readonly message: string;
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -347,6 +372,11 @@ export interface GitHubClient {
     prNumber: number,
     input: GitHubUpdatePullRequestInput,
   ): Promise<GitHubPullRequest>;
+  mergePullRequest(
+    repositoryFullName: string,
+    prNumber: number,
+    input: GitHubMergePullRequestInput,
+  ): Promise<GitHubMergeResult>;
   listReviews(repositoryFullName: string, prNumber: number): Promise<readonly GitHubReview[]>;
   listCheckRuns(repositoryFullName: string, ref: string): Promise<readonly GitHubCheckRun[]>;
   getCombinedStatus(repositoryFullName: string, ref: string): Promise<GitHubCombinedStatus>;
@@ -515,6 +545,19 @@ class GitHubClientImpl implements GitHubClient {
       serializeUpdatePullRequestInput(input),
     );
     return parsePullRequest(body);
+  }
+
+  async mergePullRequest(
+    repositoryFullName: string,
+    prNumber: number,
+    input: GitHubMergePullRequestInput,
+  ): Promise<GitHubMergeResult> {
+    const body = await this.requestJson(
+      "PUT",
+      `/repos/${repositoryFullName}/pulls/${String(prNumber)}/merge`,
+      serializeMergePullRequestInput(input),
+    );
+    return parseMergeResult(body);
   }
 
   async listReviews(
@@ -1168,6 +1211,8 @@ function parsePullRequest(value: unknown, context = "pull_request"): GitHubPullR
     body: parseNullableString(object["body"], `${context}.body`),
     state: parsePullRequestState(object["state"], `${context}.state`),
     merged: requireBoolean(object["merged"], `${context}.merged`),
+    mergeCommitSha: parseNullableString(object["merge_commit_sha"], `${context}.merge_commit_sha`),
+    mergedAt: parseNullableString(object["merged_at"], `${context}.merged_at`),
     draft: requireBoolean(object["draft"], `${context}.draft`),
     headRefName: requireString(head["ref"], `${context}.head.ref`),
     baseRefName: requireString(base["ref"], `${context}.base.ref`),
@@ -1329,6 +1374,31 @@ function serializeUpdatePullRequestInput(
     payload["state"] = input.state;
   }
   return payload;
+}
+
+function serializeMergePullRequestInput(
+  input: GitHubMergePullRequestInput,
+): Readonly<Record<string, unknown>> {
+  const payload: Record<string, unknown> = { merge_method: input.mergeMethod };
+  if (input.commitTitle !== undefined) {
+    payload["commit_title"] = input.commitTitle;
+  }
+  if (input.commitMessage !== undefined) {
+    payload["commit_message"] = input.commitMessage;
+  }
+  if (input.sha !== undefined) {
+    payload["sha"] = input.sha;
+  }
+  return payload;
+}
+
+function parseMergeResult(value: unknown): GitHubMergeResult {
+  const object = requireObject(value, "merge_result");
+  return Object.freeze({
+    sha: parseNullableString(object["sha"], "merge_result.sha"),
+    merged: requireBoolean(object["merged"], "merge_result.merged"),
+    message: requireString(object["message"], "merge_result.message"),
+  });
 }
 
 function errorToString(error: unknown): string {

@@ -516,6 +516,9 @@ export type {
   GitHubCombinedStatusState,
   GitHubCreatePullRequestInput,
   GitHubGitRef,
+  GitHubMergeMethod,
+  GitHubMergePullRequestInput,
+  GitHubMergeResult,
   GitHubPullRequest,
   GitHubPullRequestListOptions,
   GitHubPullRequestListState,
@@ -640,3 +643,29 @@ export type {
   RestackStaleSink,
   RestackWorkingCopy,
 } from "./restack-coordinator.js";
+// PR 36 — explicit landing reconciliation (core domain re-export + coordinator).
+export {
+  evaluatePreflight,
+  isAlreadyLanded,
+  LandingReceiptStoreError,
+  validateLandingIntent,
+} from "@minions/core";
+export type {
+  LandingIntent,
+  LandingMergeMethod,
+  LandingPreflight,
+  LandingReceipt,
+  LandingReceiptStore,
+  LandingReceiptStoreErrorCode,
+  LandingRequestedBy,
+  LandingVerdict,
+} from "@minions/core";
+export { createLandingCoordinator, LandingError } from "./landing-coordinator.js";
+export type {
+  LandingCoordinator,
+  LandingCoordinatorOptions,
+  LandingErrorCode,
+  LandingNodeResolver,
+  LandingPolicy,
+  LandingRulesetGate,
+} from "./landing-coordinator.js";

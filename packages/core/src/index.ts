@@ -7,6 +7,7 @@ export * from "./repair.js";
 export * from "./restack.js";
 export * from "./command.js";
 export * from "./domain-error.js";
+export * from "./landing.js";
 export * from "./remote-ci.js";
 export * from "./git.js";
 export * from "./vcs-backend.js";
