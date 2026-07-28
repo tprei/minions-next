@@ -671,3 +671,42 @@ export type {
   LandingPolicy,
   LandingRulesetGate,
 } from "./landing-coordinator.js";
+// PR 37 — ordered crash recovery + retention (core domain re-export + coordinator).
+export {
+  MILLIS_PER_DAY,
+  orderedPhases,
+  recoveryBoundary,
+  recoveryError,
+  recoveryReport,
+  retentionPolicy,
+  shouldCompact,
+  shouldPurge,
+} from "@minions/core";
+export type {
+  RecoveryBoundary,
+  RecoveryBoundaryStatus,
+  RecoveryError,
+  RecoveryPhase,
+  RecoveryReport,
+  RetentionEvaluation,
+  RetentionPolicy,
+} from "@minions/core";
+export {
+  blobReconciler,
+  createRecoveryCoordinator,
+  RecoveryCoordinatorError,
+  schedulerLeaseReconciler,
+  workspaceReconciler,
+} from "./recovery-coordinator.js";
+export type {
+  CompactionReport,
+  PhaseReconciliation,
+  PurgeReport,
+  RecoveryCompactor,
+  RecoveryCoordinator,
+  RecoveryCoordinatorErrorCode,
+  RecoveryCoordinatorOptions,
+  RecoveryLogger,
+  RecoveryPurger,
+  RecoveryReconciler,
+} from "./recovery-coordinator.js";
