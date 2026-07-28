@@ -733,3 +733,22 @@ export type {
   RecoveryPurger,
   RecoveryReconciler,
 } from "./recovery-coordinator.js";
+// PR 39 — fixup targeting via jj absorb (core domain re-export + coordinator).
+export { previewAffectedChanges, validateFixupTarget } from "@minions/core";
+export type { FixupPreview, FixupResult, FixupTarget, FixupTargetVerdict } from "@minions/core";
+export {
+  changeIdFingerprint,
+  createFixupCoordinator,
+  DEFAULT_FIXUP_COMMIT_MESSAGE,
+  FixupError,
+} from "./fixup-coordinator.js";
+export type {
+  AbsorbOutcome,
+  AbsorbReceipt,
+  FixContent,
+  FixupCoordinator,
+  FixupCoordinatorOptions,
+  FixupErrorCode,
+  FixupLogger,
+  FixupWorkingCopy,
+} from "./fixup-coordinator.js";
