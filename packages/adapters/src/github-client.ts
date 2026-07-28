@@ -236,15 +236,19 @@ export type GitHubCheckConclusion =
 
 /**
  * A CI check run, validated from `GET /repos/{owner}/{repo}/commits/{ref}/check-runs`.
- * `conclusion` is present only once `status === "completed"`.
+ * `conclusion` is present only once `status === "completed"`. `headSha` is the
+ * commit the run executed against (GitHub's `head_sha`); when it differs from
+ * the ref queried the run is stale (PR 35 exact-head evidence).
  */
 export interface GitHubCheckRun {
   readonly id: number;
   readonly name: string;
+  readonly headSha: string;
   readonly status: GitHubCheckStatus;
   readonly conclusion: GitHubCheckConclusion | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
+  readonly htmlUrl: string | null;
 }
 
 export type GitHubCombinedStatusState = "success" | "failure" | "pending" | "error";
@@ -1207,10 +1211,12 @@ function parseCheckRun(value: unknown, index: number): GitHubCheckRun {
   return Object.freeze({
     id: requireNumber(object["id"], `${here}.id`),
     name: requireString(object["name"], `${here}.name`),
+    headSha: requireString(object["head_sha"], `${here}.head_sha`),
     status: parseCheckStatus(object["status"], `${here}.status`),
     conclusion: parseCheckConclusion(object["conclusion"], `${here}.conclusion`),
     startedAt: parseNullableString(object["started_at"], `${here}.started_at`),
     completedAt: parseNullableString(object["completed_at"], `${here}.completed_at`),
+    htmlUrl: parseNullableString(object["html_url"], `${here}.html_url`),
   });
 }
 

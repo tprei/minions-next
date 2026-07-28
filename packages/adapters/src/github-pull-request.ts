@@ -102,13 +102,13 @@ export interface ReviewObservation {
   readonly observedAt: string;
 }
 
-export type CheckState = "pass" | "fail" | "pending" | "missing";
+export type CheckSummaryState = "pass" | "fail" | "pending" | "missing";
 
-export interface CheckObservation {
+export interface CheckSummary {
   readonly repositoryFullName: string;
   readonly prNumber: number;
   readonly headSha: string;
-  readonly state: CheckState;
+  readonly state: CheckSummaryState;
   readonly totalCheckRuns: number;
   readonly failingNames: readonly string[];
   readonly pendingNames: readonly string[];
@@ -126,7 +126,7 @@ export interface PullRequestManagerOptions {
 export interface PullRequestManager {
   createOrUpdatePR(input: PullRequestInput): Promise<PullRequestReceipt>;
   observeReviewState(repositoryFullName: string, prNumber: number): Promise<ReviewObservation>;
-  observeChecks(repositoryFullName: string, prNumber: number): Promise<CheckObservation>;
+  observeChecks(repositoryFullName: string, prNumber: number): Promise<CheckSummary>;
 }
 
 export function createPullRequestManager(options: PullRequestManagerOptions): PullRequestManager {
@@ -233,7 +233,7 @@ class PullRequestManagerImpl implements PullRequestManager {
     });
   }
 
-  async observeChecks(repositoryFullName: string, prNumber: number): Promise<CheckObservation> {
+  async observeChecks(repositoryFullName: string, prNumber: number): Promise<CheckSummary> {
     validateRepository(repositoryFullName);
     const client = await this.acquireClient(repositoryFullName);
     const pr = await this.fetchPr(client, repositoryFullName, prNumber);
@@ -249,7 +249,7 @@ class PullRequestManagerImpl implements PullRequestManager {
     const combinedPending = combined.state === "pending";
 
     const hasAny = checkRuns.length > 0 || combined.totalCount > 0;
-    const state: CheckState = !hasAny
+    const state: CheckSummaryState = !hasAny
       ? "missing"
       : failingNames.length > 0 || combinedFailing
         ? "fail"
