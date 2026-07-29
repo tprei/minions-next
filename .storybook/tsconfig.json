@@ -1,16 +1,15 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
     "composite": false,
     "incremental": false,
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
+    "noEmit": true,
     "skipLibCheck": true,
     "types": []
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "include": ["*.ts", "*.tsx"]
 }

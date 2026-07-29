@@ -1,0 +1,126 @@
+.mn-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--mn-color-scrim);
+}
+
+.mn-dialog__overlay[data-state="open"] {
+  animation: mn-dialog-overlay-in var(--mn-motion-duration) var(--mn-motion-easing);
+}
+
+.mn-dialog__overlay[data-state="closed"] {
+  animation: mn-dialog-overlay-out var(--mn-motion-duration) var(--mn-motion-easing);
+}
+
+.mn-dialog__content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-3);
+  width: min(90vw, 28rem);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: var(--mn-space-6);
+  border: 1px solid var(--mn-color-border);
+  border-radius: var(--mn-radius-lg);
+  background-color: var(--mn-color-bg-overlay);
+  transform: translate(-50%, -50%);
+}
+
+.mn-dialog__content[data-state="open"] {
+  animation: mn-dialog-content-in var(--mn-motion-duration) var(--mn-motion-easing);
+}
+
+.mn-dialog__content[data-state="closed"] {
+  animation: mn-dialog-content-out var(--mn-motion-duration) var(--mn-motion-easing);
+}
+
+.mn-dialog__title {
+  margin: 0;
+  padding-right: var(--mn-space-6);
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-lg);
+  font-weight: var(--mn-font-weight-semibold);
+  color: var(--mn-color-fg);
+}
+
+.mn-dialog__description {
+  margin: 0;
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  color: var(--mn-color-fg-muted);
+}
+
+.mn-dialog__body {
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-md);
+  color: var(--mn-color-fg);
+}
+
+.mn-dialog__close {
+  position: absolute;
+  top: var(--mn-space-3);
+  right: var(--mn-space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  border-radius: var(--mn-radius-sm);
+  background-color: transparent;
+  color: var(--mn-color-fg-muted);
+  font-size: var(--mn-font-size-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--mn-motion-duration) var(--mn-motion-easing),
+    color var(--mn-motion-duration) var(--mn-motion-easing);
+}
+
+.mn-dialog__close:hover {
+  background-color: var(--mn-color-bg-inset);
+  color: var(--mn-color-fg);
+}
+
+@keyframes mn-dialog-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mn-dialog-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes mn-dialog-content-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes mn-dialog-content-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.96);
+  }
+}

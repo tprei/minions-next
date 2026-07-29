@@ -1,0 +1,39 @@
+@import "@minions/ui-kit/styles.css";
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--mn-color-bg);
+  color: var(--mn-color-fg);
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-md);
+  line-height: var(--mn-line-height-md);
+}
+
+.mn-app-shell {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--mn-space-8) var(--mn-space-4);
+}
+
+.mn-fixtures {
+  padding: var(--mn-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-6);
+}
+
+.mn-fixtures__section h2 {
+  font-size: var(--mn-font-size-md);
+  margin: 0 0 var(--mn-space-2);
+}
+
+.mn-fixtures__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mn-space-3);
+}

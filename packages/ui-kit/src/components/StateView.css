@@ -1,0 +1,62 @@
+.mn-state-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--mn-space-2);
+  padding: var(--mn-space-8);
+  text-align: center;
+  border-radius: var(--mn-radius-lg);
+  background-color: var(--mn-color-bg-inset);
+}
+
+.mn-state-view__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  font-size: var(--mn-font-size-lg);
+  font-weight: var(--mn-font-weight-semibold);
+  color: var(--mn-color-fg-on-accent);
+  background-color: var(--mn-color-fg-faint);
+}
+
+.mn-state-view--error .mn-state-view__glyph {
+  background-color: var(--mn-color-status-danger-fg);
+}
+
+.mn-state-view--offline .mn-state-view__glyph,
+.mn-state-view--stale .mn-state-view__glyph {
+  background-color: var(--mn-color-status-warning-fg);
+}
+
+.mn-state-view__title {
+  margin: 0;
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-md);
+  font-weight: var(--mn-font-weight-semibold);
+  color: var(--mn-color-fg);
+}
+
+.mn-state-view__description {
+  margin: 0;
+  max-width: 32rem;
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  color: var(--mn-color-fg-muted);
+}
+
+.mn-state-view--loading .mn-state-view__glyph {
+  animation: mn-state-view-pulse calc(var(--mn-motion-duration) * 8) ease-in-out infinite;
+}
+
+@keyframes mn-state-view-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}

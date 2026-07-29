@@ -1,0 +1,9 @@
+.mn-card {
+  background-color: var(--mn-color-bg-raised);
+  border: 1px solid var(--mn-color-border);
+  border-radius: var(--mn-radius-lg);
+}
+
+.mn-card--padded {
+  padding: var(--mn-space-4);
+}

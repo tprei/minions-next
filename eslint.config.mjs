@@ -1,4 +1,6 @@
 import eslint from "@eslint/js";
+import reactHooks from "eslint-plugin-react-hooks";
+import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 const restrictedImports = (...patterns) => [
@@ -15,6 +17,7 @@ export default tseslint.config(
       "**/dist/**",
       "**/node_modules/**",
       "packages/contracts/src/gen/**",
+      "storybook-static/**",
     ],
   },
   eslint.configs.recommended,
@@ -89,6 +92,17 @@ export default tseslint.config(
         ["@minions/adapters", "@minions/adapters/*"],
         ["@minions/testkit", "@minions/testkit/*"],
       ),
+    },
+  },
+  {
+    files: ["apps/web/**/*.tsx", "packages/ui-kit/**/*.tsx"],
+    plugins: {
+      "react-hooks": reactHooks,
+      "react-refresh": reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      "react-refresh/only-export-components": ["error", { allowConstantExport: true }],
     },
   },
   {
