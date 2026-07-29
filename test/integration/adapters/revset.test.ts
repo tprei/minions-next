@@ -474,3 +474,78 @@ describe("revset domain: filterBindings topology", () => {
     ).toThrow();
   });
 });
+
+describe("revset manager: reviewHeaders", () => {
+  /** A runner that returns change ids for `log` and configurable interdiff output. */
+  function reviewRunner(changeIds: readonly string[], interdiffOutput = ""): RevsetJjRunner {
+    return (args) => {
+      if (args[0] === "interdiff") {
+        return Promise.resolve<RevsetJjRunResult>({
+          exitCode: 0,
+          stdout: interdiffOutput,
+          stderr: "",
+        });
+      }
+      return Promise.resolve<RevsetJjRunResult>({
+        exitCode: 0,
+        stdout: `${changeIds.join("\n")}\n`,
+        stderr: "",
+      });
+    };
+  }
+
+  async function upsertReviewBindings(): Promise<void> {
+    if (temporary === undefined) throw new Error("test database not initialized");
+    const store = createSqliteVcsChangeBindingStore({ database: temporary.database });
+    // GRANDCHILD: needs interdiff (commits differ, rewrite generation 1).
+    await store.upsertBinding(
+      bindingA(GRANDCHILD_NODE, {
+        currentCommitId: commit(31),
+        lastReviewedCommitId: commit(3),
+        rewriteGeneration: 1,
+      }),
+    );
+    // LEAF: needs interdiff (commits differ, same generation).
+    await store.upsertBinding(
+      bindingA(LEAF_NODE, {
+        currentCommitId: commit(41),
+        lastReviewedCommitId: commit(4),
+      }),
+    );
+  }
+
+  function reviewManager(interdiffOutput = "") {
+    if (temporary === undefined) throw new Error("test database not initialized");
+    return createRevsetManager({
+      jjBinaryPath: "/nonexistent/jj",
+      workingCopyPath: "/nonexistent/repo",
+      bindingStore: createSqliteVcsChangeBindingStore({ database: temporary.database }),
+      runJj: reviewRunner(TREE_A_CHANGES, interdiffOutput),
+    });
+  }
+
+  it("classifies fresh and never_reviewed from binding fields alone", async () => {
+    // beforeEach already seeded ROOT (fresh) and SIBLING (never_reviewed).
+    const headers = await reviewManager().reviewHeaders(TREE_A);
+    const byNode = new Map(headers.map((h) => [String(h.nodeId), h]));
+    expect(byNode.get(String(ROOT_NODE))?.freshness).toBe("fresh");
+    expect(byNode.get(String(SIBLING_NODE))?.freshness).toBe("never_reviewed");
+    expect(byNode.get(String(ROOT_NODE))?.contentChangedSinceReview).toBe(false);
+  });
+
+  it("classifies ancestry_only when interdiff is empty (restack)", async () => {
+    await upsertReviewBindings();
+    const headers = await reviewManager("").reviewHeaders(TREE_A);
+    const byNode = new Map(headers.map((h) => [String(h.nodeId), h]));
+    expect(byNode.get(String(GRANDCHILD_NODE))?.freshness).toBe("ancestry_only");
+    expect(byNode.get(String(GRANDCHILD_NODE))?.contentChangedSinceReview).toBe(false);
+  });
+
+  it("classifies stale_content when interdiff is non-empty", async () => {
+    await upsertReviewBindings();
+    const headers = await reviewManager("M src/handler.ts\n").reviewHeaders(TREE_A);
+    const byNode = new Map(headers.map((h) => [String(h.nodeId), h]));
+    expect(byNode.get(String(LEAF_NODE))?.freshness).toBe("stale_content");
+    expect(byNode.get(String(LEAF_NODE))?.contentChangedSinceReview).toBe(true);
+  });
+});
