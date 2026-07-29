@@ -185,3 +185,12 @@
   align-items: center;
   gap: var(--mn-space-2);
 }
+
+.mn-home__inbox-link {
+  color: var(--mn-color-fact-fg);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+.mn-home__inbox-link:hover {
+  text-decoration: underline;
+}
