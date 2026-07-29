@@ -9,5 +9,6 @@ docs/*
 !docs/2026-07-13-sqlite-schema.md
 node_modules/
 playwright-report/
+playwright-report-e2e/
 test-results/
 storybook-static/

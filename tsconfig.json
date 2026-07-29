@@ -7,5 +7,10 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["test/**/*.ts", "vitest*.config.ts", "playwright.config.ts"]
+  "include": [
+    "test/**/*.ts",
+    "vitest*.config.ts",
+    "playwright.config.ts",
+    "playwright-e2e.config.ts"
+  ]
 }

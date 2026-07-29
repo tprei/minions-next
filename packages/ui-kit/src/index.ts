@@ -15,6 +15,11 @@ export {
   type StatusKind,
 } from "./components/Provenance.js";
 export { StateView, type StateViewKind, type StateViewProps } from "./components/StateView.js";
+export { Field, type FieldProps } from "./components/Field.js";
+export { TextInput, type TextInputProps } from "./components/TextInput.js";
+export { TextArea, type TextAreaProps } from "./components/TextArea.js";
+export { Select, type SelectOption, type SelectProps } from "./components/Select.js";
+export { NavBar, type NavBarProps } from "./components/NavBar.js";
 export { Tabs, type TabItem, type TabsProps } from "./components/Tabs.js";
 export { ThemeProvider } from "./theme.js";
 export {

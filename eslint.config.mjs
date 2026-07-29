@@ -106,6 +106,17 @@ export default tseslint.config(
     },
   },
   {
+    // Playwright's fixture API (test.extend) requires every fixture function's first
+    // parameter to be an object DESTRUCTURING PATTERN naming its dependencies, even when a
+    // fixture depends on none — `({}, use) => {...}` is the framework's own required shape
+    // (see node_modules/playwright/lib/common/fixtures.js's parameter-list parsing), not an
+    // accidental empty pattern `no-empty-pattern` should otherwise catch.
+    files: ["test/e2e/**/*.ts"],
+    rules: {
+      "no-empty-pattern": ["error", { allowObjectPatternsAsParameters: true }],
+    },
+  },
+  {
     files: ["apps/daemon/**/*.ts", "apps/cli/**/*.ts"],
     rules: {
       "no-restricted-imports": restrictedImports(

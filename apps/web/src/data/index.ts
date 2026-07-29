@@ -3,7 +3,6 @@ export {
   createMemoryStorage,
   type KeyValueStorage,
 } from "./cursor-storage.js";
-export { createDaemonTransport, type DaemonTransportOptions } from "./transport.js";
 export { emptyProjectionState, type ProjectionState } from "./projection-types.js";
 export {
   applyProjectionChange,
@@ -19,3 +18,6 @@ export {
 } from "./event-client.js";
 export { CommandReceiptStore, type ReceiptState } from "./command-receipts.js";
 export { ReadOnlyCache, type CachedProjection } from "./read-only-cache.js";
+export { actorSessionId } from "./actor-session.js";
+export { createApiClients, type ApiClients } from "./api-client.js";
+export { generateUuidV7 } from "./id-generator.js";

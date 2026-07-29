@@ -1,0 +1,33 @@
+.mn-select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+  padding: var(--mn-space-2) var(--mn-space-3);
+  border: 1px solid var(--mn-color-border);
+  border-radius: var(--mn-radius-md);
+  background-color: var(--mn-color-bg);
+  color: var(--mn-color-fg);
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-md);
+  transition:
+    border-color var(--mn-motion-duration) var(--mn-motion-easing),
+    background-color var(--mn-motion-duration) var(--mn-motion-easing);
+}
+
+.mn-select:hover:not(:disabled) {
+  border-color: var(--mn-color-border-strong);
+}
+
+.mn-select:focus-visible {
+  border-color: var(--mn-color-accent);
+}
+
+.mn-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mn-select--invalid {
+  border-color: var(--mn-color-status-danger-fg);
+}

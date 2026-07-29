@@ -1,24 +1,19 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { createClient } from "@connectrpc/connect";
-import { EventService } from "@minions/contracts";
 import {
-  createDaemonTransport,
+  createApiClients,
   createLocalStorageAdapter,
   EventClient,
   ProjectionStore,
   type ConnectionState,
-  type DaemonTransportOptions,
   type EventClientOptions,
   type ProjectionState,
 } from "./index.js";
 
 /**
  * Starts one {@link EventClient} against the daemon on mount and exposes its live
- * {@link ProjectionState} and {@link ConnectionState} via `useSyncExternalStore` (PR 44).
- *
- * The daemon serves the built PWA from its own loopback origin (PR 52), so `window.location`
- * is the correct transport target — there is no separate "API host" to discover for the local
- * v1 case. Host-specific auth headers land with PR 57's device sessions.
+ * {@link ProjectionState} and {@link ConnectionState} via `useSyncExternalStore` (PR 44/45).
+ * Shares its API base URL resolution with every command hook via {@link createApiClients}
+ * (including the E2E test override) so reads and writes always target the same daemon.
  */
 export function useEventClient(cursorKey = "minions.event-cursor"): {
   readonly projection: ProjectionState;
@@ -26,11 +21,9 @@ export function useEventClient(cursorKey = "minions.event-cursor"): {
 } {
   const store = useMemo(() => new ProjectionStore(), []);
   const eventClient = useMemo(() => {
-    const transportOptions: DaemonTransportOptions = { baseUrl: window.location.origin };
-    const transport = createDaemonTransport(transportOptions);
-    const client = createClient(EventService, transport);
+    const { event } = createApiClients();
     const options: EventClientOptions = {
-      client,
+      client: event,
       store,
       storage: createLocalStorageAdapter(),
       cursorKey,
