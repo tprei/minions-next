@@ -35,6 +35,7 @@ import { registerEventService } from "./event-service.js";
 import { registerHostService } from "./host-service.js";
 import { registerMaintenanceService } from "./maintenance-service.js";
 import { registerRepositoryService } from "./repository-service.js";
+import { registerPairingService } from "./pairing-service.js";
 import { registerSteeringService } from "./steering-service.js";
 import { registerSystemService } from "./system-service.js";
 import { registerTreeService, type TreeServiceRevsetOptions } from "./tree-service.js";
@@ -166,6 +167,12 @@ export async function startDaemonServer(
           ids: options.recoveryIds,
           restart: options.recoveryRestart,
         });
+        registerPairingService(
+          router,
+          options.remoteAccess === undefined
+            ? {}
+            : { sessionStore: options.remoteAccess.sessionStore },
+        );
       }
       if (options.mode !== "host") {
         registerHostService(router, options.hostRegistry);

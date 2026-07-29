@@ -22,6 +22,8 @@ export type { MaintenanceServiceOptions } from "./maintenance-service.js";
 export type { CreateStructuredLoggerOptions, StructuredLogger } from "./logger.js";
 export type { DaemonRuntimeOptions, RunningDaemonRuntime } from "./runtime.js";
 export type { DaemonServerOptions, RunningDaemonServer } from "./server.js";
+export { registerPairingService } from "./pairing-service.js";
+export type { PairingServiceOptions } from "./pairing-service.js";
 export { DaemonStartupError, AuthRuntimeStartupError } from "./runtime.js";
 export type {
   AuthBrokerRuntimeOptions,
