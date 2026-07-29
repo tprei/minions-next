@@ -47,3 +47,4 @@ export {
 export * from "./task-tree.js";
 export * from "./value-objects.js";
 export * from "./ssh-profile.js";
+export * from "./wsl-profile.js";

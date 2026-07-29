@@ -839,3 +839,14 @@ export type {
   RevisionRestoreOpFn,
   RevisionSnapshotFn,
 } from "./revision-gate-runner.js";
+
+export { createWslRequirementProbe, WslProbeError } from "./wsl-probe.js";
+export type {
+  CommandResult,
+  CommandRunner,
+  LoopbackProber,
+  StorageProber,
+  WslProbeOptions,
+  WslProbeErrorCode,
+  WslRequirementProbe,
+} from "./wsl-probe.js";

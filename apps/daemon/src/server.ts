@@ -34,6 +34,7 @@ import { registerRepositoryService } from "./repository-service.js";
 import { registerSteeringService } from "./steering-service.js";
 import { registerSystemService } from "./system-service.js";
 import { registerTreeService, type TreeServiceRevsetOptions } from "./tree-service.js";
+import { registerWslHostService } from "./wsl-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
 
 type DaemonSystemOptions = Readonly<{
@@ -142,6 +143,7 @@ export async function startDaemonServer(
         if (options.repository !== undefined) {
           registerRepositoryService(router, options.repository);
         }
+        registerWslHostService(router, {});
       }
       if (options.mode !== "host") {
         registerHostService(router, options.hostRegistry);

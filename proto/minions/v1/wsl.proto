@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+
+service WslHostService {
+  rpc RegisterWslHost(RegisterWslHostRequest) returns (RegisterWslHostResponse);
+  rpc ProbeWslHost(ProbeWslHostRequest) returns (ProbeWslHostResponse);
+  rpc ListWslHosts(ListWslHostsRequest) returns (ListWslHostsResponse);
+}
+
+enum WslRequirement {
+  WSL_REQUIREMENT_UNSPECIFIED = 0;
+  WSL_REQUIREMENT_SYSTEMD = 1;
+  WSL_REQUIREMENT_ROOTLESS_PODMAN = 2;
+  WSL_REQUIREMENT_LOCALHOST_FORWARDING = 3;
+  WSL_REQUIREMENT_SECURE_STORAGE = 4;
+}
+
+message WslHostProfile {
+  string distro = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string windows_user = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  repeated WslRequirement requirements_met = 3;
+}
+
+message WslProbeResult {
+  string distro = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  repeated WslRequirement satisfied = 2;
+  repeated WslRequirement missing = 3;
+}
+
+message RegisterWslHostRequest {
+  WslHostProfile profile = 1 [(buf.validate.field).required = true];
+}
+
+message RegisterWslHostResponse {
+  WslHostProfile profile = 1 [(buf.validate.field).required = true];
+}
+
+message ProbeWslHostRequest {
+  string distro = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+}
+
+message ProbeWslHostResponse {
+  WslProbeResult result = 1 [(buf.validate.field).required = true];
+}
+
+message ListWslHostsRequest {
+  uint32 page_size = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 100
+  }];
+  optional string page_token = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message ListWslHostsResponse {
+  repeated WslHostProfile hosts = 1;
+  optional string next_page_token = 2 [(buf.validate.field).string.uuid = true];
+}
