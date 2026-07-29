@@ -54,3 +54,4 @@ export * from "./pairing.js";
 export * from "./tailscale-capability.js";
 export * from "./mobile-push.js";
 export * from "./security-matrix.js";
+export * from "./release-criteria.js";
