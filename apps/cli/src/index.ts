@@ -2,7 +2,7 @@
 
 import { create } from "@bufbuild/protobuf";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { Code, ConnectError, createClient } from "@connectrpc/connect";
+import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { homedir } from "node:os";
 import { existsSync, statSync } from "node:fs";
@@ -21,18 +21,28 @@ import {
   type SystemdCredsKeyMode,
 } from "@minions/adapters";
 import {
+  AnswerNodeCommandSchema,
   ApiVersionSchema,
   ApprovePlanRequestSchema,
   ArtifactInputSchema,
   ArtifactOutputContractSchema,
+  ArtifactService,
   CreateTreeRequestSchema,
   DoctorStatus,
+  GetNodeOutcomeRequestSchema,
   GetTreeRequestSchema,
   HostService,
   ImplementationOutputContractSchema,
   ListHostsRequestSchema,
+  ListNodeAttentionRequestSchema,
+  ListNodeCommandsRequestSchema,
   ListRepositoriesRequestSchema,
   ListTreesRequestSchema,
+  NodeAttentionKind,
+  NodeAttentionState,
+  NodeCommandDeliveryState,
+  NodeCommandPayloadSchema,
+  NodeCommandRecoveryDisposition,
   NodeState,
   PlanAttentionKind,
   PlanAttentionState,
@@ -40,14 +50,22 @@ import {
   PlanRevisionState,
   ProposePlanRequestSchema,
   ProposedNodeSchema,
+  QueueNodeCommandRequestSchema,
   RepairPlanRequestSchema,
   RepositoryService,
+  SteeringService,
   SystemService,
+  TextNodeCommandSchema,
   TreeBudgetSchema,
   TreeService,
   TreeState,
+  VcsConflictState,
   type ArtifactInput,
   type ExecutionHost,
+  type NodeAttention,
+  type NodeCommand,
+  type NodeCommandPayload,
+  type NodeOutcome,
   type PlanAttention,
   type PlanRevision,
   type RegisteredRepository,
@@ -55,6 +73,7 @@ import {
   type TaskTree,
   type TreeBudget,
   type TreeSummary,
+  type VcsChangeBinding,
 } from "@minions/contracts";
 import { hostId, timestampFromEpochMilliseconds, type HostId } from "@minions/core";
 import { main as runDaemon } from "@minions/daemon";
@@ -110,6 +129,19 @@ export async function main(argv: readonly string[]): Promise<number> {
         );
       case "tree-approve":
         return await approvePlan(invocation.home, invocation.treeId, invocation.planRevisionId);
+      case "tree-provenance":
+        return await exportProvenance(invocation.home, invocation.treeId);
+      case "node-get":
+        return await getNode(invocation.home, invocation.treeId, invocation.nodeId);
+      case "node-steer":
+        return await steerNode(
+          invocation.home,
+          invocation.treeId,
+          invocation.nodeId,
+          invocation.payload,
+        );
+      case "node-attention":
+        return await listNodeAttention(invocation.home, invocation.treeId, invocation.nodeId);
       case "auth-login":
         return await authLogin(invocation);
       case "auth-status":
@@ -191,6 +223,24 @@ type Invocation =
       treeId: string;
       planRevisionId: string;
     }>
+  | Readonly<{
+      command: "tree-provenance";
+      home: string;
+      treeId: string;
+    }>
+  | Readonly<{
+      command: "node-get";
+      home: string;
+      treeId: string;
+      nodeId: string;
+    }>
+  | NodeSteerInvocation
+  | Readonly<{
+      command: "node-attention";
+      home: string;
+      treeId: string;
+      nodeId?: string;
+    }>
   | AuthLoginInvocation
   | AuthStatusInvocation
   | AuthLogoutInvocation;
@@ -222,11 +272,25 @@ type AuthLogoutInvocation = Readonly<{
   vaultKeyMode?: SystemdCredsKeyMode;
 }>;
 
+type NodeSteerInvocation = Readonly<{
+  command: "node-steer";
+  home: string;
+  treeId: string;
+  nodeId: string;
+  payload:
+    | Readonly<{ kind: "text"; text: string }>
+    | Readonly<{ kind: "answer"; answer: string; attentionId: string }>;
+}>;
+
 function parseInvocation(argv: readonly string[]): Invocation {
   const [first, second, ...rest] = argv;
   const command = normalizeCommand(first, second);
   const commandArguments =
-    first === "host" || first === "repository" || first === "tree" || first === "auth"
+    first === "host" ||
+    first === "repository" ||
+    first === "tree" ||
+    first === "node" ||
+    first === "auth"
       ? rest
       : argv.slice(1);
   const positionalCount = invocationPositionalCount(command);
@@ -248,6 +312,10 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let maxAttemptsPerNode: number | undefined;
   let rootAllowedRepositoryPath: string | undefined;
   let rootCheckProfile: string | undefined;
+  let nodeSteerText: string | undefined;
+  let nodeSteerAnswer: string | undefined;
+  let nodeSteerAttentionId: string | undefined;
+  let nodeAttentionNodeId: string | undefined;
   const seenOptions = new Set<string>();
   for (let index = 0; index < optionArguments.length; index += 1) {
     const option = optionArguments[index];
@@ -342,6 +410,34 @@ function parseInvocation(argv: readonly string[]): Invocation {
           throw new UsageError("--root-check-profile is only valid with tree create");
         }
         rootCheckProfile = requiredText("root check profile", requiredValue(option, value));
+        index += 1;
+        break;
+      case "--text":
+        if (command !== "node-steer") {
+          throw new UsageError("--text is only valid with node steer");
+        }
+        nodeSteerText = requiredValue(option, value);
+        index += 1;
+        break;
+      case "--answer":
+        if (command !== "node-steer") {
+          throw new UsageError("--answer is only valid with node steer");
+        }
+        nodeSteerAnswer = requiredValue(option, value);
+        index += 1;
+        break;
+      case "--attention-id":
+        if (command !== "node-steer") {
+          throw new UsageError("--attention-id is only valid with node steer");
+        }
+        nodeSteerAttentionId = parseUuidV7Argument("attention ID", requiredValue(option, value));
+        index += 1;
+        break;
+      case "--node-id":
+        if (command !== "node-attention") {
+          throw new UsageError("--node-id is only valid with node attention");
+        }
+        nodeAttentionNodeId = parseUuidV7Argument("node ID", requiredValue(option, value));
         index += 1;
         break;
       case "--provider":
@@ -489,6 +585,69 @@ function parseInvocation(argv: readonly string[]): Invocation {
       ),
     };
   }
+  if (command === "tree-provenance") {
+    return {
+      command,
+      home,
+      treeId: parseUuidV7Argument("tree ID", requiredPositional("tree ID", positional[0])),
+    };
+  }
+  if (command === "node-get") {
+    return {
+      command,
+      home,
+      treeId: parseUuidV7Argument("tree ID", requiredPositional("tree ID", positional[0])),
+      nodeId: parseUuidV7Argument("node ID", requiredPositional("node ID", positional[1])),
+    };
+  }
+  if (command === "node-steer") {
+    const treeId = parseUuidV7Argument("tree ID", requiredPositional("tree ID", positional[0]));
+    const nodeId = parseUuidV7Argument("node ID", requiredPositional("node ID", positional[1]));
+    const kind = requiredPositional("steer kind", positional[2]);
+    if (kind === "text") {
+      if (nodeSteerAnswer !== undefined || nodeSteerAttentionId !== undefined) {
+        throw new UsageError("--answer and --attention-id are only valid with node steer answer");
+      }
+      if (nodeSteerText === undefined) {
+        throw new UsageError("node steer text requires --text");
+      }
+      return {
+        command,
+        home,
+        treeId,
+        nodeId,
+        payload: { kind: "text", text: requiredText("steer text", nodeSteerText) },
+      };
+    }
+    if (kind === "answer") {
+      if (nodeSteerText !== undefined) {
+        throw new UsageError("--text is only valid with node steer text");
+      }
+      if (nodeSteerAnswer === undefined || nodeSteerAttentionId === undefined) {
+        throw new UsageError("node steer answer requires --answer and --attention-id");
+      }
+      return {
+        command,
+        home,
+        treeId,
+        nodeId,
+        payload: {
+          kind: "answer",
+          answer: requiredText("steer answer", nodeSteerAnswer),
+          attentionId: nodeSteerAttentionId,
+        },
+      };
+    }
+    throw new UsageError("node steer kind must be text or answer");
+  }
+  if (command === "node-attention") {
+    return {
+      command,
+      home,
+      treeId: parseUuidV7Argument("tree ID", requiredPositional("tree ID", positional[0])),
+      ...(nodeAttentionNodeId === undefined ? {} : { nodeId: nodeAttentionNodeId }),
+    };
+  }
   if (command === "auth-login") {
     if (authHostId === undefined) {
       throw new UsageError("auth login requires --host-id");
@@ -569,9 +728,13 @@ function normalizeCommand(
       second === "list" ||
       second === "propose" ||
       second === "repair" ||
-      second === "approve")
+      second === "approve" ||
+      second === "provenance")
   ) {
     return `tree-${second}`;
+  }
+  if (first === "node" && (second === "get" || second === "steer" || second === "attention")) {
+    return `node-${second}`;
   }
   if (first === "auth" && (second === "login" || second === "status" || second === "logout")) {
     return `auth-${second}`;
@@ -584,13 +747,17 @@ function invocationPositionalCount(command: string | undefined): number {
     case "repository-register":
     case "repository-get":
     case "tree-get":
+    case "tree-provenance":
+    case "node-attention":
       return 1;
     case "tree-create":
     case "tree-propose":
+    case "node-steer":
       return 3;
     case "tree-repair":
       return 4;
     case "tree-approve":
+    case "node-get":
       return 2;
     case "auth-login":
     case "auth-status":
@@ -677,7 +844,7 @@ function parseBudget(value: string, option: string): number {
 }
 
 function usageText(): string {
-  return "usage: minions <start|stop|status|doctor|host list|repository register|repository get|repository list|tree create|tree get|tree list|tree propose|tree repair|tree approve|auth login|auth status|auth logout> [options]";
+  return "usage: minions <start|stop|status|doctor|host list|repository register|repository get|repository list|tree create|tree get|tree list|tree propose|tree repair|tree approve|tree provenance|node get|node steer|node attention|auth login|auth status|auth logout> [options]";
 }
 
 async function start(invocation: StartInvocation): Promise<number> {
@@ -925,11 +1092,273 @@ async function approvePlan(home: string, treeId: string, planRevisionId: string)
   return 0;
 }
 
+/**
+ * PR 42 provenance export. Aggregates `tree.getTree` plus one
+ * `artifact.getNodeOutcome` per node (no new server endpoint) into a single
+ * tree -> node -> attempt -> commit -> gates -> PR trace, in the same
+ * root-to-leaf order `tree.nodes` already returns.
+ *
+ * This is a purpose-built aggregation view, not a POJO mirror of one proto
+ * message, so unlike the rest of this file's snake_case command output it
+ * uses the underlying TS field names (camelCase) verbatim.
+ *
+ * Included per node: identity/lineage, objective, state, checkProfile (the
+ * name of the gate profile the node runs against), the VcsChangeBinding
+ * recorded for its most recent commit (branch/bookmark, commit id, conflict
+ * state), and its recorded NodeOutcome (artifact / no-change / commit) when
+ * one exists.
+ *
+ * Omitted: live GitHub PR number/review/CI status. VcsChangeBinding carries
+ * no PR reference, and the only PR lookup available in this repo
+ * (`PullRequestManager`, packages/adapters/src/github-pull-request.ts) needs
+ * a `repositoryFullName` + `prNumber` plus a live `GitHubAppAuth` credential —
+ * neither of which the CLI has on hand for an arbitrary tree — and a per-node
+ * GitHub API round-trip is out of scope for this client-side aggregation.
+ * Likewise, gate *results* are not persisted as a queryable artifact today;
+ * checkProfile is only the gate profile *name*, not a pass/fail receipt.
+ */
+async function exportProvenance(home: string, treeId: string): Promise<number> {
+  const clients = clientsForHome(home);
+  const treeResponse = await clients.tree.getTree(create(GetTreeRequestSchema, { treeId }));
+  const tree = requiredTree(treeResponse.tree, "get tree");
+  const nodes = await Promise.all(
+    tree.nodes.map(async (node) => {
+      const outcome = await provenanceNodeOutcome(clients.artifact, node.id);
+      return {
+        nodeId: node.id,
+        ...(node.parentNodeId === undefined ? {} : { parentNodeId: node.parentNodeId }),
+        objective: node.objective,
+        state: nodeStateJson(node.state),
+        ...(node.vcsChangeBinding === undefined
+          ? {}
+          : { vcsChangeBinding: vcsChangeBindingJson(node.vcsChangeBinding) }),
+        outcome: provenanceOutcomeJson(outcome),
+        checkProfile: node.checkProfile,
+      };
+    }),
+  );
+  writeJson({ treeId: tree.id, nodes });
+  return 0;
+}
+
+type ArtifactClient = Client<typeof ArtifactService>;
+
+async function provenanceNodeOutcome(
+  artifact: ArtifactClient,
+  nodeId: string,
+): Promise<NodeOutcome | undefined> {
+  try {
+    const response = await artifact.getNodeOutcome(create(GetNodeOutcomeRequestSchema, { nodeId }));
+    return response.outcome;
+  } catch (error) {
+    if (error instanceof ConnectError && error.code === Code.NotFound) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function provenanceOutcomeJson(outcome: NodeOutcome | undefined) {
+  if (outcome === undefined) {
+    return null;
+  }
+  const createdAt = requiredTimestamp(outcome.createdAt, "node outcome created_at");
+  switch (outcome.outcome.case) {
+    case "artifact":
+      return { case: "artifact", createdAt, artifactId: outcome.outcome.value.artifactId };
+    case "noChange":
+      return {
+        case: "noChange",
+        createdAt,
+        revision: outcome.outcome.value.revision,
+        evidenceId: outcome.outcome.value.evidenceId,
+        explanation: outcome.outcome.value.explanation,
+      };
+    case "commit":
+      return {
+        case: "commit",
+        createdAt,
+        revision: outcome.outcome.value.revision,
+        evidenceId: outcome.outcome.value.evidenceId,
+      };
+    case undefined:
+      throw new ConnectError("node outcome response has no outcome", Code.Internal);
+  }
+  throw new ConnectError("node outcome response has no outcome", Code.Internal);
+}
+
+function vcsChangeBindingJson(binding: VcsChangeBinding) {
+  return {
+    jjChangeId: binding.jjChangeId,
+    currentCommitId: binding.currentCommitId,
+    ...(binding.parentChangeId === undefined ? {} : { parentChangeId: binding.parentChangeId }),
+    ...(binding.bookmark === undefined ? {} : { bookmark: binding.bookmark }),
+    rewriteGeneration: binding.rewriteGeneration,
+    lastJjOperationId: binding.lastJjOperationId,
+    ...(binding.lastPushedCommitId === undefined
+      ? {}
+      : { lastPushedCommitId: binding.lastPushedCommitId }),
+    ...(binding.lastReviewedCommitId === undefined
+      ? {}
+      : { lastReviewedCommitId: binding.lastReviewedCommitId }),
+    conflictState: vcsConflictStateJson(binding.conflictState),
+  };
+}
+
+function vcsConflictStateJson(value: VcsConflictState): string {
+  switch (value) {
+    case VcsConflictState.CLEAN:
+      return "VCS_CONFLICT_STATE_CLEAN";
+    case VcsConflictState.CONFLICT:
+      return "VCS_CONFLICT_STATE_CONFLICT";
+    case VcsConflictState.RESOLVED:
+      return "VCS_CONFLICT_STATE_RESOLVED";
+    case VcsConflictState.UNSPECIFIED:
+      throw new ConnectError(
+        `vcs change binding has unknown conflict state ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(
+    `vcs change binding has unknown conflict state ${String(value)}`,
+    Code.Internal,
+  );
+}
+
+async function getNode(home: string, treeId: string, nodeId: string): Promise<number> {
+  const clients = clientsForHome(home);
+  const treeResponse = await clients.tree.getTree(create(GetTreeRequestSchema, { treeId }));
+  const tree = requiredTree(treeResponse.tree, "get tree");
+  const node = tree.nodes.find((candidate) => candidate.id === nodeId);
+  if (node === undefined) {
+    throw new ConnectError("node was not found", Code.NotFound);
+  }
+  let outcome: NodeOutcome | undefined;
+  try {
+    const outcomeResponse = await clients.artifact.getNodeOutcome(
+      create(GetNodeOutcomeRequestSchema, { nodeId }),
+    );
+    outcome = outcomeResponse.outcome;
+  } catch (error) {
+    if (!(error instanceof ConnectError) || error.code !== Code.NotFound) {
+      throw error;
+    }
+  }
+  const attentionResponse = await clients.steering.listNodeAttention(
+    create(ListNodeAttentionRequestSchema, { nodeId, openOnly: false }),
+  );
+  const commands: NodeCommand[] = [];
+  const seenOrdinals = new Set<bigint>();
+  let afterOrdinal: bigint | undefined;
+  do {
+    const request =
+      afterOrdinal === undefined
+        ? create(ListNodeCommandsRequestSchema, { nodeId, pageSize: 100 })
+        : create(ListNodeCommandsRequestSchema, { nodeId, pageSize: 100, afterOrdinal });
+    const response = await clients.steering.listNodeCommands(request);
+    commands.push(...response.commands);
+    afterOrdinal = response.nextOrdinal;
+    if (afterOrdinal !== undefined && seenOrdinals.has(afterOrdinal)) {
+      throw new ConnectError(
+        "node command pagination repeated a continuation ordinal",
+        Code.Internal,
+      );
+    }
+    if (afterOrdinal !== undefined) {
+      seenOrdinals.add(afterOrdinal);
+    }
+  } while (afterOrdinal !== undefined);
+  writeJson({
+    node: taskNodeJson(node),
+    ...(outcome === undefined ? {} : { outcome: nodeOutcomeJson(outcome) }),
+    attention: attentionResponse.attention.map(nodeAttentionJson),
+    commands: commands.map(nodeCommandJson),
+  });
+  return 0;
+}
+
+async function steerNode(
+  home: string,
+  treeId: string,
+  nodeId: string,
+  payload: NodeSteerInvocation["payload"],
+): Promise<number> {
+  const clients = clientsForHome(home);
+  const treeResponse = await clients.tree.getTree(create(GetTreeRequestSchema, { treeId }));
+  const tree = requiredTree(treeResponse.tree, "get tree");
+  if (!tree.nodes.some((candidate) => candidate.id === nodeId)) {
+    throw new ConnectError("node was not found", Code.NotFound);
+  }
+  const ids = createSecureIdGenerator({
+    now: () => timestampFromEpochMilliseconds(Date.now()),
+  });
+  const commandPayload =
+    payload.kind === "text"
+      ? create(NodeCommandPayloadSchema, {
+          command: {
+            case: "message",
+            value: create(TextNodeCommandSchema, { text: payload.text }),
+          },
+        })
+      : create(NodeCommandPayloadSchema, {
+          command: {
+            case: "answer",
+            value: create(AnswerNodeCommandSchema, {
+              attentionId: payload.attentionId,
+              answer: payload.answer,
+            }),
+          },
+        });
+  const response = await clients.steering.queueNodeCommand(
+    create(QueueNodeCommandRequestSchema, {
+      commandId: ids.nextId(),
+      actorSessionId: ids.nextId(),
+      nodeId,
+      payload: commandPayload,
+    }),
+  );
+  writeJson({
+    command: nodeCommandJson(requiredNodeCommand(response.command, "queue node command")),
+  });
+  return 0;
+}
+
+async function listNodeAttention(
+  home: string,
+  treeId: string,
+  nodeId: string | undefined,
+): Promise<number> {
+  const clients = clientsForHome(home);
+  const nodeIds =
+    nodeId === undefined
+      ? requiredTree(
+          (await clients.tree.getTree(create(GetTreeRequestSchema, { treeId }))).tree,
+          "get tree",
+        ).nodes.map((candidate) => candidate.id)
+      : [nodeId];
+  const attention: NodeAttention[] = [];
+  for (const candidateNodeId of nodeIds) {
+    const response = await clients.steering.listNodeAttention(
+      create(ListNodeAttentionRequestSchema, { nodeId: candidateNodeId, openOnly: false }),
+    );
+    attention.push(...response.attention);
+  }
+  writeJson({ attention: attention.map(nodeAttentionJson) });
+  return 0;
+}
+
 function requiredTree(tree: TaskTree | undefined, operation: string): TaskTree {
   if (tree === undefined) {
     throw new ConnectError(`${operation} response is missing tree`, Code.Internal);
   }
   return tree;
+}
+
+function requiredNodeCommand(command: NodeCommand | undefined, operation: string): NodeCommand {
+  if (command === undefined) {
+    throw new ConnectError(`${operation} response is missing command`, Code.Internal);
+  }
+  return command;
 }
 
 function treeSummaryJson(summary: TreeSummary) {
@@ -1176,6 +1605,216 @@ function planAttentionStateJson(value: PlanAttentionState): string {
   }
   throw new ConnectError(
     `plan attention response has unknown state ${String(value)}`,
+    Code.Internal,
+  );
+}
+
+function nodeOutcomeJson(outcome: NodeOutcome) {
+  const fields = {
+    node_id: outcome.nodeId,
+    created_at: requiredTimestamp(outcome.createdAt, "node outcome created_at"),
+  };
+  if (outcome.outcome.case === "artifact") {
+    return { ...fields, artifact: { artifact_id: outcome.outcome.value.artifactId } };
+  }
+  if (outcome.outcome.case === "noChange") {
+    return {
+      ...fields,
+      no_change: {
+        revision: outcome.outcome.value.revision,
+        evidence_id: outcome.outcome.value.evidenceId,
+        explanation: outcome.outcome.value.explanation,
+      },
+    };
+  }
+  if (outcome.outcome.case === "commit") {
+    return {
+      ...fields,
+      commit: {
+        revision: outcome.outcome.value.revision,
+        evidence_id: outcome.outcome.value.evidenceId,
+      },
+    };
+  }
+  throw new ConnectError("node outcome response has no outcome", Code.Internal);
+}
+
+function nodeAttentionJson(attention: NodeAttention) {
+  return {
+    id: attention.id,
+    node_id: attention.nodeId,
+    kind: nodeAttentionKindJson(attention.kind),
+    prompt: attention.prompt,
+    choices: attention.choices,
+    state: nodeAttentionStateJson(attention.state),
+    ...(attention.resolutionCommandId === undefined
+      ? {}
+      : { resolution_command_id: attention.resolutionCommandId }),
+    ...(attention.resolution === undefined ? {} : { resolution: attention.resolution }),
+    created_at: requiredTimestamp(attention.createdAt, "node attention created_at"),
+    ...(attention.resolvedAt === undefined
+      ? {}
+      : { resolved_at: toJsonTimestamp(attention.resolvedAt) }),
+  };
+}
+
+function nodeCommandJson(command: NodeCommand) {
+  return {
+    command_id: command.commandId,
+    actor_session_id: command.actorSessionId,
+    node_id: command.nodeId,
+    ordinal: command.ordinal.toString(),
+    payload: nodeCommandPayloadJson(requiredNodeCommandPayload(command.payload)),
+    delivery_state: nodeCommandDeliveryStateJson(command.deliveryState),
+    recovery_disposition: nodeCommandRecoveryDispositionJson(command.recoveryDisposition),
+    delivery_attempts: command.deliveryAttempts,
+    created_at: requiredTimestamp(command.createdAt, "node command created_at"),
+    ...(command.sentAt === undefined ? {} : { sent_at: toJsonTimestamp(command.sentAt) }),
+    ...(command.acknowledgedAt === undefined
+      ? {}
+      : { acknowledged_at: toJsonTimestamp(command.acknowledgedAt) }),
+    ...(command.appliedAt === undefined ? {} : { applied_at: toJsonTimestamp(command.appliedAt) }),
+    ...(command.failedAt === undefined ? {} : { failed_at: toJsonTimestamp(command.failedAt) }),
+    ...(command.failure === undefined ? {} : { failure: command.failure }),
+  };
+}
+
+function requiredNodeCommandPayload(payload: NodeCommandPayload | undefined): NodeCommandPayload {
+  if (payload === undefined) {
+    throw new ConnectError("node command response is missing payload", Code.Internal);
+  }
+  return payload;
+}
+
+function nodeCommandPayloadJson(payload: NodeCommandPayload) {
+  switch (payload.command.case) {
+    case "message":
+      return { case: "text", text: payload.command.value.text };
+    case "steerAfterCurrentTool":
+      return { case: "steer_after_current_tool", text: payload.command.value.text };
+    case "interruptNow":
+      return { case: "interrupt_now" };
+    case "followUpAfterTurn":
+      return { case: "follow_up_after_turn", text: payload.command.value.text };
+    case "pause":
+      return { case: "pause" };
+    case "resume":
+      return { case: "resume" };
+    case "answer":
+      return {
+        case: "answer",
+        attention_id: payload.command.value.attentionId,
+        answer: payload.command.value.answer,
+      };
+    case "approve":
+      return {
+        case: "approve",
+        attention_id: payload.command.value.attentionId,
+        ...(payload.command.value.reason === undefined
+          ? {}
+          : { reason: payload.command.value.reason }),
+      };
+    case "reject":
+      return {
+        case: "reject",
+        attention_id: payload.command.value.attentionId,
+        ...(payload.command.value.reason === undefined
+          ? {}
+          : { reason: payload.command.value.reason }),
+      };
+    case "retry":
+      return { case: "retry" };
+    case "cancelNode":
+      return { case: "cancel_node" };
+    case "cancelSubtree":
+      return { case: "cancel_subtree" };
+    case "replanUnstartedSubtree":
+      return { case: "replan_unstarted_subtree", objective: payload.command.value.objective };
+    case undefined:
+      throw new ConnectError("node command payload response has no case", Code.Internal);
+  }
+}
+
+function nodeAttentionKindJson(value: NodeAttentionKind): string {
+  switch (value) {
+    case NodeAttentionKind.QUESTION:
+      return "NODE_ATTENTION_KIND_QUESTION";
+    case NodeAttentionKind.APPROVAL:
+      return "NODE_ATTENTION_KIND_APPROVAL";
+    case NodeAttentionKind.UNSPECIFIED:
+      throw new ConnectError(
+        `node attention response has unknown kind ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(
+    `node attention response has unknown kind ${String(value)}`,
+    Code.Internal,
+  );
+}
+
+function nodeAttentionStateJson(value: NodeAttentionState): string {
+  switch (value) {
+    case NodeAttentionState.OPEN:
+      return "NODE_ATTENTION_STATE_OPEN";
+    case NodeAttentionState.RESOLVED:
+      return "NODE_ATTENTION_STATE_RESOLVED";
+    case NodeAttentionState.UNSPECIFIED:
+      throw new ConnectError(
+        `node attention response has unknown state ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(
+    `node attention response has unknown state ${String(value)}`,
+    Code.Internal,
+  );
+}
+
+function nodeCommandDeliveryStateJson(value: NodeCommandDeliveryState): string {
+  switch (value) {
+    case NodeCommandDeliveryState.QUEUED:
+      return "NODE_COMMAND_DELIVERY_STATE_QUEUED";
+    case NodeCommandDeliveryState.SENT:
+      return "NODE_COMMAND_DELIVERY_STATE_SENT";
+    case NodeCommandDeliveryState.ACKNOWLEDGED:
+      return "NODE_COMMAND_DELIVERY_STATE_ACKNOWLEDGED";
+    case NodeCommandDeliveryState.APPLIED:
+      return "NODE_COMMAND_DELIVERY_STATE_APPLIED";
+    case NodeCommandDeliveryState.FAILED:
+      return "NODE_COMMAND_DELIVERY_STATE_FAILED";
+    case NodeCommandDeliveryState.REVIEW_REQUIRED:
+      return "NODE_COMMAND_DELIVERY_STATE_REVIEW_REQUIRED";
+    case NodeCommandDeliveryState.UNSPECIFIED:
+      throw new ConnectError(
+        `node command response has unknown delivery state ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(
+    `node command response has unknown delivery state ${String(value)}`,
+    Code.Internal,
+  );
+}
+
+function nodeCommandRecoveryDispositionJson(value: NodeCommandRecoveryDisposition): string {
+  switch (value) {
+    case NodeCommandRecoveryDisposition.RESUME_SESSION:
+      return "NODE_COMMAND_RECOVERY_DISPOSITION_RESUME_SESSION";
+    case NodeCommandRecoveryDisposition.FORK_SESSION:
+      return "NODE_COMMAND_RECOVERY_DISPOSITION_FORK_SESSION";
+    case NodeCommandRecoveryDisposition.RETRY_EXTERNAL_ACTION:
+      return "NODE_COMMAND_RECOVERY_DISPOSITION_RETRY_EXTERNAL_ACTION";
+    case NodeCommandRecoveryDisposition.REQUIRES_REVIEW:
+      return "NODE_COMMAND_RECOVERY_DISPOSITION_REQUIRES_REVIEW";
+    case NodeCommandRecoveryDisposition.UNSPECIFIED:
+      throw new ConnectError(
+        `node command response has unknown recovery disposition ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(
+    `node command response has unknown recovery disposition ${String(value)}`,
     Code.Internal,
   );
 }
@@ -1627,6 +2266,8 @@ function clientsForHome(home: string) {
     host: createClient(HostService, transport),
     repository: createClient(RepositoryService, transport),
     tree: createClient(TreeService, transport),
+    steering: createClient(SteeringService, transport),
+    artifact: createClient(ArtifactService, transport),
   };
 }
 
