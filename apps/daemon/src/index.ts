@@ -17,6 +17,8 @@ export type { SystemServiceOptions } from "./system-service.js";
 export { createSchedulerLoop } from "./scheduler.js";
 export type { CreateSchedulerLoopOptions } from "./scheduler.js";
 export { startDaemonServer } from "./server.js";
+export { registerMaintenanceService } from "./maintenance-service.js";
+export type { MaintenanceServiceOptions } from "./maintenance-service.js";
 export type { CreateStructuredLoggerOptions, StructuredLogger } from "./logger.js";
 export type { DaemonRuntimeOptions, RunningDaemonRuntime } from "./runtime.js";
 export type { DaemonServerOptions, RunningDaemonServer } from "./server.js";
