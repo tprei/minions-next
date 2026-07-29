@@ -323,6 +323,17 @@ export type {
   RevsetManager,
   RevsetManagerOptions,
 } from "./revset-adapter.js";
+export { createSshConnection, SshAdapterError } from "./ssh-adapter.js";
+export type {
+  SshAdapterOptions,
+  SshConnection,
+  SshConnectionState,
+  SshErrorCode,
+  SshRunResult,
+  SshRunner,
+} from "./ssh-adapter.js";
+export { createReconnectStrategy } from "./ssh-reconnect.js";
+export type { ReconnectStrategy, ReconnectStrategyOptions } from "./ssh-reconnect.js";
 export {
   buildRevsetExpression,
   EMPTY_REVSET,

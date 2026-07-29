@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file minions/v1/host.proto.
  */
 export const file_minions_v1_host: GenFile = /*@__PURE__*/
-  fileDesc("ChVtaW5pb25zL3YxL2hvc3QucHJvdG8SCm1pbmlvbnMudjEi6QIKDUV4ZWN1dGlvbkhvc3QSFAoCaWQYASABKAlCCLpIBXIDsAEBEjcKBGtpbmQYAiABKA4yHS5taW5pb25zLnYxLkV4ZWN1dGlvbkhvc3RLaW5kQgq6SAeCAQQQASAAEiAKDGRpc3BsYXlfbmFtZRgDIAEoCUIKukgHcgUQARiAARI5CgVzdGF0ZRgEIAEoDjIeLm1pbmlvbnMudjEuRXhlY3V0aW9uSG9zdFN0YXRlQgq6SAeCAQQQASAAEiEKCGVuZHBvaW50GAUgASgJQgq6SAdyBRABGIAQSACIAQESDwoHdmVyc2lvbhgGIAEoBBI5Cg1yZWdpc3RlcmVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEjAKDGxhc3Rfc2Vlbl9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCwoJX2VuZHBvaW50ImIKEExpc3RIb3N0c1JlcXVlc3QSHAoJcGFnZV9zaXplGAEgASgNQgm6SAYqBBhkKAESIQoKcGFnZV90b2tlbhgCIAEoCUIIukgFcgOwAQFIAIgBAUINCgtfcGFnZV90b2tlbiJ5ChFMaXN0SG9zdHNSZXNwb25zZRIoCgVob3N0cxgBIAMoCzIZLm1pbmlvbnMudjEuRXhlY3V0aW9uSG9zdBImCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAlCCLpIBXIDsAEBSACIAQFCEgoQX25leHRfcGFnZV90b2tlbiqSAQoRRXhlY3V0aW9uSG9zdEtpbmQSIwofRVhFQ1VUSU9OX0hPU1RfS0lORF9VTlNQRUNJRklFRBAAEh0KGUVYRUNVVElPTl9IT1NUX0tJTkRfTE9DQUwQARIbChdFWEVDVVRJT05fSE9TVF9LSU5EX1NTSBACEhwKGEVYRUNVVElPTl9IT1NUX0tJTkRfV1NMMhADKuQBChJFeGVjdXRpb25Ib3N0U3RhdGUSJAogRVhFQ1VUSU9OX0hPU1RfU1RBVEVfVU5TUEVDSUZJRUQQABIgChxFWEVDVVRJT05fSE9TVF9TVEFURV9QRU5ESU5HEAESHwobRVhFQ1VUSU9OX0hPU1RfU1RBVEVfT05MSU5FEAISIAocRVhFQ1VUSU9OX0hPU1RfU1RBVEVfT0ZGTElORRADEiEKHUVYRUNVVElPTl9IT1NUX1NUQVRFX0RFR1JBREVEEAQSIAocRVhFQ1VUSU9OX0hPU1RfU1RBVEVfUkVNT1ZFRBAFMlcKC0hvc3RTZXJ2aWNlEkgKCUxpc3RIb3N0cxIcLm1pbmlvbnMudjEuTGlzdEhvc3RzUmVxdWVzdBodLm1pbmlvbnMudjEuTGlzdEhvc3RzUmVzcG9uc2ViBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("ChVtaW5pb25zL3YxL2hvc3QucHJvdG8SCm1pbmlvbnMudjEi6QIKDUV4ZWN1dGlvbkhvc3QSFAoCaWQYASABKAlCCLpIBXIDsAEBEjcKBGtpbmQYAiABKA4yHS5taW5pb25zLnYxLkV4ZWN1dGlvbkhvc3RLaW5kQgq6SAeCAQQQASAAEiAKDGRpc3BsYXlfbmFtZRgDIAEoCUIKukgHcgUQARiAARI5CgVzdGF0ZRgEIAEoDjIeLm1pbmlvbnMudjEuRXhlY3V0aW9uSG9zdFN0YXRlQgq6SAeCAQQQASAAEiEKCGVuZHBvaW50GAUgASgJQgq6SAdyBRABGIAQSACIAQESDwoHdmVyc2lvbhgGIAEoBBI5Cg1yZWdpc3RlcmVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEjAKDGxhc3Rfc2Vlbl9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCwoJX2VuZHBvaW50ImIKEExpc3RIb3N0c1JlcXVlc3QSHAoJcGFnZV9zaXplGAEgASgNQgm6SAYqBBhkKAESIQoKcGFnZV90b2tlbhgCIAEoCUIIukgFcgOwAQFIAIgBAUINCgtfcGFnZV90b2tlbiJ5ChFMaXN0SG9zdHNSZXNwb25zZRIoCgVob3N0cxgBIAMoCzIZLm1pbmlvbnMudjEuRXhlY3V0aW9uSG9zdBImCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAlCCLpIBXIDsAEBSACIAQFCEgoQX25leHRfcGFnZV90b2tlbiL/AQoOU3NoSG9zdFByb2ZpbGUSGQoFYWxpYXMYASABKAlCCrpIB3IFEAEYgAESHAoIaG9zdG5hbWUYAiABKAlCCrpIB3IFEAEY/wESGQoEcG9ydBgDIAEoDUILukgIKgYY//8DKAESGAoEdXNlchgEIAEoCUIKukgHcgUQARiAARItCg5rbm93bl9ob3N0X2tleRgFIAEoCUIVukgSchAyDl5bMC05YS1mXXs2NH0kEicKE2NvbnRyb2xfbWFzdGVyX3BhdGgYBiABKAlCCrpIB3IFEAEYgCASJwoSbG9jYWxfZm9yd2FyZF9wb3J0GAcgASgNQgu6SAgqBhj//wMoASJNChZSZWdpc3RlclNzaEhvc3RSZXF1ZXN0EjMKB3Byb2ZpbGUYASABKAsyGi5taW5pb25zLnYxLlNzaEhvc3RQcm9maWxlQga6SAPIAQEiSgoXUmVnaXN0ZXJTc2hIb3N0UmVzcG9uc2USLwoEaG9zdBgBIAEoCzIZLm1pbmlvbnMudjEuRXhlY3V0aW9uSG9zdEIGukgDyAEBKpIBChFFeGVjdXRpb25Ib3N0S2luZBIjCh9FWEVDVVRJT05fSE9TVF9LSU5EX1VOU1BFQ0lGSUVEEAASHQoZRVhFQ1VUSU9OX0hPU1RfS0lORF9MT0NBTBABEhsKF0VYRUNVVElPTl9IT1NUX0tJTkRfU1NIEAISHAoYRVhFQ1VUSU9OX0hPU1RfS0lORF9XU0wyEAMq5AEKEkV4ZWN1dGlvbkhvc3RTdGF0ZRIkCiBFWEVDVVRJT05fSE9TVF9TVEFURV9VTlNQRUNJRklFRBAAEiAKHEVYRUNVVElPTl9IT1NUX1NUQVRFX1BFTkRJTkcQARIfChtFWEVDVVRJT05fSE9TVF9TVEFURV9PTkxJTkUQAhIgChxFWEVDVVRJT05fSE9TVF9TVEFURV9PRkZMSU5FEAMSIQodRVhFQ1VUSU9OX0hPU1RfU1RBVEVfREVHUkFERUQQBBIgChxFWEVDVVRJT05fSE9TVF9TVEFURV9SRU1PVkVEEAUyswEKC0hvc3RTZXJ2aWNlEkgKCUxpc3RIb3N0cxIcLm1pbmlvbnMudjEuTGlzdEhvc3RzUmVxdWVzdBodLm1pbmlvbnMudjEuTGlzdEhvc3RzUmVzcG9uc2USWgoPUmVnaXN0ZXJTc2hIb3N0EiIubWluaW9ucy52MS5SZWdpc3RlclNzaEhvc3RSZXF1ZXN0GiMubWluaW9ucy52MS5SZWdpc3RlclNzaEhvc3RSZXNwb25zZWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message minions.v1.ExecutionHost
@@ -112,6 +112,87 @@ export const ListHostsResponseSchema: GenMessage<ListHostsResponse> = /*@__PURE_
   messageDesc(file_minions_v1_host, 2);
 
 /**
+ * @generated from message minions.v1.SshHostProfile
+ */
+export type SshHostProfile = Message<"minions.v1.SshHostProfile"> & {
+  /**
+   * @generated from field: string alias = 1;
+   */
+  alias: string;
+
+  /**
+   * @generated from field: string hostname = 2;
+   */
+  hostname: string;
+
+  /**
+   * @generated from field: uint32 port = 3;
+   */
+  port: number;
+
+  /**
+   * @generated from field: string user = 4;
+   */
+  user: string;
+
+  /**
+   * @generated from field: string known_host_key = 5;
+   */
+  knownHostKey: string;
+
+  /**
+   * @generated from field: string control_master_path = 6;
+   */
+  controlMasterPath: string;
+
+  /**
+   * @generated from field: uint32 local_forward_port = 7;
+   */
+  localForwardPort: number;
+};
+
+/**
+ * Describes the message minions.v1.SshHostProfile.
+ * Use `create(SshHostProfileSchema)` to create a new message.
+ */
+export const SshHostProfileSchema: GenMessage<SshHostProfile> = /*@__PURE__*/
+  messageDesc(file_minions_v1_host, 3);
+
+/**
+ * @generated from message minions.v1.RegisterSshHostRequest
+ */
+export type RegisterSshHostRequest = Message<"minions.v1.RegisterSshHostRequest"> & {
+  /**
+   * @generated from field: minions.v1.SshHostProfile profile = 1;
+   */
+  profile?: SshHostProfile | undefined;
+};
+
+/**
+ * Describes the message minions.v1.RegisterSshHostRequest.
+ * Use `create(RegisterSshHostRequestSchema)` to create a new message.
+ */
+export const RegisterSshHostRequestSchema: GenMessage<RegisterSshHostRequest> = /*@__PURE__*/
+  messageDesc(file_minions_v1_host, 4);
+
+/**
+ * @generated from message minions.v1.RegisterSshHostResponse
+ */
+export type RegisterSshHostResponse = Message<"minions.v1.RegisterSshHostResponse"> & {
+  /**
+   * @generated from field: minions.v1.ExecutionHost host = 1;
+   */
+  host?: ExecutionHost | undefined;
+};
+
+/**
+ * Describes the message minions.v1.RegisterSshHostResponse.
+ * Use `create(RegisterSshHostResponseSchema)` to create a new message.
+ */
+export const RegisterSshHostResponseSchema: GenMessage<RegisterSshHostResponse> = /*@__PURE__*/
+  messageDesc(file_minions_v1_host, 5);
+
+/**
  * @generated from enum minions.v1.ExecutionHostKind
  */
 export enum ExecutionHostKind {
@@ -194,6 +275,14 @@ export const HostService: GenService<{
     methodKind: "unary";
     input: typeof ListHostsRequestSchema;
     output: typeof ListHostsResponseSchema;
+  },
+  /**
+   * @generated from rpc minions.v1.HostService.RegisterSshHost
+   */
+  registerSshHost: {
+    methodKind: "unary";
+    input: typeof RegisterSshHostRequestSchema;
+    output: typeof RegisterSshHostResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_minions_v1_host, 0);

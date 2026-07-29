@@ -7,6 +7,7 @@ import "google/protobuf/timestamp.proto";
 
 service HostService {
   rpc ListHosts(ListHostsRequest) returns (ListHostsResponse);
+  rpc RegisterSshHost(RegisterSshHostRequest) returns (RegisterSshHostResponse);
 }
 
 enum ExecutionHostKind {
@@ -59,4 +60,40 @@ message ListHostsRequest {
 message ListHostsResponse {
   repeated ExecutionHost hosts = 1;
   optional string next_page_token = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message SshHostProfile {
+  string alias = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string hostname = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+  uint32 port = 3 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 65535
+  }];
+  string user = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string known_host_key = 5 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string control_master_path = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  uint32 local_forward_port = 7 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 65535
+  }];
+}
+
+message RegisterSshHostRequest {
+  SshHostProfile profile = 1 [(buf.validate.field).required = true];
+}
+
+message RegisterSshHostResponse {
+  ExecutionHost host = 1 [(buf.validate.field).required = true];
 }

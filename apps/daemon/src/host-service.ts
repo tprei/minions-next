@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   create,
   type DescMessage,
@@ -30,6 +31,33 @@ export function registerHostService(router: ConnectRouter, registry: SupervisorH
         nextPageToken: rows.length > request.pageSize ? hosts.at(-1)?.id : undefined,
       });
       return validateResponse(ListHostsResponseSchema, response);
+    },
+    registerSshHost(request) {
+      if (request.profile === undefined) {
+        throw new ConnectError("profile is required", Code.InvalidArgument);
+      }
+      const profile = request.profile;
+      if (profile.alias.trim().length === 0) {
+        throw new ConnectError("alias must not be empty", Code.InvalidArgument);
+      }
+      const now = Date.now();
+      const host = create(ExecutionHostSchema, {
+        id: randomUUID(),
+        kind: ExecutionHostKind.SSH,
+        displayName: profile.alias,
+        state: ExecutionHostState.PENDING,
+        endpoint: `${profile.hostname}:${String(profile.port)}`,
+        version: 1n,
+        registeredAt: create(TimestampSchema, {
+          seconds: BigInt(Math.floor(now / 1000)),
+          nanos: 0,
+        }),
+        lastSeenAt: create(TimestampSchema, {
+          seconds: BigInt(Math.floor(now / 1000)),
+          nanos: 0,
+        }),
+      });
+      return { host };
     },
   });
 }
