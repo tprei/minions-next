@@ -7,6 +7,10 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "2.12.1",
+    "@connectrpc/connect": "2.1.2",
+    "@connectrpc/connect-web": "2.1.2",
+    "@minions/contracts": "workspace:*",
     "@minions/ui-kit": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8"
