@@ -4,15 +4,26 @@ import {
   AnswerNodeCommandSchema,
   EmptyNodeCommandSchema,
   GetTreeRequestSchema,
+  NodeCommandDeliveryState,
   NodeCommandPayloadSchema,
+  PlanNodeMode,
   QueueNodeCommandRequestSchema,
   ReplanNodeCommandSchema,
   ResolveApprovalNodeCommandSchema,
   TextNodeCommandSchema,
   type NodeCommandPayload,
   type NodeState,
+  type TaskNode,
 } from "@minions/contracts";
-import { Commentary, Fact, NavBar, StateView, StatusBadge } from "@minions/ui-kit";
+import {
+  Commentary,
+  Fact,
+  NavBar,
+  StateView,
+  StatusBadge,
+  Tabs,
+  type TabItem,
+} from "@minions/ui-kit";
 import {
   actorSessionId,
   createApiClients,
@@ -53,6 +64,7 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
   const [error, setError] = useState<TypedError | undefined>(undefined);
   const [fetchedObjective, setFetchedObjective] = useState<string | undefined>();
   const [fetchedState, setFetchedState] = useState<NodeState | undefined>();
+  const [fetchedNode, setFetchedNode] = useState<TaskNode | undefined>();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,6 +76,7 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
         if (found !== undefined) {
           setFetchedObjective(found.objective);
           setFetchedState(found.state);
+          setFetchedNode(found);
         }
       } catch {
         // Projection store will eventually deliver the node via the event stream.
@@ -179,18 +192,98 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
         </div>
       ) : null}
 
-      <h2 className="mn-node-console__section">Command receipts</h2>
-      <CommandTimeline commands={commands} />
-
-      <h2 className="mn-node-console__section">Steer</h2>
-      <Composer
-        openAttention={openAttention}
-        submitting={submitting}
-        error={error}
-        onAction={(action) => {
-          void handleAction(action);
-        }}
-      />
+      {(() => {
+        const commandCount = commands.length;
+        const appliedCount = commands.filter(
+          (c) => c.deliveryState === NodeCommandDeliveryState.APPLIED,
+        ).length;
+        const failedCount = commands.filter(
+          (c) => c.deliveryState === NodeCommandDeliveryState.FAILED,
+        ).length;
+        const tabItems: TabItem[] = [
+          {
+            value: "console",
+            label: "Console",
+            content: (
+              <>
+                <CommandTimeline commands={commands} />
+                <h2 className="mn-node-console__section">Steer</h2>
+                <Composer
+                  openAttention={openAttention}
+                  submitting={submitting}
+                  error={error}
+                  onAction={(action) => {
+                    void handleAction(action);
+                  }}
+                />
+              </>
+            ),
+          },
+          {
+            value: "context",
+            label: "Context",
+            content: (
+              <div className="mn-node-console__evidence" data-testid="context-panel">
+                {fetchedNode !== undefined ? (
+                  <>
+                    <Fact>
+                      mode: {fetchedNode.mode !== PlanNodeMode.UNSPECIFIED ? "set" : "unspecified"}
+                    </Fact>
+                    <Fact>check profile: {fetchedNode.checkProfile || "(unset)"}</Fact>
+                    <Fact>
+                      allowed paths: {fetchedNode.allowedRepositoryPaths.join(", ") || "(none)"}
+                    </Fact>
+                    {fetchedNode.acceptanceCriteria.length > 0 ? (
+                      <div>
+                        <strong>Acceptance criteria</strong>
+                        <ul>
+                          {fetchedNode.acceptanceCriteria.map((criterion, index) => (
+                            <li key={`${String(index)}-${criterion}`}>{criterion}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <Commentary>Node details not yet loaded from GetTree.</Commentary>
+                )}
+                <Commentary>Source: GetTree response. Freshness: {connectionState}.</Commentary>
+              </div>
+            ),
+          },
+          {
+            value: "evidence",
+            label: "Evidence",
+            content: (
+              <div className="mn-node-console__evidence" data-testid="evidence-panel">
+                <Fact>
+                  commands: {String(commandCount)} ({String(appliedCount)} applied,{" "}
+                  {String(failedCount)} failed)
+                </Fact>
+                {fetchedNode?.vcsChangeBinding !== undefined ? (
+                  <>
+                    <Fact title={fetchedNode.vcsChangeBinding.currentCommitId}>
+                      commit {shortId(fetchedNode.vcsChangeBinding.currentCommitId)}
+                    </Fact>
+                    {fetchedNode.vcsChangeBinding.bookmark !== undefined ? (
+                      <Fact>branch: {fetchedNode.vcsChangeBinding.bookmark}</Fact>
+                    ) : null}
+                    <Fact>
+                      rewrite generation: {String(fetchedNode.vcsChangeBinding.rewriteGeneration)}
+                    </Fact>
+                  </>
+                ) : (
+                  <Commentary>No VCS change binding recorded for this node.</Commentary>
+                )}
+                <Commentary>
+                  Source: projection store (live) + GetTree. Freshness: {connectionState}.
+                </Commentary>
+              </div>
+            ),
+          },
+        ];
+        return <Tabs items={tabItems} defaultValue="console" />;
+      })()}
     </div>
   );
 }
