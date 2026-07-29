@@ -2,18 +2,21 @@ import type { ReactNode } from "react";
 import { ThemeProvider } from "@minions/ui-kit";
 import { FixturesRoute } from "./routes/Fixtures.js";
 import { HomeRoute } from "./routes/Home.js";
+import { NodeConsole } from "./routes/node/NodeConsole.js";
 import { TreeRoute } from "./routes/tree/TreeRoute.js";
 
 /**
  * Application shell (PR 43 — ui-design-system-shell; PR 44 — browser-projection-store;
- * PR 45 — host-repository-task-ui; PR 46 — plan-tree-editor-approval).
+ * PR 45 — host-repository-task-ui; PR 46 — plan-tree-editor-approval; PR 47 —
+ * live-node-console-steering).
  *
  * Routing stays deliberately simple — a `window.location.pathname` check, no router
- * dependency — because there are exactly three routes: the deterministic `/fixtures` dev/
- * visual-regression route (PR 43, untouched by real data), `/tree/<id>` (PR 46's plan
- * editor/approval screen, reached from a "New task" confirmation or a task link on the home
- * screen), and the real operator app at every other path (the host/repository home screen,
- * PR 45; the node console lands in PR 47).
+ * dependency — because there are exactly four routes: the deterministic `/fixtures` dev/
+ * visual-regression route (PR 43, untouched by real data), `/tree/<treeId>/node/<nodeId>`
+ * (PR 47's live node console — reached by selecting a node in the tree outline),
+ * `/tree/<id>` (PR 46's plan editor/approval screen, reached from a "New task"
+ * confirmation or a task link on the home screen), and the real operator app at every
+ * other path (the host/repository home screen, PR 45).
  */
 export function App(): ReactNode {
   return (
@@ -30,6 +33,15 @@ function Shell(): ReactNode {
   const { pathname } = window.location;
   if (pathname === "/fixtures") {
     return <FixturesRoute />;
+  }
+  const nodeMatch = /^\/tree\/([^/]+)\/node\/([^/]+)$/.exec(pathname);
+  if (nodeMatch?.[1] !== undefined && nodeMatch[2] !== undefined) {
+    return (
+      <NodeConsole
+        treeId={decodeURIComponent(nodeMatch[1])}
+        nodeId={decodeURIComponent(nodeMatch[2])}
+      />
+    );
   }
   const treeMatch = /^\/tree\/([^/]+)$/.exec(pathname);
   if (treeMatch?.[1] !== undefined) {
