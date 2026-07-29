@@ -5,6 +5,12 @@ export {
   type ButtonVariant,
 } from "./components/Button.js";
 export { Card, type CardProps } from "./components/Card.js";
+export {
+  DiffList,
+  type DiffEntryKind,
+  type DiffListEntry,
+  type DiffListProps,
+} from "./components/DiffList.js";
 export { Dialog, type DialogProps } from "./components/Dialog.js";
 export {
   Commentary,

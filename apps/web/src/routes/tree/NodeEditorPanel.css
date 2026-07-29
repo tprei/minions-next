@@ -1,0 +1,37 @@
+.mn-node-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-3);
+  height: 28rem;
+  overflow-y: auto;
+}
+
+.mn-node-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mn-space-2);
+}
+
+.mn-node-editor__header h2 {
+  margin: 0;
+  font-size: var(--mn-font-size-md);
+  font-weight: var(--mn-font-weight-semibold);
+}
+
+.mn-node-editor__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mn-space-2);
+}
+
+.mn-node-editor__criteria {
+  margin: 0;
+  padding-left: var(--mn-space-4);
+}
+
+.mn-node-editor__inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-2);
+}

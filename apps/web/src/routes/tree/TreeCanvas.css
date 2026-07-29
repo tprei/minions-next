@@ -1,0 +1,53 @@
+.mn-tree-canvas {
+  width: 100%;
+  height: 28rem;
+  border: 1px solid var(--mn-color-border);
+  border-radius: var(--mn-radius-md);
+  background-color: var(--mn-color-bg);
+}
+
+.mn-tree-canvas__edge {
+  stroke: var(--mn-color-border-strong);
+  stroke-width: 1.5;
+}
+
+.mn-tree-canvas__node rect {
+  fill: var(--mn-color-bg-raised);
+  stroke: var(--mn-color-border);
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.mn-tree-canvas__node text {
+  fill: var(--mn-color-fg);
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  pointer-events: none;
+}
+
+.mn-tree-canvas__node rect:hover {
+  stroke: var(--mn-color-border-strong);
+}
+
+.mn-tree-canvas__node rect:focus-visible {
+  outline: 2px solid var(--mn-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.mn-tree-canvas__node--locked rect {
+  fill: var(--mn-color-bg-inset);
+}
+
+.mn-tree-canvas__node--locked text {
+  fill: var(--mn-color-fg-muted);
+}
+
+.mn-tree-canvas__node--stale rect {
+  stroke: var(--mn-color-status-warning-fg);
+}
+
+.mn-tree-canvas__node--selected rect {
+  fill: var(--mn-color-accent-muted);
+  stroke: var(--mn-color-accent);
+  stroke-width: 2;
+}

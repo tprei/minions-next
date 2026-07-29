@@ -122,6 +122,19 @@
   gap: var(--mn-space-2);
 }
 
+.mn-tree-list__link {
+  color: var(--mn-color-fact-fg);
+  border-left: 2px solid var(--mn-color-fact-border);
+  padding-left: var(--mn-space-2);
+  font-family: var(--mn-font-mono);
+  font-size: var(--mn-font-size-sm);
+  text-decoration: none;
+}
+
+.mn-tree-list__link:hover {
+  text-decoration: underline;
+}
+
 .mn-muted {
   margin: 0;
   font-family: var(--mn-font-sans);
