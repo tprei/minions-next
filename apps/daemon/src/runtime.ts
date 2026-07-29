@@ -173,6 +173,24 @@ export type DaemonRuntimeOptions = Readonly<{
    * exposure is deferred — callers drive {@link ExecutionCoordinator.runNode}.
    */
   nodeExecution?: NodeExecutionRuntimeOptions;
+  /**
+   * PR 52: when set, the daemon serves the built web app (apps/web/dist) from this
+   * directory for non-RPC GET requests, making the PWA and RPC API same-origin.
+   */
+  webDistDir?: string;
+  /**
+   * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing). When
+   * enabled, the daemon constructs a process-lifetime {@link DeviceSessionStore},
+   * shares it between the pairing RPCs and the remote-access interceptor, and binds
+   * every interface instead of loopback only (see `server.ts`'s `remoteAccess` doc for
+   * the full security model). Only meaningful for "local"/"host" mode, which is where
+   * the mutation RPCs a phone session gates actually live; ignored for "supervisor"
+   * mode. Omitted, daemon behaviour is unchanged (REMOTE-01's loopback-only default).
+   */
+  remoteAccess?: RemoteAccessRuntimeOptions;
+}>;
+export type RemoteAccessRuntimeOptions = Readonly<{
+  enabled: true;
 }>;
 
 export type ProviderAdmissionRuntimeOptions = Readonly<{
@@ -591,6 +609,8 @@ export async function startDaemonRuntime(
         },
         hostRegistry: requireRegistry(hostRegistry),
         ...(revset !== undefined ? { revset } : {}),
+        ...(options.webDistDir !== undefined ? { webDistDir: options.webDistDir } : {}),
+        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else if (options.mode === "host") {
       server = await startDaemonServer({

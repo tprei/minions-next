@@ -1,0 +1,22 @@
+[Unit]
+Description=Minions — local-first coding-agent command center
+Documentation=https://github.com/tprei/minions-next
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=__PREFIX__/bin/minions daemon --home %h/.local/share/minions
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=tmpfs
+ReadWritePaths=%h/.local/share/minions
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=default.target
