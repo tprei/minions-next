@@ -10,4 +10,5 @@ export * from "./gen/minions/v1/steering_pb.js";
 export * from "./gen/minions/v1/tree_pb.js";
 export * from "./gen/minions/v1/system_pb.js";
 export * from "./projection-change.js";
+export * from "./gen/minions/v1/recovery_pb.js";
 export * from "./gen/minions/v1/wsl_pb.js";
