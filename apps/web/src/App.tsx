@@ -5,6 +5,7 @@ import { HomeRoute } from "./routes/Home.js";
 import { InboxRoute } from "./routes/Inbox.js";
 import { MaintenanceRoute } from "./routes/Maintenance.js";
 import { NodeConsole } from "./routes/node/NodeConsole.js";
+import { RecoveryAuditRoute } from "./routes/RecoveryAudit.js";
 import { TreeRoute } from "./routes/tree/TreeRoute.js";
 
 /**
@@ -43,6 +44,9 @@ function Shell(): ReactNode {
   }
   if (pathname === "/maintenance") {
     return <MaintenanceRoute />;
+  }
+  if (pathname === "/recovery-audit") {
+    return <RecoveryAuditRoute />;
   }
   const nodeMatch = /^\/tree\/([^/]+)\/node\/([^/]+)$/.exec(pathname);
   if (nodeMatch?.[1] !== undefined && nodeMatch[2] !== undefined) {

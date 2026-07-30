@@ -38,6 +38,9 @@ export function MaintenanceRoute(): ReactNode {
         <div className="mn-maintenance__header">
           <h1>Maintenance</h1>
           <Fact>{String(WEB_MAINTENANCE_TOOLS.length)} tools</Fact>
+          <a className="mn-maintenance__audit-link" href="/recovery-audit">
+            Recovery audit →
+          </a>
         </div>
 
         {WEB_MAINTENANCE_TOOLS.length === 0 ? (
