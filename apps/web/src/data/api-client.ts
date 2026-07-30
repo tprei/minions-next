@@ -2,6 +2,7 @@ import { createClient, type Client } from "@connectrpc/connect";
 import {
   EventService,
   HostService,
+  RecoveryService,
   RepositoryService,
   SteeringService,
   TreeService,
@@ -11,6 +12,7 @@ import { createDaemonTransport } from "./transport.js";
 export interface ApiClients {
   readonly event: Client<typeof EventService>;
   readonly host: Client<typeof HostService>;
+  readonly recovery: Client<typeof RecoveryService>;
   readonly repository: Client<typeof RepositoryService>;
   readonly steering: Client<typeof SteeringService>;
   readonly tree: Client<typeof TreeService>;
@@ -41,6 +43,7 @@ export function createApiClients(
   return {
     event: createClient(EventService, transport),
     host: createClient(HostService, transport),
+    recovery: createClient(RecoveryService, transport),
     repository: createClient(RepositoryService, transport),
     steering: createClient(SteeringService, transport),
     tree: createClient(TreeService, transport),
