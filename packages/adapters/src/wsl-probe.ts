@@ -9,7 +9,10 @@
  */
 
 import { spawn } from "node:child_process";
+
 import type { WslDistroName, WslRequirement, WslProbeResult } from "@minions/core";
+
+import { createCredentialVault } from "./credential-vault.js";
 
 // -------------------------------------------------------------------------------------------------
 // Errors.
@@ -176,8 +179,13 @@ function defaultLoopbackProbe(): Promise<boolean> {
   });
 }
 
+/**
+ * Reuses the credential vault's own `probe()` (systemd-creds on Linux/WSL2, Keychain
+ * on macOS) — "secure storage available" and "the credential vault backend is
+ * available" are the same underlying fact, so there is no separate check to invent.
+ */
 function defaultStorageProbe(): Promise<boolean> {
-  return Promise.resolve(false);
+  return Promise.resolve(createCredentialVault("wsl-requirement-probe").probe().available);
 }
 
 function runBounded(args: readonly string[]): Promise<CommandResult> {
