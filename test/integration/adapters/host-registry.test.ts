@@ -235,4 +235,56 @@ describe("supervisor host registry", () => {
       await expect(removal).rejects.toMatchObject({ code: "host_not_found" });
     });
   });
+
+  it("requireActive returns an active host unchanged", async () => {
+    await withSupervisor(async (temporary) => {
+      const registry = createSupervisorHostRegistry({ database: temporary.database });
+      const host = await registry.registerSsh({
+        id: REGISTERED_SSH_HOST_ID,
+        displayName: "builder-a",
+        hostname: "builder-a.internal",
+        port: 22,
+        username: "minions",
+        knownHostKeyFingerprint: KNOWN_HOST_KEY,
+        registeredAt: REGISTERED_AT,
+      });
+
+      expect(registry.requireActive(REGISTERED_SSH_HOST_ID)).toEqual(host);
+    });
+  });
+
+  it("requireActive rejects a revoked host with host_revoked (security scenario 13)", async () => {
+    await withSupervisor(async (temporary) => {
+      const registry = createSupervisorHostRegistry({ database: temporary.database });
+      await registry.registerSsh({
+        id: REGISTERED_SSH_HOST_ID,
+        displayName: "builder-a",
+        hostname: "builder-a.internal",
+        port: 22,
+        username: "minions",
+        knownHostKeyFingerprint: KNOWN_HOST_KEY,
+        registeredAt: REGISTERED_AT,
+      });
+      await registry.remove(REGISTERED_SSH_HOST_ID, REMOVED_AT);
+
+      expect(() => registry.requireActive(REGISTERED_SSH_HOST_ID)).toThrow(HostRegistryError);
+      try {
+        registry.requireActive(REGISTERED_SSH_HOST_ID);
+        expect.unreachable("requireActive must reject a revoked host");
+      } catch (error) {
+        expect(error).toBeInstanceOf(HostRegistryError);
+        expect((error as InstanceType<typeof HostRegistryError>).code).toBe("host_revoked");
+      }
+    });
+  });
+
+  it("requireActive rejects an unknown host with host_not_found", async () => {
+    await withSupervisor((temporary) => {
+      const registry = createSupervisorHostRegistry({ database: temporary.database });
+      expect(() => registry.requireActive(UNKNOWN_HOST_ID)).toThrow(
+        expect.objectContaining({ code: "host_not_found" }),
+      );
+      return Promise.resolve();
+    });
+  });
 });

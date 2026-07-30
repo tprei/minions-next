@@ -48,6 +48,14 @@ export interface SupervisorHostRegistry {
   ensureLocalHost(input: EnsureLocalHostInput): Promise<ExecutionHostRecord>;
   registerSsh(input: RegisterSshHostInput): Promise<ExecutionHostRecord>;
   find(id: HostId): ExecutionHostRecord | undefined;
+  /**
+   * Fetches a host and asserts it is usable: throws `host_not_found` if no such
+   * host was ever registered, `host_revoked` if it was registered and later
+   * removed. Every future connection-dispatch path MUST call this (or `find` plus
+   * an equivalent check) before attempting to reach a host — this is the guard
+   * that makes host removal actually deny use, not just relabel a row.
+   */
+  requireActive(id: HostId): ExecutionHostRecord;
   markOffline(id: HostId, observedAt: Timestamp): Promise<ExecutionHostRecord>;
   /** Soft-removes a host: `state` becomes `"removed"`, permanently. Idempotent. */
   remove(id: HostId, observedAt: Timestamp): Promise<ExecutionHostRecord>;
@@ -156,6 +164,17 @@ class DefaultSupervisorHostRegistry implements SupervisorHostRegistry {
     return this.#database.read((reader) => findHostById(reader, id));
   }
 
+  requireActive(id: HostId): ExecutionHostRecord {
+    const host = this.find(id);
+    if (host === undefined) {
+      throw new HostRegistryError("host_not_found", "execution host does not exist");
+    }
+    if (host.state === "removed") {
+      throw new HostRegistryError("host_revoked", "execution host has been removed");
+    }
+    return host;
+  }
+
   markOffline(id: HostId, observedAt: Timestamp): Promise<ExecutionHostRecord> {
     const timestamp = timestampFromEpochMilliseconds(observedAt);
     return executeManagedSqliteWrite(this.#database, (transaction) => {
@@ -228,7 +247,11 @@ class DefaultSupervisorHostRegistry implements SupervisorHostRegistry {
 }
 
 export type HostRegistryErrorCode =
-  "host_not_active" | "host_not_found" | "invalid_observation" | "registry_corrupt";
+  | "host_not_active"
+  | "host_not_found"
+  | "host_revoked"
+  | "invalid_observation"
+  | "registry_corrupt";
 
 export class HostRegistryError extends Error {
   readonly code: HostRegistryErrorCode;
