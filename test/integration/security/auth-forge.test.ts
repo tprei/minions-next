@@ -22,7 +22,7 @@ describe("auth gateway error contract", () => {
   });
 
   it("preserves the error name as the class name", () => {
-    const error = new AuthGatewayError("auth_failed", "authentication failed");
+    const error = new AuthGatewayError("capability_unknown", "authentication failed");
     expect(error.name).toBe("AuthGatewayError");
   });
 
@@ -35,10 +35,10 @@ describe("auth gateway error contract", () => {
   it("every error code produces a distinct AuthGatewayError", () => {
     const codes: AuthGatewayErrorCode[] = [
       "spawn_failed",
-      "auth_failed",
-      "timeout",
+      "capability_unknown",
+      "status_unhealthy",
       "not_running",
-      "capability_revoked",
+      "revocation_failed",
     ];
     const errors = codes.map((code) => new AuthGatewayError(code, `test: ${code}`));
     // Every error has a unique code
@@ -47,9 +47,8 @@ describe("auth gateway error contract", () => {
   });
 
   it("errors are safe to throw in promise chains", async () => {
-    const thrower = async (): Promise<void> => {
-      throw new AuthGatewayError("auth_failed", "forged token detected");
-    };
+    const thrower = (): Promise<void> =>
+      Promise.reject(new AuthGatewayError("capability_unknown", "forged token detected"));
     await expect(thrower()).rejects.toThrow(AuthGatewayError);
     await expect(thrower()).rejects.toThrow(/forged token/);
   });

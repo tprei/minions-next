@@ -40,6 +40,9 @@ describe("protobuf boundary security", () => {
       },
     });
     expect(req.commandId).toBe("01900000-0000-7000-8000-000000000001");
+    if (req.payload === undefined) {
+      expect.unreachable("payload must be defined");
+    }
     expect(req.payload.command.case).toBe("pause");
   });
 
@@ -78,6 +81,9 @@ describe("protobuf boundary security", () => {
       nodeId: "01900000-0000-7000-8000-000000000003",
       payload: pausePayload,
     });
+    if (req.payload === undefined) {
+      expect.unreachable("payload must be defined");
+    }
     expect(req.payload.command.case).toBe("pause");
     // An undefined case would indicate a malformed payload
     expect(req.payload.command.case).toBeDefined();

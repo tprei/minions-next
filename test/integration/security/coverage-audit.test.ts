@@ -47,9 +47,18 @@ const COVERAGE: Record<SecurityBoundary, { tested: boolean; suites: string[] }> 
     tested: false,
     suites: [],
   },
+  // syntheticId 14 "changed host key rejected" is covered by ssh-adapter.test.ts's
+  // host_key_mismatch suite. syntheticId 13 "revoked SSH host rejected" is covered
+  // by ssh-revocation.test.ts against the real supervisor registry (RegisterSshHost/
+  // RemoveHost RPCs + requireActive's host_revoked guard). Real SSH bootstrap/
+  // ControlMaster/tunnel connection dispatch needs a real remote host and is not
+  // covered — see PR 53's spec delegation for that follow-up scope.
   ssh_revocation: {
-    tested: false,
-    suites: [],
+    tested: true,
+    suites: [
+      "test/unit/adapters/ssh-adapter.test.ts (host_key_mismatch — syntheticId 14)",
+      "test/integration/security/ssh-revocation.test.ts (requireActive/host_revoked — syntheticId 13)",
+    ],
   },
   phone_revocation: {
     tested: false,
