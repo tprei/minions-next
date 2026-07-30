@@ -144,8 +144,8 @@ export async function startDaemonServer(
         if (options.repository !== undefined) {
           registerRepositoryService(router, options.repository);
         }
+        registerMaintenanceService(router, { database: options.database });
         registerWslHostService(router, {});
-        registerMaintenanceService(router, {});
       }
       if (options.mode !== "host") {
         registerHostService(router, options.hostRegistry);
