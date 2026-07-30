@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
@@ -33,18 +33,34 @@ import {
  * RequestPairingCode generates a cryptographically random 6-char legible code with a
  * 5-minute expiry (`node:crypto.randomInt` — `@minions/core` has no `node:crypto` access
  * by design, so this adapter supplies the secure random source `generatePairingCode`
- * requires). CompletePairing consumes a still-valid code exactly once and mints a new
- * `DeviceSession`; ListDevices/RevokeDevice operate on the same in-memory registry.
+ * requires). CompletePairing consumes a still-valid code exactly once, mints a new
+ * `DeviceSession` via the shared {@link DeviceSessionStore}, and authenticates it going
+ * forward with an HttpOnly Secure SameSite=Strict cookie plus a double-submit CSRF token
+ * (returned via a response header, never in the cookie itself — a cross-site page can
+ * trigger a cookie-bearing request but cannot read the header to reproduce the token).
+ * RevokeDevice requires that authentication and a control-scope session: the caller must
+ * present the cookie issued to *some* still-valid control session and echo its CSRF token
+ * back, closing the "read-only/control boundaries" and "CSRF/origin protections"
+ * requirements. ListDevices and RequestPairingCode stay open reads/bootstrapping,
+ * unchanged.
+ *
+ * The device-session store is shared with `remote-access-interceptor.ts` (passed in via
+ * `options.sessionStore`, defaulting to a private store when omitted) so a session this
+ * service mints or revokes is authenticated identically wherever a non-loopback caller
+ * invokes a scope-gated mutation RPC. Pairing codes stay private to this module — they
+ * are single-use and exist only to bootstrap a session, so nothing outside pairing needs
+ * to see them.
  *
  * Both stores are in-memory and scoped to the daemon process lifetime — pairing codes are
  * short-lived by design (5 minutes) and device sessions have no cross-restart persistence
- * requirement in this revision (no `UserKnownHostsFile`-style durable store exists yet;
- * a restarted daemon requires every paired device to re-pair). This matches
- * `RequestPairingCode`'s pre-existing "ephemeral, not persisted" precedent.
+ * requirement in this revision (no durable store exists yet; a restarted daemon requires
+ * every paired device to re-pair). This matches `RequestPairingCode`'s pre-existing
+ * "ephemeral, not persisted" precedent.
  */
 export type PairingServiceOptions = Readonly<Record<string, never>>;
 
 const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
+const DEVICE_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Uniform [0, 1) float sourced from a CSPRNG — pairing codes gate device trust. */
 function secureRandomSource(): number {
@@ -86,7 +102,6 @@ export function registerPairingService(
   void options;
   const sessionStore = options.sessionStore ?? createDeviceSessionStore();
   const pendingCodes = new Map<string, PairingCode>();
-  const deviceSessions = new Map<string, DeviceSession>();
 
   router.service(PairingService, {
     requestPairingCode(request) {
@@ -100,7 +115,7 @@ export function registerPairingService(
         scope: request.scope,
       });
     },
-    completePairing(request) {
+    completePairing(request, context) {
       const pending = pendingCodes.get(request.code);
       // One-time use: the code is consumed on every attempt, valid or not, so a
       // leaked/observed code cannot be replayed after a single completion attempt.
@@ -115,18 +130,26 @@ export function registerPairingService(
         now,
         ttlMs: DEVICE_SESSION_TTL_MS,
       });
-      deviceSessions.set(session.sessionId, session);
-      return create(CompletePairingResponseSchema, { session: toProtoSession(session) });
+
+      context.responseHeader.set(
+        "Set-Cookie",
+        `${SESSION_COOKIE_NAME}=${authenticated.sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${String(
+          Math.floor(DEVICE_SESSION_TTL_MS / 1000),
+        )}`,
+      );
+      context.responseHeader.set(CSRF_HEADER_NAME, authenticated.csrfToken);
+      return create(CompletePairingResponseSchema, {
+        session: toProtoSession(authenticated.session),
+      });
     },
     listDevices() {
       return create(ListDevicesResponseSchema, {
-        devices: [...deviceSessions.values()].map(toProtoSession),
+        devices: sessionStore.list().map((entry) => toProtoSession(entry.session)),
       });
     },
-    revokeDevice(request) {
-      // Idempotent: revoking an already-revoked/unknown session id still succeeds — the
-      // caller's postcondition ("this session cannot act") holds either way.
-      deviceSessions.delete(request.sessionId);
+    revokeDevice(request, context) {
+      sessionStore.authenticate(context.requestHeader, "control", Date.now());
+      sessionStore.revoke(request.sessionId);
       return create(RevokeDeviceResponseSchema, {});
     },
   });

@@ -98,18 +98,39 @@ describe("PairingService integration", () => {
   it("revokeDevice removes the session — it no longer appears in listDevices", async () => {
     const pairing = pairingClient();
     const { code } = await pairing.requestPairingCode({ scope: PairingScope.CONTROL });
-    const { session } = await pairing.completePairing({ code, deviceLabel: "revoke-me" });
+    let responseHeaders: Headers | undefined;
+    const { session } = await pairing.completePairing(
+      { code, deviceLabel: "revoke-me" },
+      { onHeader: (headers) => (responseHeaders = headers) },
+    );
     expect((await pairing.listDevices({})).devices).toHaveLength(1);
 
-    await pairing.revokeDevice({ sessionId: session?.sessionId ?? "" });
+    const cookie = (responseHeaders?.get("Set-Cookie") ?? "").split(";")[0] ?? "";
+    const csrfToken = responseHeaders?.get("X-Minions-Csrf-Token") ?? "";
+    await pairing.revokeDevice(
+      { sessionId: session?.sessionId ?? "" },
+      { headers: { Cookie: cookie, "X-Minions-Csrf-Token": csrfToken } },
+    );
 
     expect((await pairing.listDevices({})).devices).toEqual([]);
   });
 
-  it("revokeDevice on an unknown session id is idempotent (no error)", async () => {
+  it("revokeDevice on an unknown session id is idempotent (no error) for an authenticated caller", async () => {
     const pairing = pairingClient();
+    const { code } = await pairing.requestPairingCode({ scope: PairingScope.CONTROL });
+    let responseHeaders: Headers | undefined;
+    await pairing.completePairing(
+      { code, deviceLabel: "caller" },
+      { onHeader: (headers) => (responseHeaders = headers) },
+    );
+    const cookie = (responseHeaders?.get("Set-Cookie") ?? "").split(";")[0] ?? "";
+    const csrfToken = responseHeaders?.get("X-Minions-Csrf-Token") ?? "";
+
     await expect(
-      pairing.revokeDevice({ sessionId: "01900000-0000-7000-8000-000000000099" }),
+      pairing.revokeDevice(
+        { sessionId: "01900000-0000-7000-8000-000000000099" },
+        { headers: { Cookie: cookie, "X-Minions-Csrf-Token": csrfToken } },
+      ),
     ).resolves.toBeDefined();
   });
 
