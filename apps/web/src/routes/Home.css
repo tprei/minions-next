@@ -194,3 +194,12 @@
 .mn-home__inbox-link:hover {
   text-decoration: underline;
 }
+
+.mn-home__push-notifications-link {
+  color: var(--mn-color-fact-fg);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+.mn-home__push-notifications-link:hover {
+  text-decoration: underline;
+}

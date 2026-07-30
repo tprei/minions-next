@@ -11,6 +11,10 @@ service PushService {
   rpc RegisterSubscription(RegisterSubscriptionRequest) returns (RegisterSubscriptionResponse);
   rpc UnregisterSubscription(UnregisterSubscriptionRequest) returns (UnregisterSubscriptionResponse);
   rpc SendPushNotification(SendPushNotificationRequest) returns (SendPushNotificationResponse);
+  // Mechanical prerequisite for RFC 8292 VAPID: the browser's
+  // `pushManager.subscribe({applicationServerKey})` call needs the daemon's raw VAPID
+  // public key before it can create a subscription at all.
+  rpc GetVapidPublicKey(GetVapidPublicKeyRequest) returns (GetVapidPublicKeyResponse);
 }
 
 // The kind of event a push notification reports.
@@ -65,4 +69,14 @@ message SendPushNotificationRequest {
 
 message SendPushNotificationResponse {
   uint32 delivered_count = 1;
+}
+
+message GetVapidPublicKeyRequest {}
+
+// The daemon's current VAPID public key (ECDSA P-256, uncompressed point, base64url —
+// RFC 8292 section 3.2's "k" parameter encoding), for use as the Push API's
+// `applicationServerKey`. The VAPID key pair is generated once per daemon process and
+// never persisted (see push-service.ts); it changes across daemon restarts.
+message GetVapidPublicKeyResponse {
+  string vapid_public_key = 1 [(buf.validate.field).string = {min_len: 1}];
 }

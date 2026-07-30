@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file minions/v1/push.proto.
  */
 export const file_minions_v1_push: GenFile = /*@__PURE__*/
-  fileDesc("ChVtaW5pb25zL3YxL3B1c2gucHJvdG8SCm1pbmlvbnMudjEiaAoQUHVzaFN1YnNjcmlwdGlvbhIcCghlbmRwb2ludBgBIAEoCUIKukgHcgUQARiAEBIbCgpwMjU2ZGhfa2V5GAIgASgJQge6SARyAhABEhkKCGF1dGhfa2V5GAMgASgJQge6SARyAhABIlkKG1JlZ2lzdGVyU3Vic2NyaXB0aW9uUmVxdWVzdBI6CgxzdWJzY3JpcHRpb24YASABKAsyHC5taW5pb25zLnYxLlB1c2hTdWJzY3JpcHRpb25CBrpIA8gBASJBChxSZWdpc3RlclN1YnNjcmlwdGlvblJlc3BvbnNlEiEKD3N1YnNjcmlwdGlvbl9pZBgBIAEoCUIIukgFcgOwAQEiPQodVW5yZWdpc3RlclN1YnNjcmlwdGlvblJlcXVlc3QSHAoIZW5kcG9pbnQYASABKAlCCrpIB3IFEAEYgBAiIAoeVW5yZWdpc3RlclN1YnNjcmlwdGlvblJlc3BvbnNlIqcBChtTZW5kUHVzaE5vdGlmaWNhdGlvblJlcXVlc3QSGQoHdHJlZV9pZBgBIAEoCUIIukgFcgOwAQESGQoHbm9kZV9pZBgCIAEoCUIIukgFcgOwAQESOgoEa2luZBgDIAEoDjIgLm1pbmlvbnMudjEuUHVzaE5vdGlmaWNhdGlvbktpbmRCCrpIB4IBBBABIAASFgoFdGl0bGUYBCABKAlCB7pIBHICEAEiNwocU2VuZFB1c2hOb3RpZmljYXRpb25SZXNwb25zZRIXCg9kZWxpdmVyZWRfY291bnQYASABKA0qtAEKFFB1c2hOb3RpZmljYXRpb25LaW5kEiYKIlBVU0hfTk9USUZJQ0FUSU9OX0tJTkRfVU5TUEVDSUZJRUQQABIkCiBQVVNIX05PVElGSUNBVElPTl9LSU5EX0FUVEVOVElPThABEiIKHlBVU0hfTk9USUZJQ0FUSU9OX0tJTkRfT1VUQ09NRRACEioKJlBVU0hfTk9USUZJQ0FUSU9OX0tJTkRfQ09NTUFORF9SRUNFSVBUEAMy1AIKC1B1c2hTZXJ2aWNlEmkKFFJlZ2lzdGVyU3Vic2NyaXB0aW9uEicubWluaW9ucy52MS5SZWdpc3RlclN1YnNjcmlwdGlvblJlcXVlc3QaKC5taW5pb25zLnYxLlJlZ2lzdGVyU3Vic2NyaXB0aW9uUmVzcG9uc2USbwoWVW5yZWdpc3RlclN1YnNjcmlwdGlvbhIpLm1pbmlvbnMudjEuVW5yZWdpc3RlclN1YnNjcmlwdGlvblJlcXVlc3QaKi5taW5pb25zLnYxLlVucmVnaXN0ZXJTdWJzY3JpcHRpb25SZXNwb25zZRJpChRTZW5kUHVzaE5vdGlmaWNhdGlvbhInLm1pbmlvbnMudjEuU2VuZFB1c2hOb3RpZmljYXRpb25SZXF1ZXN0GigubWluaW9ucy52MS5TZW5kUHVzaE5vdGlmaWNhdGlvblJlc3BvbnNlYgZwcm90bzM", [file_buf_validate_validate]);
+  fileDesc("ChVtaW5pb25zL3YxL3B1c2gucHJvdG8SCm1pbmlvbnMudjEiaAoQUHVzaFN1YnNjcmlwdGlvbhIcCghlbmRwb2ludBgBIAEoCUIKukgHcgUQARiAEBIbCgpwMjU2ZGhfa2V5GAIgASgJQge6SARyAhABEhkKCGF1dGhfa2V5GAMgASgJQge6SARyAhABIlkKG1JlZ2lzdGVyU3Vic2NyaXB0aW9uUmVxdWVzdBI6CgxzdWJzY3JpcHRpb24YASABKAsyHC5taW5pb25zLnYxLlB1c2hTdWJzY3JpcHRpb25CBrpIA8gBASJBChxSZWdpc3RlclN1YnNjcmlwdGlvblJlc3BvbnNlEiEKD3N1YnNjcmlwdGlvbl9pZBgBIAEoCUIIukgFcgOwAQEiPQodVW5yZWdpc3RlclN1YnNjcmlwdGlvblJlcXVlc3QSHAoIZW5kcG9pbnQYASABKAlCCrpIB3IFEAEYgBAiIAoeVW5yZWdpc3RlclN1YnNjcmlwdGlvblJlc3BvbnNlIqcBChtTZW5kUHVzaE5vdGlmaWNhdGlvblJlcXVlc3QSGQoHdHJlZV9pZBgBIAEoCUIIukgFcgOwAQESGQoHbm9kZV9pZBgCIAEoCUIIukgFcgOwAQESOgoEa2luZBgDIAEoDjIgLm1pbmlvbnMudjEuUHVzaE5vdGlmaWNhdGlvbktpbmRCCrpIB4IBBBABIAASFgoFdGl0bGUYBCABKAlCB7pIBHICEAEiNwocU2VuZFB1c2hOb3RpZmljYXRpb25SZXNwb25zZRIXCg9kZWxpdmVyZWRfY291bnQYASABKA0iGgoYR2V0VmFwaWRQdWJsaWNLZXlSZXF1ZXN0Ij4KGUdldFZhcGlkUHVibGljS2V5UmVzcG9uc2USIQoQdmFwaWRfcHVibGljX2tleRgBIAEoCUIHukgEcgIQASq0AQoUUHVzaE5vdGlmaWNhdGlvbktpbmQSJgoiUFVTSF9OT1RJRklDQVRJT05fS0lORF9VTlNQRUNJRklFRBAAEiQKIFBVU0hfTk9USUZJQ0FUSU9OX0tJTkRfQVRURU5USU9OEAESIgoeUFVTSF9OT1RJRklDQVRJT05fS0lORF9PVVRDT01FEAISKgomUFVTSF9OT1RJRklDQVRJT05fS0lORF9DT01NQU5EX1JFQ0VJUFQQAzK2AwoLUHVzaFNlcnZpY2USaQoUUmVnaXN0ZXJTdWJzY3JpcHRpb24SJy5taW5pb25zLnYxLlJlZ2lzdGVyU3Vic2NyaXB0aW9uUmVxdWVzdBooLm1pbmlvbnMudjEuUmVnaXN0ZXJTdWJzY3JpcHRpb25SZXNwb25zZRJvChZVbnJlZ2lzdGVyU3Vic2NyaXB0aW9uEikubWluaW9ucy52MS5VbnJlZ2lzdGVyU3Vic2NyaXB0aW9uUmVxdWVzdBoqLm1pbmlvbnMudjEuVW5yZWdpc3RlclN1YnNjcmlwdGlvblJlc3BvbnNlEmkKFFNlbmRQdXNoTm90aWZpY2F0aW9uEicubWluaW9ucy52MS5TZW5kUHVzaE5vdGlmaWNhdGlvblJlcXVlc3QaKC5taW5pb25zLnYxLlNlbmRQdXNoTm90aWZpY2F0aW9uUmVzcG9uc2USYAoRR2V0VmFwaWRQdWJsaWNLZXkSJC5taW5pb25zLnYxLkdldFZhcGlkUHVibGljS2V5UmVxdWVzdBolLm1pbmlvbnMudjEuR2V0VmFwaWRQdWJsaWNLZXlSZXNwb25zZWIGcHJvdG8z", [file_buf_validate_validate]);
 
 /**
  * A Web Push subscription for a single browser/device endpoint. p256dh_key
@@ -162,6 +162,41 @@ export const SendPushNotificationResponseSchema: GenMessage<SendPushNotification
   messageDesc(file_minions_v1_push, 6);
 
 /**
+ * @generated from message minions.v1.GetVapidPublicKeyRequest
+ */
+export type GetVapidPublicKeyRequest = Message<"minions.v1.GetVapidPublicKeyRequest"> & {
+};
+
+/**
+ * Describes the message minions.v1.GetVapidPublicKeyRequest.
+ * Use `create(GetVapidPublicKeyRequestSchema)` to create a new message.
+ */
+export const GetVapidPublicKeyRequestSchema: GenMessage<GetVapidPublicKeyRequest> = /*@__PURE__*/
+  messageDesc(file_minions_v1_push, 7);
+
+/**
+ * The daemon's current VAPID public key (ECDSA P-256, uncompressed point, base64url —
+ * RFC 8292 section 3.2's "k" parameter encoding), for use as the Push API's
+ * `applicationServerKey`. The VAPID key pair is generated once per daemon process and
+ * never persisted (see push-service.ts); it changes across daemon restarts.
+ *
+ * @generated from message minions.v1.GetVapidPublicKeyResponse
+ */
+export type GetVapidPublicKeyResponse = Message<"minions.v1.GetVapidPublicKeyResponse"> & {
+  /**
+   * @generated from field: string vapid_public_key = 1;
+   */
+  vapidPublicKey: string;
+};
+
+/**
+ * Describes the message minions.v1.GetVapidPublicKeyResponse.
+ * Use `create(GetVapidPublicKeyResponseSchema)` to create a new message.
+ */
+export const GetVapidPublicKeyResponseSchema: GenMessage<GetVapidPublicKeyResponse> = /*@__PURE__*/
+  messageDesc(file_minions_v1_push, 8);
+
+/**
  * The kind of event a push notification reports.
  *
  * @generated from enum minions.v1.PushNotificationKind
@@ -225,6 +260,18 @@ export const PushService: GenService<{
     methodKind: "unary";
     input: typeof SendPushNotificationRequestSchema;
     output: typeof SendPushNotificationResponseSchema;
+  },
+  /**
+   * Mechanical prerequisite for RFC 8292 VAPID: the browser's
+   * `pushManager.subscribe({applicationServerKey})` call needs the daemon's raw VAPID
+   * public key before it can create a subscription at all.
+   *
+   * @generated from rpc minions.v1.PushService.GetVapidPublicKey
+   */
+  getVapidPublicKey: {
+    methodKind: "unary";
+    input: typeof GetVapidPublicKeyRequestSchema;
+    output: typeof GetVapidPublicKeyResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_minions_v1_push, 0);

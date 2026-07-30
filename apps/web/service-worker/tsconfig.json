@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../dist-sw-typecheck",
+    "composite": false,
+    "incremental": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024", "WebWorker"],
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["sw.ts"]
+}

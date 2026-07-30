@@ -178,6 +178,9 @@ importers:
       react-dom:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
+      workbox-precaching:
+        specifier: 7.4.1
+        version: 7.4.1
     devDependencies:
       '@types/d3-hierarchy':
         specifier: 3.1.7

@@ -1,0 +1,39 @@
+.mn-push-notifications {
+  min-height: calc(100vh - 56px);
+  padding: 16px 24px;
+}
+
+.mn-push-notifications__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.mn-push-notifications__header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.mn-push-notifications__description {
+  max-width: 60ch;
+  color: var(--mn-color-fact-fg);
+  line-height: 1.5;
+}
+
+.mn-push-notifications__actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 12px;
+}
+
+.mn-push-notifications__back {
+  color: var(--mn-color-fact-fg);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.mn-push-notifications__back:hover {
+  text-decoration: underline;
+}
