@@ -11,6 +11,7 @@ import { createStructuredLogger } from "./logger.js";
 import { defaultRuntimeOptions, startDaemonRuntime } from "./runtime.js";
 
 export { createStructuredLogger, defaultRuntimeOptions, startDaemonRuntime };
+export { registerHostService } from "./host-service.js";
 export { createSchedulerLoop } from "./scheduler.js";
 export type { CreateSchedulerLoopOptions } from "./scheduler.js";
 export { startDaemonServer } from "./server.js";

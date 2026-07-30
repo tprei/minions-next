@@ -7,7 +7,10 @@ import { describe, expect, it } from "vitest";
 const REGISTERED_AT = timestampFromEpochMilliseconds(1_700_000_000_000);
 const OFFLINE_AT = timestampFromEpochMilliseconds(1_700_000_000_100);
 const ONLINE_AT = timestampFromEpochMilliseconds(1_700_000_000_200);
+const REMOVED_AT = timestampFromEpochMilliseconds(1_700_000_000_300);
 const CLOCK = new FixedClock(REGISTERED_AT);
+
+const KNOWN_HOST_KEY = "a".repeat(64);
 
 const LOCAL_HOST_ID = hostId("018f3a2e-4a20-7b90-8123-abcdef123456");
 const REPLACEMENT_LOCAL_ID = hostId("018f3a2e-4a20-7b90-8123-abcdef123457");
@@ -15,6 +18,7 @@ const SSH_HOST_ID_A = hostId("018f3a2e-4a20-7b90-8123-abcdef123458");
 const SSH_HOST_ID_B = hostId("018f3a2e-4a20-7b90-8123-abcdef123459");
 const WSL_HOST_ID = hostId("018f3a2e-4a20-7b90-8123-abcdef12345a");
 const UNKNOWN_HOST_ID = hostId("018f3a2e-4a20-7b90-8123-abcdef1234ff");
+const REGISTERED_SSH_HOST_ID = hostId("018f3a2e-4a20-7b90-8123-abcdef1234fe");
 
 async function withSupervisor<T>(
   operation: (temporary: TemporarySqliteDatabase) => Promise<T>,
@@ -149,6 +153,86 @@ describe("supervisor host registry", () => {
       await expect(transition).rejects.toBeInstanceOf(HostRegistryError);
       await expect(transition).rejects.toMatchObject({ code: "host_not_found" });
       expect(registry.list({ afterId: undefined, limit: 10 })).toEqual([]);
+    });
+  });
+
+  it("registers an SSH host and persists its profile alongside the execution host", async () => {
+    await withSupervisor(async (temporary) => {
+      const registry = createSupervisorHostRegistry({ database: temporary.database });
+
+      const host = await registry.registerSsh({
+        id: REGISTERED_SSH_HOST_ID,
+        displayName: "builder-a",
+        hostname: "builder-a.internal",
+        port: 22,
+        username: "minions",
+        knownHostKeyFingerprint: KNOWN_HOST_KEY,
+        registeredAt: REGISTERED_AT,
+      });
+
+      expect(host).toEqual({
+        id: REGISTERED_SSH_HOST_ID,
+        kind: "ssh",
+        displayName: "builder-a",
+        state: "pending",
+        endpoint: "builder-a.internal:22",
+        version: 0,
+        registeredAt: REGISTERED_AT,
+        lastSeenAt: REGISTERED_AT,
+      });
+      expect(registry.find(REGISTERED_SSH_HOST_ID)).toEqual(host);
+
+      const profileRows = temporary.database.read((reader) =>
+        reader.all(
+          "SELECT hostname, port, username, host_key_fingerprint FROM ssh_profiles WHERE host_id = ?",
+          [REGISTERED_SSH_HOST_ID],
+        ),
+      );
+      expect(profileRows).toEqual([
+        {
+          hostname: "builder-a.internal",
+          port: 22n,
+          username: "minions",
+          host_key_fingerprint: KNOWN_HOST_KEY,
+        },
+      ]);
+    });
+  });
+
+  it("removes a host permanently and is idempotent on a second removal", async () => {
+    await withSupervisor(async (temporary) => {
+      const registry = createSupervisorHostRegistry({ database: temporary.database });
+      await registry.registerSsh({
+        id: REGISTERED_SSH_HOST_ID,
+        displayName: "builder-a",
+        hostname: "builder-a.internal",
+        port: 22,
+        username: "minions",
+        knownHostKeyFingerprint: KNOWN_HOST_KEY,
+        registeredAt: REGISTERED_AT,
+      });
+
+      const removed = await registry.remove(REGISTERED_SSH_HOST_ID, REMOVED_AT);
+      expect(removed).toMatchObject({
+        id: REGISTERED_SSH_HOST_ID,
+        state: "removed",
+        version: 1,
+      });
+
+      // Idempotent: a second removal is a no-op and preserves the original timestamp
+      // rather than advancing version or removed_at on every repeated call.
+      const removedAgain = await registry.remove(REGISTERED_SSH_HOST_ID, ONLINE_AT);
+      expect(removedAgain).toEqual(removed);
+    });
+  });
+
+  it("rejects removal of unknown hosts", async () => {
+    await withSupervisor(async (temporary) => {
+      const registry = createSupervisorHostRegistry({ database: temporary.database });
+      const removal = registry.remove(UNKNOWN_HOST_ID, REMOVED_AT);
+
+      await expect(removal).rejects.toBeInstanceOf(HostRegistryError);
+      await expect(removal).rejects.toMatchObject({ code: "host_not_found" });
     });
   });
 });
