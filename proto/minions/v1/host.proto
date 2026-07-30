@@ -8,6 +8,7 @@ import "google/protobuf/timestamp.proto";
 service HostService {
   rpc ListHosts(ListHostsRequest) returns (ListHostsResponse);
   rpc RegisterSshHost(RegisterSshHostRequest) returns (RegisterSshHostResponse);
+  rpc RemoveHost(RemoveHostRequest) returns (RemoveHostResponse);
 }
 
 enum ExecutionHostKind {
@@ -97,3 +98,14 @@ message RegisterSshHostRequest {
 message RegisterSshHostResponse {
   ExecutionHost host = 1 [(buf.validate.field).required = true];
 }
+
+// Removes a host's trust from the supervisor registry. Idempotent: removing
+// an already-removed or unknown host id still succeeds — the caller's
+// postcondition ("this host is not trusted") holds either way. A removed
+// host's id is never reused; re-adding the same physical host registers a
+// new host id.
+message RemoveHostRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message RemoveHostResponse {}

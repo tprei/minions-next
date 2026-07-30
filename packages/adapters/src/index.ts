@@ -75,6 +75,7 @@ export type {
   ExecutionHostState,
   HostRegistryErrorCode,
   ListExecutionHostsInput,
+  RegisterSshHostInput,
   SupervisorHostRegistry,
 } from "./sqlite/host-registry.js";
 export { createRepositoryRegistry, RepositoryRegistryError } from "./sqlite/repository-registry.js";
