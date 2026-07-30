@@ -51,3 +51,4 @@ export * from "./wsl-profile.js";
 export * from "./maintenance.js";
 export * from "./recovery-action.js";
 export * from "./pairing.js";
+export * from "./tailscale-capability.js";

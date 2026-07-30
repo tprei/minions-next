@@ -2,7 +2,9 @@ import { randomInt } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
+import { createTailscaleProbe, type TailscaleProbe } from "@minions/adapters";
 import {
+  CheckNetworkCapabilityResponseSchema,
   CompletePairingResponseSchema,
   DeviceSessionSchema,
   ListDevicesResponseSchema,
@@ -29,6 +31,12 @@ import {
 
 /**
  * Pairing service handler (PR 57 — private-phone-pairing).
+ *
+ * CheckNetworkCapability reports the private-network-reachability half of "Phone
+ * access requires both private-network reachability and valid application session":
+ * it runs the real `@minions/adapters` `TailscaleProbe` (`tailscale status --json`,
+ * read-only, never mutates tailnet state) to report whether this host is on a
+ * tailnet right now and whether that tailnet supports HTTPS cert issuance for it.
  *
  * RequestPairingCode generates a cryptographically random 6-char legible code with a
  * 5-minute expiry (`node:crypto.randomInt` — `@minions/core` has no `node:crypto` access
@@ -57,7 +65,11 @@ import {
  * every paired device to re-pair). This matches `RequestPairingCode`'s pre-existing
  * "ephemeral, not persisted" precedent.
  */
-export type PairingServiceOptions = Readonly<Record<string, never>>;
+export type PairingServiceOptions = Readonly<{
+  tailscaleProbe?: TailscaleProbe;
+  /** Shared with the remote-access interceptor. Defaults to a private store. */
+  sessionStore?: DeviceSessionStore;
+}>;
 
 const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
 const DEVICE_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -99,11 +111,20 @@ export function registerPairingService(
   router: ConnectRouter,
   options: PairingServiceOptions,
 ): void {
-  void options;
+  const probe = options.tailscaleProbe ?? createTailscaleProbe();
   const sessionStore = options.sessionStore ?? createDeviceSessionStore();
   const pendingCodes = new Map<string, PairingCode>();
 
   router.service(PairingService, {
+    async checkNetworkCapability() {
+      const capability = await probe.checkCapability();
+      return create(CheckNetworkCapabilityResponseSchema, {
+        connected: capability.connected,
+        tailnetHostname: capability.tailnetHostname,
+        httpsCapable: capability.httpsCapable,
+        certDomain: capability.certDomain,
+      });
+    },
     requestPairingCode(request) {
       const scope = toDomainScope(request.scope);
       const expiresAt = Date.now() + PAIRING_CODE_TTL_MS;

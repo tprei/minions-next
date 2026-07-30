@@ -10,6 +10,7 @@ import "google/protobuf/timestamp.proto";
 // public listener or relay. Pairing codes are short-lived and single-use,
 // and every resulting device session is individually revocable.
 service PairingService {
+  rpc CheckNetworkCapability(CheckNetworkCapabilityRequest) returns (CheckNetworkCapabilityResponse);
   rpc RequestPairingCode(RequestPairingCodeRequest) returns (RequestPairingCodeResponse);
   rpc CompletePairing(CompletePairingRequest) returns (CompletePairingResponse);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
@@ -81,3 +82,15 @@ message RevokeDeviceRequest {
 }
 
 message RevokeDeviceResponse {}
+
+message CheckNetworkCapabilityRequest {}
+
+// Reports the private-network reachability half of pairing's access requirement
+// ("Phone access requires both private-network reachability AND a valid
+// application session"). Read-only — never mutates tailnet state.
+message CheckNetworkCapabilityResponse {
+  bool connected = 1;
+  optional string tailnet_hostname = 2 [(buf.validate.field).string = {min_len: 1}];
+  bool https_capable = 3;
+  optional string cert_domain = 4 [(buf.validate.field).string = {min_len: 1}];
+}

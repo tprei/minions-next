@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file minions/v1/pairing.proto.
  */
 export const file_minions_v1_pairing: GenFile = /*@__PURE__*/
-  fileDesc("ChhtaW5pb25zL3YxL3BhaXJpbmcucHJvdG8SCm1pbmlvbnMudjEiUAoZUmVxdWVzdFBhaXJpbmdDb2RlUmVxdWVzdBIzCgVzY29wZRgBIAEoDjIYLm1pbmlvbnMudjEuUGFpcmluZ1Njb3BlQgq6SAeCAQQQASAAIrQBChpSZXF1ZXN0UGFpcmluZ0NvZGVSZXNwb25zZRIpCgRjb2RlGAEgASgJQhu6SBhyFjIUXlsyLTlBLUhKS01OUC1aXXs2fSQSNgoKZXhwaXJlc19hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIzCgVzY29wZRgDIAEoDjIYLm1pbmlvbnMudjEuUGFpcmluZ1Njb3BlQgq6SAeCAQQQASAAImUKFkNvbXBsZXRlUGFpcmluZ1JlcXVlc3QSKQoEY29kZRgBIAEoCUIbukgYchYyFF5bMi05QS1ISktNTlAtWl17Nn0kEiAKDGRldmljZV9sYWJlbBgCIAEoCUIKukgHcgUQARiAASJNChdDb21wbGV0ZVBhaXJpbmdSZXNwb25zZRIyCgdzZXNzaW9uGAEgASgLMhkubWluaW9ucy52MS5EZXZpY2VTZXNzaW9uQga6SAPIAQEi9gEKDURldmljZVNlc3Npb24SHAoKc2Vzc2lvbl9pZBgBIAEoCUIIukgFcgOwAQESIAoMZGV2aWNlX2xhYmVsGAIgASgJQgq6SAdyBRABGIABEjMKBXNjb3BlGAMgASgOMhgubWluaW9ucy52MS5QYWlyaW5nU2NvcGVCCrpIB4IBBBABIAASNgoKY3JlYXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI4CgxsYXN0X3NlZW5fYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQEiFAoSTGlzdERldmljZXNSZXF1ZXN0IkEKE0xpc3REZXZpY2VzUmVzcG9uc2USKgoHZGV2aWNlcxgBIAMoCzIZLm1pbmlvbnMudjEuRGV2aWNlU2Vzc2lvbiIzChNSZXZva2VEZXZpY2VSZXF1ZXN0EhwKCnNlc3Npb25faWQYASABKAlCCLpIBXIDsAEBIhYKFFJldm9rZURldmljZVJlc3BvbnNlKmUKDFBhaXJpbmdTY29wZRIdChlQQUlSSU5HX1NDT1BFX1VOU1BFQ0lGSUVEEAASGwoXUEFJUklOR19TQ09QRV9SRUFEX09OTFkQARIZChVQQUlSSU5HX1NDT1BFX0NPTlRST0wQAjL0AgoOUGFpcmluZ1NlcnZpY2USYwoSUmVxdWVzdFBhaXJpbmdDb2RlEiUubWluaW9ucy52MS5SZXF1ZXN0UGFpcmluZ0NvZGVSZXF1ZXN0GiYubWluaW9ucy52MS5SZXF1ZXN0UGFpcmluZ0NvZGVSZXNwb25zZRJaCg9Db21wbGV0ZVBhaXJpbmcSIi5taW5pb25zLnYxLkNvbXBsZXRlUGFpcmluZ1JlcXVlc3QaIy5taW5pb25zLnYxLkNvbXBsZXRlUGFpcmluZ1Jlc3BvbnNlEk4KC0xpc3REZXZpY2VzEh4ubWluaW9ucy52MS5MaXN0RGV2aWNlc1JlcXVlc3QaHy5taW5pb25zLnYxLkxpc3REZXZpY2VzUmVzcG9uc2USUQoMUmV2b2tlRGV2aWNlEh8ubWluaW9ucy52MS5SZXZva2VEZXZpY2VSZXF1ZXN0GiAubWluaW9ucy52MS5SZXZva2VEZXZpY2VSZXNwb25zZWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("ChhtaW5pb25zL3YxL3BhaXJpbmcucHJvdG8SCm1pbmlvbnMudjEiUAoZUmVxdWVzdFBhaXJpbmdDb2RlUmVxdWVzdBIzCgVzY29wZRgBIAEoDjIYLm1pbmlvbnMudjEuUGFpcmluZ1Njb3BlQgq6SAeCAQQQASAAIrQBChpSZXF1ZXN0UGFpcmluZ0NvZGVSZXNwb25zZRIpCgRjb2RlGAEgASgJQhu6SBhyFjIUXlsyLTlBLUhKS01OUC1aXXs2fSQSNgoKZXhwaXJlc19hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIzCgVzY29wZRgDIAEoDjIYLm1pbmlvbnMudjEuUGFpcmluZ1Njb3BlQgq6SAeCAQQQASAAImUKFkNvbXBsZXRlUGFpcmluZ1JlcXVlc3QSKQoEY29kZRgBIAEoCUIbukgYchYyFF5bMi05QS1ISktNTlAtWl17Nn0kEiAKDGRldmljZV9sYWJlbBgCIAEoCUIKukgHcgUQARiAASJNChdDb21wbGV0ZVBhaXJpbmdSZXNwb25zZRIyCgdzZXNzaW9uGAEgASgLMhkubWluaW9ucy52MS5EZXZpY2VTZXNzaW9uQga6SAPIAQEi9gEKDURldmljZVNlc3Npb24SHAoKc2Vzc2lvbl9pZBgBIAEoCUIIukgFcgOwAQESIAoMZGV2aWNlX2xhYmVsGAIgASgJQgq6SAdyBRABGIABEjMKBXNjb3BlGAMgASgOMhgubWluaW9ucy52MS5QYWlyaW5nU2NvcGVCCrpIB4IBBBABIAASNgoKY3JlYXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI4CgxsYXN0X3NlZW5fYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQEiFAoSTGlzdERldmljZXNSZXF1ZXN0IkEKE0xpc3REZXZpY2VzUmVzcG9uc2USKgoHZGV2aWNlcxgBIAMoCzIZLm1pbmlvbnMudjEuRGV2aWNlU2Vzc2lvbiIzChNSZXZva2VEZXZpY2VSZXF1ZXN0EhwKCnNlc3Npb25faWQYASABKAlCCLpIBXIDsAEBIhYKFFJldm9rZURldmljZVJlc3BvbnNlIh8KHUNoZWNrTmV0d29ya0NhcGFiaWxpdHlSZXF1ZXN0IroBCh5DaGVja05ldHdvcmtDYXBhYmlsaXR5UmVzcG9uc2USEQoJY29ubmVjdGVkGAEgASgIEiYKEHRhaWxuZXRfaG9zdG5hbWUYAiABKAlCB7pIBHICEAFIAIgBARIVCg1odHRwc19jYXBhYmxlGAMgASgIEiEKC2NlcnRfZG9tYWluGAQgASgJQge6SARyAhABSAGIAQFCEwoRX3RhaWxuZXRfaG9zdG5hbWVCDgoMX2NlcnRfZG9tYWluKmUKDFBhaXJpbmdTY29wZRIdChlQQUlSSU5HX1NDT1BFX1VOU1BFQ0lGSUVEEAASGwoXUEFJUklOR19TQ09QRV9SRUFEX09OTFkQARIZChVQQUlSSU5HX1NDT1BFX0NPTlRST0wQAjLlAwoOUGFpcmluZ1NlcnZpY2USbwoWQ2hlY2tOZXR3b3JrQ2FwYWJpbGl0eRIpLm1pbmlvbnMudjEuQ2hlY2tOZXR3b3JrQ2FwYWJpbGl0eVJlcXVlc3QaKi5taW5pb25zLnYxLkNoZWNrTmV0d29ya0NhcGFiaWxpdHlSZXNwb25zZRJjChJSZXF1ZXN0UGFpcmluZ0NvZGUSJS5taW5pb25zLnYxLlJlcXVlc3RQYWlyaW5nQ29kZVJlcXVlc3QaJi5taW5pb25zLnYxLlJlcXVlc3RQYWlyaW5nQ29kZVJlc3BvbnNlEloKD0NvbXBsZXRlUGFpcmluZxIiLm1pbmlvbnMudjEuQ29tcGxldGVQYWlyaW5nUmVxdWVzdBojLm1pbmlvbnMudjEuQ29tcGxldGVQYWlyaW5nUmVzcG9uc2USTgoLTGlzdERldmljZXMSHi5taW5pb25zLnYxLkxpc3REZXZpY2VzUmVxdWVzdBofLm1pbmlvbnMudjEuTGlzdERldmljZXNSZXNwb25zZRJRCgxSZXZva2VEZXZpY2USHy5taW5pb25zLnYxLlJldm9rZURldmljZVJlcXVlc3QaIC5taW5pb25zLnYxLlJldm9rZURldmljZVJlc3BvbnNlYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message minions.v1.RequestPairingCodeRequest
@@ -203,6 +203,55 @@ export const RevokeDeviceResponseSchema: GenMessage<RevokeDeviceResponse> = /*@_
   messageDesc(file_minions_v1_pairing, 8);
 
 /**
+ * @generated from message minions.v1.CheckNetworkCapabilityRequest
+ */
+export type CheckNetworkCapabilityRequest = Message<"minions.v1.CheckNetworkCapabilityRequest"> & {
+};
+
+/**
+ * Describes the message minions.v1.CheckNetworkCapabilityRequest.
+ * Use `create(CheckNetworkCapabilityRequestSchema)` to create a new message.
+ */
+export const CheckNetworkCapabilityRequestSchema: GenMessage<CheckNetworkCapabilityRequest> = /*@__PURE__*/
+  messageDesc(file_minions_v1_pairing, 9);
+
+/**
+ * Reports the private-network reachability half of pairing's access requirement
+ * ("Phone access requires both private-network reachability AND a valid
+ * application session"). Read-only — never mutates tailnet state.
+ *
+ * @generated from message minions.v1.CheckNetworkCapabilityResponse
+ */
+export type CheckNetworkCapabilityResponse = Message<"minions.v1.CheckNetworkCapabilityResponse"> & {
+  /**
+   * @generated from field: bool connected = 1;
+   */
+  connected: boolean;
+
+  /**
+   * @generated from field: optional string tailnet_hostname = 2;
+   */
+  tailnetHostname?: string | undefined;
+
+  /**
+   * @generated from field: bool https_capable = 3;
+   */
+  httpsCapable: boolean;
+
+  /**
+   * @generated from field: optional string cert_domain = 4;
+   */
+  certDomain?: string | undefined;
+};
+
+/**
+ * Describes the message minions.v1.CheckNetworkCapabilityResponse.
+ * Use `create(CheckNetworkCapabilityResponseSchema)` to create a new message.
+ */
+export const CheckNetworkCapabilityResponseSchema: GenMessage<CheckNetworkCapabilityResponse> = /*@__PURE__*/
+  messageDesc(file_minions_v1_pairing, 10);
+
+/**
  * Access scope granted to a paired device.
  *
  * @generated from enum minions.v1.PairingScope
@@ -239,6 +288,14 @@ export const PairingScopeSchema: GenEnum<PairingScope> = /*@__PURE__*/
  * @generated from service minions.v1.PairingService
  */
 export const PairingService: GenService<{
+  /**
+   * @generated from rpc minions.v1.PairingService.CheckNetworkCapability
+   */
+  checkNetworkCapability: {
+    methodKind: "unary";
+    input: typeof CheckNetworkCapabilityRequestSchema;
+    output: typeof CheckNetworkCapabilityResponseSchema;
+  },
   /**
    * @generated from rpc minions.v1.PairingService.RequestPairingCode
    */

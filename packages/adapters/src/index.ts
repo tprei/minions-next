@@ -874,3 +874,11 @@ export type {
   WslProbeErrorCode,
   WslRequirementProbe,
 } from "./wsl-probe.js";
+
+export { createTailscaleProbe } from "./tailscale-probe.js";
+export type {
+  TailscaleCommandResult,
+  TailscaleCommandRunner,
+  TailscaleProbe,
+  TailscaleProbeOptions,
+} from "./tailscale-probe.js";

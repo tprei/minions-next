@@ -1,4 +1,5 @@
 import { createClient, createRouterTransport, Code, ConnectError } from "@connectrpc/connect";
+import type { TailscaleProbe } from "@minions/adapters";
 import { PairingScope, PairingService } from "@minions/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -11,14 +12,51 @@ import { registerPairingService } from "@minions/daemon";
  * handler under test is a pure function of the request/router, so this is a faithful,
  * fast integration test of `registerPairingService`'s actual RPC wiring, not a mock.
  */
-function pairingClient() {
+function pairingClient(tailscaleProbe?: TailscaleProbe) {
   const transport = createRouterTransport((router) => {
-    registerPairingService(router, {});
+    registerPairingService(router, tailscaleProbe === undefined ? {} : { tailscaleProbe });
   });
   return createClient(PairingService, transport);
 }
 
+function fakeTailscaleProbe(
+  capability: Awaited<ReturnType<TailscaleProbe["checkCapability"]>>,
+): TailscaleProbe {
+  return { checkCapability: () => Promise.resolve(capability) };
+}
+
 describe("PairingService integration", () => {
+  it("checkNetworkCapability reflects a connected, https-capable probe", async () => {
+    const pairing = pairingClient(
+      fakeTailscaleProbe({
+        connected: true,
+        tailnetHostname: "mini-1.example.ts.net",
+        httpsCapable: true,
+        certDomain: "mini-1.example.ts.net",
+      }),
+    );
+    const response = await pairing.checkNetworkCapability({});
+    expect(response.connected).toBe(true);
+    expect(response.tailnetHostname).toBe("mini-1.example.ts.net");
+    expect(response.httpsCapable).toBe(true);
+    expect(response.certDomain).toBe("mini-1.example.ts.net");
+  });
+
+  it("checkNetworkCapability reflects a disconnected probe", async () => {
+    const pairing = pairingClient(
+      fakeTailscaleProbe({
+        connected: false,
+        tailnetHostname: undefined,
+        httpsCapable: false,
+        certDomain: undefined,
+      }),
+    );
+    const response = await pairing.checkNetworkCapability({});
+    expect(response.connected).toBe(false);
+    expect(response.tailnetHostname).toBeUndefined();
+    expect(response.httpsCapable).toBe(false);
+  });
+
   it("requestPairingCode returns a 6-char legible code bound to the requested scope", async () => {
     const pairing = pairingClient();
     const response = await pairing.requestPairingCode({ scope: PairingScope.CONTROL });
