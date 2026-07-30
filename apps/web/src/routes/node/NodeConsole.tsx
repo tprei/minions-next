@@ -133,7 +133,7 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
 
   if (objective.length === 0) {
     return (
-      <div className="mn-node-console" data-testid="node-console">
+      <>
         <NavBar brand="Minions">
           <a className="mn-node-console__back" href={`/tree/${treeId}`}>
             ← Back to tree
@@ -143,17 +143,19 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
             label={`daemon: ${connectionState}`}
           />
         </NavBar>
-        <StateView
-          kind="loading"
-          title="Loading node…"
-          description="Waiting for the node to appear in the event stream."
-        />
-      </div>
+        <main className="mn-node-console" data-testid="node-console">
+          <StateView
+            kind="loading"
+            title="Loading node…"
+            description="Waiting for the node to appear in the event stream."
+          />
+        </main>
+      </>
     );
   }
 
   return (
-    <div className="mn-node-console" data-testid="node-console">
+    <>
       <NavBar brand="Minions">
         <a className="mn-node-console__back" href={`/tree/${treeId}`} data-testid="node-back-link">
           ← Back to tree
@@ -165,39 +167,40 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
         />
       </NavBar>
 
-      <div className="mn-node-console__header">
-        <div className="mn-node-console__title">
-          <h1>{objective || "(untitled node)"}</h1>
-          {state !== undefined ? (
-            <StatusBadge status={nodeStateBadgeKind(state)} label={nodeStateLabel(state)} />
-          ) : null}
+      <main className="mn-node-console" data-testid="node-console">
+        <div className="mn-node-console__header">
+          <div className="mn-node-console__title">
+            <h1>{objective || "(untitled node)"}</h1>
+            {state !== undefined ? (
+              <StatusBadge status={nodeStateBadgeKind(state)} label={nodeStateLabel(state)} />
+            ) : null}
+          </div>
+          <Fact title={nodeId}>node {shortId(nodeId)}</Fact>
         </div>
-        <Fact title={nodeId}>node {shortId(nodeId)}</Fact>
-      </div>
 
-      {connectionState !== "live" ? (
-        <Commentary>
-          Connection is {connectionState}. Displayed state may be stale — the UI never pretends
-          cached data is live.
-        </Commentary>
-      ) : null}
+        {connectionState !== "live" ? (
+          <Commentary>
+            Connection is {connectionState}. Displayed state may be stale — the UI never pretends
+            cached data is live.
+          </Commentary>
+        ) : null}
 
-      {openAttention !== undefined ? (
-        <div className="mn-node-console__attention" data-testid="node-attention" role="status">
-          <StatusBadge
-            status={attentionStateBadgeKind(openAttention.state)}
-            label={`${attentionKindLabel(openAttention.kind)} ${attentionStateLabel(openAttention.state)}`}
-          />
-          <Commentary>{openAttention.prompt}</Commentary>
-          {openAttention.choices.length > 0 ? (
-            <ul className="mn-node-console__choices">
-              {openAttention.choices.map((choice, index) => (
-                <li key={`${String(index)}-${choice}`}>{choice}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+        {openAttention !== undefined ? (
+          <div className="mn-node-console__attention" data-testid="node-attention" role="status">
+            <StatusBadge
+              status={attentionStateBadgeKind(openAttention.state)}
+              label={`${attentionKindLabel(openAttention.kind)} ${attentionStateLabel(openAttention.state)}`}
+            />
+            <Commentary>{openAttention.prompt}</Commentary>
+            {openAttention.choices.length > 0 ? (
+              <ul className="mn-node-console__choices">
+                {openAttention.choices.map((choice, index) => (
+                  <li key={`${String(index)}-${choice}`}>{choice}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
 
       {(() => {
         const tabItems: TabItem[] = [

@@ -1,9 +1,9 @@
 .mn-command-timeline {
   overflow-y: auto;
   max-height: 50vh;
-  border: 1px solid var(--mn-hairline);
-  border-radius: var(--mn-radius-card);
-  background: var(--mn-surface-bg);
+  border: 1px solid var(--mn-color-border);
+  border-radius: var(--mn-radius-lg);
+  background: var(--mn-color-bg-raised);
 }
 
 .mn-command-timeline__empty {
@@ -16,12 +16,12 @@
   align-items: center;
   gap: 8px;
   padding: 0 12px;
-  border-bottom: 1px solid var(--mn-hairline-soft);
+  border-bottom: 1px solid var(--mn-color-border);
 }
 
 .mn-command-row__payload {
   flex: 1;
-  font-family: var(--font-mono);
+  font-family: var(--mn-font-mono);
   font-size: 0.875rem;
   white-space: nowrap;
   overflow: hidden;
@@ -30,6 +30,6 @@
 
 .mn-command-row__ordinal {
   font-size: 0.75rem;
-  color: var(--mn-muted-fg);
+  color: var(--mn-color-fg-muted);
   white-space: nowrap;
 }

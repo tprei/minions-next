@@ -1,7 +1,7 @@
 .mn-node-console {
   min-height: 100vh;
-  background: var(--mn-app-bg);
-  color: var(--mn-text-fg);
+  background: var(--mn-color-bg);
+  color: var(--mn-color-fg);
 }
 
 .mn-node-console__back {
@@ -33,14 +33,16 @@
   font-size: 1.25rem;
   font-weight: 600;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .mn-node-console__attention {
   margin: 0 24px 12px;
   padding: 12px 16px;
-  background: var(--mn-status-warning-bg);
-  border: 1px solid var(--mn-status-warning-fg);
-  border-radius: var(--mn-radius-card);
+  background: var(--mn-color-status-warning-bg);
+  border: 1px solid var(--mn-color-status-warning-fg);
+  border-radius: var(--mn-radius-lg);
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -61,6 +63,7 @@
 
 .mn-node-console__evidence {
   padding: 12px 24px;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 8px;

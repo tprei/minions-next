@@ -23,6 +23,7 @@
 .mn-revision-history__goal {
   margin: var(--mn-space-1) 0;
   color: var(--mn-color-fg);
+  overflow-wrap: anywhere;
 }
 
 .mn-revision-history__facts {

@@ -1,6 +1,6 @@
 import { useMemo, type KeyboardEvent, type ReactNode } from "react";
 import type { CanvasDatum } from "./tree-model.js";
-import { computeCanvasLayout } from "./tree-layout.js";
+import { computeCanvasLayout, NODE_RECT_HEIGHT, NODE_RECT_WIDTH } from "./tree-layout.js";
 import "./TreeCanvas.css";
 
 /**
@@ -17,8 +17,9 @@ export interface TreeCanvasProps {
   readonly onSelect: (key: string) => void;
 }
 
-const NODE_RECT_WIDTH = 176;
-const NODE_RECT_HEIGHT = 52;
+// NODE_RECT_WIDTH/NODE_RECT_HEIGHT come from tree-layout.ts — that module's viewBox bounds
+// are computed from the exact same rect size rendered below, so the two can never drift out
+// of sync and re-clip the leftmost node again.
 const PADDING = 32;
 
 export function TreeCanvas({ root, selectedKey, onSelect }: TreeCanvasProps): ReactNode {
@@ -36,7 +37,7 @@ export function TreeCanvas({ root, selectedKey, onSelect }: TreeCanvasProps): Re
 
   return (
     <svg
-      role="img"
+      role="group"
       aria-label="Tree canvas"
       className="mn-tree-canvas"
       viewBox={viewBox}

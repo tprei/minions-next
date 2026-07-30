@@ -287,19 +287,19 @@ export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
 
   if (loading && tree === undefined) {
     return (
-      <div className="mn-tree-route" data-testid="tree-root">
+      <main className="mn-tree-route" data-testid="tree-root">
         <StateView
           kind="loading"
           title="Loading tree…"
           description="Fetching the plan from the daemon."
         />
-      </div>
+      </main>
     );
   }
 
   if (loadError !== undefined) {
     return (
-      <div className="mn-tree-route" data-testid="tree-root">
+      <main className="mn-tree-route" data-testid="tree-root">
         <StateView
           kind="error"
           title="Could not load this tree"
@@ -315,15 +315,15 @@ export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
             </Button>
           }
         />
-      </div>
+      </main>
     );
   }
 
   if (tree === undefined || workingTree === undefined || canvasRoot === undefined) {
     return (
-      <div className="mn-tree-route" data-testid="tree-root">
+      <main className="mn-tree-route" data-testid="tree-root">
         <StateView kind="empty" title="No tree loaded" />
-      </div>
+      </main>
     );
   }
 
@@ -366,7 +366,7 @@ export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
   ];
 
   return (
-    <div className="mn-tree-route" data-testid="tree-root">
+    <>
       <NavBar brand="Minions">
         <a className="mn-tree-route__back" href="/" data-testid="tree-back-link">
           ← Back to hosts
@@ -377,116 +377,124 @@ export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
         />
       </NavBar>
 
-      <div className="mn-tree-route__header">
-        <div className="mn-tree-route__title">
-          <h1>{tree.goal}</h1>
-          <StatusBadge status={treeStateBadgeKind(tree.state)} label={treeStateLabel(tree.state)} />
-        </div>
-        <Fact title={tree.id}>tree {shortId(tree.id)}</Fact>
-        {selectedKey !== undefined && consoleNodeId !== undefined ? (
-          <a className="mn-tree-route__console-link" href={`/tree/${treeId}/node/${consoleNodeId}`}>
-            Open node console →
-          </a>
-        ) : null}
-      </div>
-
-      {isStale ? (
-        <StateView
-          kind="stale"
-          title="This tree changed elsewhere"
-          description="Another session updated this plan. Reload before continuing so you don't overwrite it."
-          action={
-            <Button
-              onClick={() => {
-                void loadTree();
-              }}
+      <main className="mn-tree-route" data-testid="tree-root">
+        <div className="mn-tree-route__header">
+          <div className="mn-tree-route__title">
+            <h1>{tree.goal}</h1>
+            <StatusBadge
+              status={treeStateBadgeKind(tree.state)}
+              label={treeStateLabel(tree.state)}
+            />
+          </div>
+          <Fact title={tree.id}>tree {shortId(tree.id)}</Fact>
+          {selectedKey !== undefined && consoleNodeId !== undefined ? (
+            <a
+              className="mn-tree-route__console-link"
+              href={`/tree/${treeId}/node/${consoleNodeId}`}
             >
-              Reload
-            </Button>
-          }
-        />
-      ) : null}
-
-      {attentionOpen ? (
-        <div className="mn-tree-attention" role="status" data-testid="tree-attention-banner">
-          <StatusBadge status="warning" label={planAttentionKindLabel(attention.kind)} />
-          <Commentary>{attention.message}</Commentary>
+              Open node console →
+            </a>
+          ) : null}
         </div>
-      ) : null}
 
-      <div className="mn-tree-route__budget" data-testid="tree-budget-summary">
-        <Fact>max depth {tree.budget?.maxDepth}</Fact>
-        <Fact>max fan-out {tree.budget?.maxFanOut}</Fact>
-        <Fact>max nodes {tree.budget?.maxNodes}</Fact>
-        <Fact>max concurrency {tree.budget?.maxConcurrency}</Fact>
-        <Fact>max attempts/node {tree.budget?.maxAttemptsPerNode}</Fact>
-        {budgetUsage !== undefined ? (
-          <Fact>
-            using {budgetUsage.nodeCount}/{tree.budget?.maxNodes ?? "?"} nodes, depth{" "}
-            {budgetUsage.maxDepthUsed}, fan-out {budgetUsage.maxFanOutUsed}
-          </Fact>
+        {isStale ? (
+          <StateView
+            kind="stale"
+            title="This tree changed elsewhere"
+            description="Another session updated this plan. Reload before continuing so you don't overwrite it."
+            action={
+              <Button
+                onClick={() => {
+                  void loadTree();
+                }}
+              >
+                Reload
+              </Button>
+            }
+          />
         ) : null}
-      </div>
 
-      <Field
-        label="Goal"
-        htmlFor="tree-goal"
-        hint="Carried into the next plan revision when you save."
-      >
-        <TextArea
-          id="tree-goal"
-          value={goalDraft}
-          onChange={(event) => {
-            setGoalDraft(event.target.value);
-          }}
-        />
-      </Field>
+        {attentionOpen ? (
+          <div className="mn-tree-attention" role="status" data-testid="tree-attention-banner">
+            <StatusBadge status="warning" label={planAttentionKindLabel(attention.kind)} />
+            <Commentary>{attention.message}</Commentary>
+          </div>
+        ) : null}
 
-      <Tabs items={tabItems} defaultValue="outline" />
+        <div className="mn-tree-route__budget" data-testid="tree-budget-summary">
+          <Fact>max depth {tree.budget?.maxDepth}</Fact>
+          <Fact>max fan-out {tree.budget?.maxFanOut}</Fact>
+          <Fact>max nodes {tree.budget?.maxNodes}</Fact>
+          <Fact>max concurrency {tree.budget?.maxConcurrency}</Fact>
+          <Fact>max attempts/node {tree.budget?.maxAttemptsPerNode}</Fact>
+          {budgetUsage !== undefined ? (
+            <Fact>
+              using {budgetUsage.nodeCount}/{tree.budget?.maxNodes ?? "?"} nodes, depth{" "}
+              {budgetUsage.maxDepthUsed}, fan-out {budgetUsage.maxFanOutUsed}
+            </Fact>
+          ) : null}
+        </div>
 
-      {showValidation && validationIssues.length > 0 ? (
-        <ul className="mn-tree-route__issues" role="alert" data-testid="tree-validation-issues">
-          {validationIssues.map((issue, index) => (
-            <li key={`${issue.key ?? "tree"}-${String(index)}`}>{issue.message}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      {submitError !== undefined ? (
-        <p className="mn-form-error" role="alert">
-          <strong>{submitError.code}:</strong> {submitError.message}
-        </p>
-      ) : null}
-
-      <div className="mn-dialog-actions">
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={submitting || !pendingChanges}
-          onClick={handleReject}
+        <Field
+          label="Goal"
+          htmlFor="tree-goal"
+          hint="Carried into the next plan revision when you save."
         >
-          Reject changes
-        </Button>
-        <Button
-          type="button"
-          disabled={submitting}
-          onClick={() => {
-            void handleSave();
-          }}
-        >
-          {submitting ? "Saving…" : isRepairMode ? "Repair plan" : "Save plan"}
-        </Button>
-        <Button
-          type="button"
-          variant="primary"
-          disabled={submitting || !canApprove}
-          onClick={() => {
-            void handleApprove();
-          }}
-        >
-          Approve plan
-        </Button>
-      </div>
-    </div>
+          <TextArea
+            id="tree-goal"
+            value={goalDraft}
+            onChange={(event) => {
+              setGoalDraft(event.target.value);
+            }}
+          />
+        </Field>
+
+        <Tabs items={tabItems} defaultValue="outline" />
+
+        {showValidation && validationIssues.length > 0 ? (
+          <ul className="mn-tree-route__issues" role="alert" data-testid="tree-validation-issues">
+            {validationIssues.map((issue, index) => (
+              <li key={`${issue.key ?? "tree"}-${String(index)}`}>{issue.message}</li>
+            ))}
+          </ul>
+        ) : null}
+
+        {submitError !== undefined ? (
+          <p className="mn-form-error" role="alert">
+            <strong>{submitError.code}:</strong> {submitError.message}
+          </p>
+        ) : null}
+
+        <div className="mn-dialog-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={submitting || !pendingChanges}
+            onClick={handleReject}
+          >
+            Reject changes
+          </Button>
+          <Button
+            type="button"
+            disabled={submitting}
+            onClick={() => {
+              void handleSave();
+            }}
+          >
+            {submitting ? "Saving…" : isRepairMode ? "Repair plan" : "Save plan"}
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            disabled={submitting || !canApprove}
+            onClick={() => {
+              void handleApprove();
+            }}
+          >
+            Approve plan
+          </Button>
+        </div>
+      </main>
+    </>
   );
 }
