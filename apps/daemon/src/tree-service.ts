@@ -8,10 +8,15 @@ import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { createValidator } from "@bufbuild/protovalidate";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import {
+  GateProfileError,
+  loadGateProfile,
   PlanRegistryError,
+  RepositoryRegistryError,
+  type HostGateMinimum,
   type PlanAttentionRecord,
   type PlanRegistry,
   type PlanRevisionRecord,
+  type RepositoryRegistry,
   type TaskNodeRecord,
   type TreeRecord,
   type TreeSummaryRecord,
@@ -35,19 +40,34 @@ import {
   TreeService,
   TreeSummarySchema,
 } from "@minions/contracts";
-import { timestampFromEpochMilliseconds, taskTreeId, type Clock } from "@minions/core";
+import {
+  repositoryId,
+  timestampFromEpochMilliseconds,
+  taskTreeId,
+  type Clock,
+} from "@minions/core";
 
 const responseValidator = createValidator();
 
 export type TreeServiceOptions = Readonly<{
   planRegistry: PlanRegistry;
   clock: Clock;
+  repositoryRegistry?: RepositoryRegistry;
+  hostMinimum?: HostGateMinimum;
 }>;
 
 export function registerTreeService(router: ConnectRouter, options: TreeServiceOptions): void {
   router.service(TreeService, {
     async createTree(request) {
       try {
+        if (options.repositoryRegistry === undefined) {
+          throw new ConnectError(
+            "repository registry is required to enforce the gate profile",
+            Code.FailedPrecondition,
+          );
+        }
+        const repository = options.repositoryRegistry.get(repositoryId(request.repositoryId));
+        await loadGateProfile(repository.canonicalRoot, options.hostMinimum);
         const tree = await options.planRegistry.create({
           request,
           at: timestampFromEpochMilliseconds(options.clock.now()),
@@ -251,6 +271,16 @@ function parseTreeId(value: string) {
 function toConnectError(error: unknown): ConnectError {
   if (error instanceof ConnectError) {
     return error;
+  }
+  if (error instanceof GateProfileError) {
+    const code =
+      error.code === "missing" || error.code === "invalid"
+        ? Code.InvalidArgument
+        : Code.FailedPrecondition;
+    return new ConnectError(error.message, code, undefined, undefined, error);
+  }
+  if (error instanceof RepositoryRegistryError) {
+    return new ConnectError(error.message, Code.NotFound, undefined, undefined, error);
   }
   if (error instanceof PlanRegistryError) {
     switch (error.code) {

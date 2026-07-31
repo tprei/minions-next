@@ -2,9 +2,12 @@ import { create } from "@bufbuild/protobuf";
 import { createValidator } from "@bufbuild/protovalidate";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import {
+  GateProfileError,
   inspectRepository,
+  loadGateProfile,
   RepositoryInspectionError,
   RepositoryRegistryError,
+  type HostGateMinimum,
   type RepositoryRegistration,
   type RepositoryRegistry,
 } from "@minions/adapters";
@@ -17,13 +20,12 @@ import {
 } from "@minions/contracts";
 import { repositoryId, timestampFromEpochMilliseconds, type Clock } from "@minions/core";
 import { isAbsolute, join, relative, sep } from "node:path";
-
 const responseValidator = createValidator();
-
 export type RepositoryServiceOptions = Readonly<{
   home: string;
   clock: Clock;
   registry: RepositoryRegistry;
+  hostMinimum?: HostGateMinimum;
 }>;
 
 export function registerRepositoryService(
@@ -36,6 +38,7 @@ export function registerRepositoryService(
         const inspection = await inspectRepository(request.rootPath);
         assertRegistrationPolicy(inspection);
         assertRepositoryLocation(options.home, inspection.canonicalRoot);
+        await loadGateProfile(inspection.canonicalRoot, options.hostMinimum);
         const registration = await options.registry.register({
           request,
           inspection,
@@ -151,6 +154,13 @@ function toConnectError(error: unknown): ConnectError {
   }
   if (error instanceof RepositoryInspectionError) {
     const code = error.code === "invalid_root" ? Code.InvalidArgument : Code.FailedPrecondition;
+    return new ConnectError(error.message, code, undefined, undefined, error);
+  }
+  if (error instanceof GateProfileError) {
+    const code =
+      error.code === "missing" || error.code === "invalid"
+        ? Code.InvalidArgument
+        : Code.FailedPrecondition;
     return new ConnectError(error.message, code, undefined, undefined, error);
   }
   if (error instanceof RepositoryRegistryError) {

@@ -72,6 +72,13 @@ const POLICY_REPOSITORY_HOME = "01900000-0000-7000-8000-000000000215";
 const POLICY_COMMAND_WORKSPACE = "01900000-0000-7000-8000-000000000216";
 const POLICY_ACTOR_WORKSPACE = "01900000-0000-7000-8000-000000000217";
 const POLICY_REPOSITORY_WORKSPACE = "01900000-0000-7000-8000-000000000218";
+
+const NO_GATE_INSTANCE_ID = "01900000-0000-7000-8000-000000000301";
+const NO_GATE_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000302";
+const NO_GATE_COMMAND = "01900000-0000-7000-8000-000000000303";
+const NO_GATE_ACTOR = "01900000-0000-7000-8000-000000000304";
+const NO_GATE_REPOSITORY = "01900000-0000-7000-8000-000000000305";
+
 interface GitFixture {
   readonly directory: string;
   readonly origin: string;
@@ -285,7 +292,17 @@ async function runGit(cwd: string, args: readonly string[]): Promise<string> {
   });
 }
 
-async function createGitFixture(name: string): Promise<GitFixture> {
+const GATE_PROFILE_FIXTURE = `required_categories:
+  - lint
+gates:
+  lint:
+    executable: "true"
+`;
+
+async function createGitFixture(
+  name: string,
+  options: Readonly<{ withGateProfile?: boolean }> = {},
+): Promise<GitFixture> {
   const directory = await mkdtemp(join(tmpdir(), `minions-repository-service-${name}-`));
   const origin = join(directory, "origin.git");
   const root = join(directory, "working");
@@ -297,7 +314,13 @@ async function createGitFixture(name: string): Promise<GitFixture> {
     await runGit(root, ["config", "user.email", "repository-service@example.test"]);
     await runGit(root, ["checkout", "-b", "main"]);
     await writeFile(join(root, "README.md"), `${name}\n`, "utf8");
-    await runGit(root, ["add", "README.md"]);
+    const committedPaths = ["README.md"];
+    if (options.withGateProfile !== false) {
+      await mkdir(join(root, ".minions"), { recursive: true });
+      await writeFile(join(root, ".minions", "gates.yaml"), GATE_PROFILE_FIXTURE, "utf8");
+      committedPaths.push(".minions/gates.yaml");
+    }
+    await runGit(root, ["add", ...committedPaths]);
     await runGit(root, ["commit", "-m", "initial"]);
     await runGit(root, ["push", "--set-upstream", "origin", "main"]);
     await runGit(origin, ["symbolic-ref", "HEAD", "refs/heads/main"]);
@@ -896,6 +919,45 @@ describe("repository service integration", () => {
         host_id: hostId,
         canonical_root: root,
       });
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(fixture.directory, { force: true, recursive: true });
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects registration when the repository has no gate profile", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-repository-service-no-gate-home-"));
+    const capture = createLogCapture();
+    const fixture = await createGitFixture("no-gate-profile", { withGateProfile: false });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      const port = await reserveLoopbackPort();
+      const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+      const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([NO_GATE_INSTANCE_ID, NO_GATE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const clients = connectClients(runtime.server.baseUrl);
+      const failure = await expectConnectCode(
+        () =>
+          clients.repository.registerRepository(
+            registerRequest(NO_GATE_COMMAND, NO_GATE_ACTOR, NO_GATE_REPOSITORY, fixture.root),
+          ),
+        Code.InvalidArgument,
+      );
+      expect(failure.message).toContain("gate profile not found at .minions/gates.yaml");
+      await expectConnectCode(
+        () => clients.repository.getRepository({ repositoryId: NO_GATE_REPOSITORY }),
+        Code.NotFound,
+      );
     } finally {
       await runtime?.close();
       await closeWritable(capture.stream);

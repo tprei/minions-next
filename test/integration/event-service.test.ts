@@ -6,6 +6,7 @@ import {
   createEventCommitWaiter,
   createFileContentBlobStore,
   createPlanRegistry,
+  createRepositoryRegistry,
   createSqliteArtifactRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
@@ -61,6 +62,7 @@ import {
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { describe, expect, it } from "vitest";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { startDaemonServer, type RunningDaemonServer } from "@minions/daemon";
@@ -777,6 +779,11 @@ async function startEventFixture(
     clock,
     ids: new SequenceIdGenerator([]),
   });
+  const repositoryRegistry = createRepositoryRegistry({
+    database,
+    commandStore,
+    hostId: trustedHostId,
+  });
   const server = await startDaemonServer({
     mode: "host",
     port: 0,
@@ -792,6 +799,11 @@ async function startEventFixture(
     }),
     artifactRegistry,
     blobStore,
+    repository: {
+      registry: repositoryRegistry,
+      home: dirname(database.path),
+      clock,
+    },
     system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
   });
   const transport = createConnectTransport({
@@ -1036,11 +1048,21 @@ async function appendSnapshotProjectionEvent(
   });
 }
 
+const GATE_PROFILE_FIXTURE = `required_categories:
+  - lint
+gates:
+  lint:
+    executable: "true"
+`;
+
 async function seedPlanRepository(database: ManagedSqliteDatabase): Promise<void> {
+  const planRepositoryRoot = join(dirname(database.path), "event-plan");
+  await mkdir(join(planRepositoryRoot, ".minions"), { recursive: true });
+  await writeFile(join(planRepositoryRoot, ".minions", "gates.yaml"), GATE_PROFILE_FIXTURE, "utf8");
   await executeTestSqliteWrite(database, (transaction) => {
     transaction.run(
       "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
-      [planRepositoryIdentifier, hostIdentifier, "/workspace/event-plan", now],
+      [planRepositoryIdentifier, hostIdentifier, planRepositoryRoot, now],
     );
     transaction.run(
       `INSERT INTO repository_registrations (
@@ -1050,8 +1072,8 @@ async function seedPlanRepository(database: ManagedSqliteDatabase): Promise<void
       [
         planRepositoryIdentifier,
         hostIdentifier,
-        "/workspace/event-plan",
-        "https://example.test/event-plan.git",
+        planRepositoryRoot,
+        "https://example.test/event-plan",
         "main",
         baseCommit,
         "/workspace",

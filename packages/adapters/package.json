@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@minions/contracts": "workspace:*",
-    "@minions/core": "workspace:*"
+    "@minions/core": "workspace:*",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@types/node": "24.13.3"

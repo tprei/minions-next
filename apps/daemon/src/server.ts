@@ -120,6 +120,9 @@ export async function startDaemonServer(
         registerTreeService(router, {
           planRegistry: options.planRegistry,
           clock: options.clock,
+          ...(options.repository === undefined
+            ? {}
+            : { repositoryRegistry: options.repository.registry }),
         });
         registerSteeringService(router, {
           store: options.steeringStore,

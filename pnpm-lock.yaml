@@ -135,6 +135,9 @@ importers:
       '@minions/core':
         specifier: workspace:*
         version: link:../core
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
     devDependencies:
       '@types/node':
         specifier: 24.13.3
