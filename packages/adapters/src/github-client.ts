@@ -178,6 +178,93 @@ export interface GitHubInstallationToken {
 }
 
 // -------------------------------------------------------------------------------------------------
+// PR-32 wire response models (pull requests, reviews, checks, git refs).
+// -------------------------------------------------------------------------------------------------
+
+export type GitHubPullRequestState = "open" | "closed";
+
+/**
+ * A pull request, validated from `GET/POST /repos/{owner}/{repo}/pulls[/{number}]`.
+ * `state` is GitHub's lifecycle state; `merged` distinguishes a merged PR (still
+ * `state === "closed"`) from one closed unmerged — both are inactive for the
+ * "at most one active PR per node" invariant, which keys on `state === "open"`.
+ */
+export interface GitHubPullRequest {
+  readonly number: number;
+  readonly title: string;
+  readonly body: string | null;
+  readonly state: GitHubPullRequestState;
+  readonly merged: boolean;
+  readonly draft: boolean;
+  readonly headRefName: string;
+  readonly baseRefName: string;
+  readonly headSha: string;
+  readonly baseSha: string;
+  readonly updatedAt: string;
+  readonly htmlUrl: string;
+}
+
+export type GitHubReviewState =
+  "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
+
+/**
+ * A pull-request review, validated from `GET /repos/{owner}/{repo}/pulls/{number}/reviews`.
+ * `commitId` is the commit SHA the review was submitted against; comparing it
+ * against the PR's current `headSha` is how the review classifier decides fresh
+ * (approved the latest push) vs stale (approved an earlier push, GIT-11).
+ */
+export interface GitHubReview {
+  readonly id: number;
+  readonly user: GitHubUser;
+  readonly state: GitHubReviewState;
+  readonly submittedAt: string;
+  readonly commitId: string;
+  readonly authorAssociation: string;
+}
+
+export type GitHubCheckStatus = "queued" | "in_progress" | "completed";
+
+export type GitHubCheckConclusion =
+  | "success"
+  | "failure"
+  | "neutral"
+  | "cancelled"
+  | "skipped"
+  | "timed_out"
+  | "action_required"
+  | "stale";
+
+/**
+ * A CI check run, validated from `GET /repos/{owner}/{repo}/commits/{ref}/check-runs`.
+ * `conclusion` is present only once `status === "completed"`.
+ */
+export interface GitHubCheckRun {
+  readonly id: number;
+  readonly name: string;
+  readonly status: GitHubCheckStatus;
+  readonly conclusion: GitHubCheckConclusion | null;
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
+}
+
+export type GitHubCombinedStatusState = "success" | "failure" | "pending" | "error";
+
+/**
+ * Combined commit status, validated from `GET /repos/{owner}/{repo}/commits/{ref}/status`.
+ * Aggregated alongside check runs by the check observer.
+ */
+export interface GitHubCombinedStatus {
+  readonly state: GitHubCombinedStatusState;
+  readonly totalCount: number;
+}
+
+/** A git ref, validated from the `git refs` API. */
+export interface GitHubGitRef {
+  readonly ref: string;
+  readonly sha: string;
+}
+
+// -------------------------------------------------------------------------------------------------
 // Request body models (typed outbound payloads).
 // -------------------------------------------------------------------------------------------------
 
@@ -194,6 +281,29 @@ export interface GitHubRulesetConfig {
 export interface GitHubRulesetRuleConfig {
   readonly type: GitHubRuleType;
   readonly pullRequestParameters: GitHubPullRequestParameters | undefined;
+}
+
+export interface GitHubCreatePullRequestInput {
+  readonly title: string;
+  readonly body: string | null;
+  readonly head: string;
+  readonly base: string;
+  readonly draft: boolean;
+}
+
+export interface GitHubUpdatePullRequestInput {
+  readonly title: string | undefined;
+  readonly body: string | null | undefined;
+  readonly base: string | undefined;
+  readonly state: GitHubPullRequestState | undefined;
+}
+
+export type GitHubPullRequestListState = "open" | "closed" | "all";
+
+export interface GitHubPullRequestListOptions {
+  /** Head filter, typically `{owner}:{branch}` for same-repo branches. */
+  readonly head: string | undefined;
+  readonly state: GitHubPullRequestListState;
 }
 
 export interface GitHubClient {
@@ -219,6 +329,30 @@ export interface GitHubClient {
   getInstallationRepositories(): Promise<readonly GitHubInstallationRepository[]>;
   getRepositoryInstallation(repositoryFullName: string): Promise<GitHubRepositoryInstallation>;
   createInstallationToken(installationId: number): Promise<GitHubInstallationToken>;
+  listPullRequests(
+    repositoryFullName: string,
+    options: GitHubPullRequestListOptions,
+  ): Promise<readonly GitHubPullRequest[]>;
+  getPullRequest(repositoryFullName: string, prNumber: number): Promise<GitHubPullRequest>;
+  createPullRequest(
+    repositoryFullName: string,
+    input: GitHubCreatePullRequestInput,
+  ): Promise<GitHubPullRequest>;
+  updatePullRequest(
+    repositoryFullName: string,
+    prNumber: number,
+    input: GitHubUpdatePullRequestInput,
+  ): Promise<GitHubPullRequest>;
+  listReviews(repositoryFullName: string, prNumber: number): Promise<readonly GitHubReview[]>;
+  listCheckRuns(repositoryFullName: string, ref: string): Promise<readonly GitHubCheckRun[]>;
+  getCombinedStatus(repositoryFullName: string, ref: string): Promise<GitHubCombinedStatus>;
+  getRef(repositoryFullName: string, branch: string): Promise<GitHubGitRef | undefined>;
+  updateRef(
+    repositoryFullName: string,
+    branch: string,
+    sha: string,
+    force: boolean,
+  ): Promise<GitHubGitRef>;
 }
 
 export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
@@ -332,6 +466,106 @@ class GitHubClientImpl implements GitHubClient {
   }
 
   // -----------------------------------------------------------------------------------------------
+  // PR-32 endpoints: pull requests, reviews, checks, git refs.
+  // -----------------------------------------------------------------------------------------------
+
+  async listPullRequests(
+    repositoryFullName: string,
+    options: GitHubPullRequestListOptions,
+  ): Promise<readonly GitHubPullRequest[]> {
+    const query = `state=${encodeURIComponent(options.state)}${
+      options.head === undefined ? "" : `&head=${encodeURIComponent(options.head)}`
+    }`;
+    const body = await this.requestJson("GET", `/repos/${repositoryFullName}/pulls?${query}`);
+    return parsePullRequestArray(body);
+  }
+
+  async getPullRequest(repositoryFullName: string, prNumber: number): Promise<GitHubPullRequest> {
+    const body = await this.requestJson(
+      "GET",
+      `/repos/${repositoryFullName}/pulls/${String(prNumber)}`,
+    );
+    return parsePullRequest(body);
+  }
+
+  async createPullRequest(
+    repositoryFullName: string,
+    input: GitHubCreatePullRequestInput,
+  ): Promise<GitHubPullRequest> {
+    const body = await this.requestJson(
+      "POST",
+      `/repos/${repositoryFullName}/pulls`,
+      serializeCreatePullRequestInput(input),
+    );
+    return parsePullRequest(body);
+  }
+
+  async updatePullRequest(
+    repositoryFullName: string,
+    prNumber: number,
+    input: GitHubUpdatePullRequestInput,
+  ): Promise<GitHubPullRequest> {
+    const body = await this.requestJson(
+      "PATCH",
+      `/repos/${repositoryFullName}/pulls/${String(prNumber)}`,
+      serializeUpdatePullRequestInput(input),
+    );
+    return parsePullRequest(body);
+  }
+
+  async listReviews(
+    repositoryFullName: string,
+    prNumber: number,
+  ): Promise<readonly GitHubReview[]> {
+    const body = await this.requestJson(
+      "GET",
+      `/repos/${repositoryFullName}/pulls/${String(prNumber)}/reviews`,
+    );
+    return parseReviewArray(body);
+  }
+
+  async listCheckRuns(repositoryFullName: string, ref: string): Promise<readonly GitHubCheckRun[]> {
+    const body = await this.requestJson(
+      "GET",
+      `/repos/${repositoryFullName}/commits/${encodeURIComponent(ref)}/check-runs`,
+    );
+    return parseCheckRunArray(body);
+  }
+
+  async getCombinedStatus(repositoryFullName: string, ref: string): Promise<GitHubCombinedStatus> {
+    const body = await this.requestJson(
+      "GET",
+      `/repos/${repositoryFullName}/commits/${encodeURIComponent(ref)}/status`,
+    );
+    return parseCombinedStatus(body);
+  }
+
+  async getRef(repositoryFullName: string, branch: string): Promise<GitHubGitRef | undefined> {
+    const result = await this.requestOptional(
+      "GET",
+      `/repos/${repositoryFullName}/git/refs/heads/${encodeURIComponent(branch)}`,
+    );
+    if (result === undefined) {
+      return undefined;
+    }
+    return parseGitRef(result, branch);
+  }
+
+  async updateRef(
+    repositoryFullName: string,
+    branch: string,
+    sha: string,
+    force: boolean,
+  ): Promise<GitHubGitRef> {
+    const body = await this.requestJson(
+      "PATCH",
+      `/repos/${repositoryFullName}/git/refs/heads/${encodeURIComponent(branch)}`,
+      { sha, force },
+    );
+    return parseGitRef(body, branch);
+  }
+
+  // -----------------------------------------------------------------------------------------------
   // Core request helpers.
   // -----------------------------------------------------------------------------------------------
 
@@ -358,9 +592,17 @@ class GitHubClientImpl implements GitHubClient {
   }
 
   private async requestOptional(method: string, path: string): Promise<unknown> {
-    const { response } = await this.send(method, path, undefined);
-    if (response.status === 404) {
-      return undefined;
+    let response: Response;
+    try {
+      response = (await this.send(method, path, undefined)).response;
+    } catch (error: unknown) {
+      // `send` asserts every response is acceptable, but for optional lookups a
+      // 404 means "resource absent" — surface that as `undefined` rather than a
+      // hard not_found so callers (e.g. getRef for a missing branch) can branch.
+      if (error instanceof GitHubClientError && error.code === "not_found") {
+        return undefined;
+      }
+      throw error;
     }
     this.assertAcceptable(response, method, path);
     const text = await response.text();
@@ -830,6 +1072,190 @@ function parseInstallationToken(value: unknown): GitHubInstallationToken {
 }
 
 // -------------------------------------------------------------------------------------------------
+// PR-32 validators (unknown -> typed).
+// -------------------------------------------------------------------------------------------------
+
+function parsePullRequestState(value: unknown, context: string): GitHubPullRequestState {
+  const text = requireString(value, context);
+  if (text === "open" || text === "closed") {
+    return text;
+  }
+  throw new GitHubClientError(
+    "response_invalid",
+    `${context}: unknown pull-request state '${text}'`,
+    200,
+  );
+}
+
+function parseReviewState(value: unknown, context: string): GitHubReviewState {
+  const text = requireString(value, context);
+  const known: readonly GitHubReviewState[] = [
+    "APPROVED",
+    "CHANGES_REQUESTED",
+    "COMMENTED",
+    "DISMISSED",
+    "PENDING",
+  ];
+  for (const candidate of known) {
+    if (text === candidate) {
+      return candidate;
+    }
+  }
+  throw new GitHubClientError(
+    "response_invalid",
+    `${context}: unknown review state '${text}'`,
+    200,
+  );
+}
+
+function parseCheckStatus(value: unknown, context: string): GitHubCheckStatus {
+  const text = requireString(value, context);
+  if (text === "queued" || text === "in_progress" || text === "completed") {
+    return text;
+  }
+  throw new GitHubClientError(
+    "response_invalid",
+    `${context}: unknown check status '${text}'`,
+    200,
+  );
+}
+
+function parseCheckConclusion(value: unknown, context: string): GitHubCheckConclusion | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const text = requireString(value, context);
+  const known: readonly GitHubCheckConclusion[] = [
+    "success",
+    "failure",
+    "neutral",
+    "cancelled",
+    "skipped",
+    "timed_out",
+    "action_required",
+    "stale",
+  ];
+  for (const candidate of known) {
+    if (text === candidate) {
+      return candidate;
+    }
+  }
+  throw new GitHubClientError(
+    "response_invalid",
+    `${context}: unknown check conclusion '${text}'`,
+    200,
+  );
+}
+
+function parseNullableString(value: unknown, context: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return requireString(value, context);
+}
+
+function parsePullRequest(value: unknown, context = "pull_request"): GitHubPullRequest {
+  const object = requireObject(value, context);
+  const head = requireObject(object["head"], `${context}.head`);
+  const base = requireObject(object["base"], `${context}.base`);
+  return Object.freeze({
+    number: requireNumber(object["number"], `${context}.number`),
+    title: requireString(object["title"], `${context}.title`),
+    body: parseNullableString(object["body"], `${context}.body`),
+    state: parsePullRequestState(object["state"], `${context}.state`),
+    merged: requireBoolean(object["merged"], `${context}.merged`),
+    draft: requireBoolean(object["draft"], `${context}.draft`),
+    headRefName: requireString(head["ref"], `${context}.head.ref`),
+    baseRefName: requireString(base["ref"], `${context}.base.ref`),
+    headSha: requireString(head["sha"], `${context}.head.sha`),
+    baseSha: requireString(base["sha"], `${context}.base.sha`),
+    createdAt: requireString(object["created_at"], `${context}.created_at`),
+    updatedAt: requireString(object["updated_at"], `${context}.updated_at`),
+    htmlUrl: requireString(object["html_url"], `${context}.html_url`),
+  });
+}
+
+function parsePullRequestArray(value: unknown): readonly GitHubPullRequest[] {
+  const array = requireArray(value, "pull_requests");
+  return Object.freeze(
+    array.map((entry, index) => parsePullRequest(entry, `pull_requests[${String(index)}]`)),
+  );
+}
+
+function parseReview(value: unknown, context = "review"): GitHubReview {
+  const object = requireObject(value, context);
+  return Object.freeze({
+    id: requireNumber(object["id"], `${context}.id`),
+    user: parseUser(object["user"]),
+    state: parseReviewState(object["state"], `${context}.state`),
+    submittedAt: requireString(object["submitted_at"], `${context}.submitted_at`),
+    commitId: requireString(object["commit_id"], `${context}.commit_id`),
+    authorAssociation: requireString(object["author_association"], `${context}.author_association`),
+  });
+}
+
+function parseReviewArray(value: unknown): readonly GitHubReview[] {
+  const array = requireArray(value, "reviews");
+  return Object.freeze(
+    array.map((entry, index) => parseReview(entry, `reviews[${String(index)}]`)),
+  );
+}
+
+function parseCheckRun(value: unknown, index: number): GitHubCheckRun {
+  const here = `check_runs[${String(index)}]`;
+  const object = requireObject(value, here);
+  return Object.freeze({
+    id: requireNumber(object["id"], `${here}.id`),
+    name: requireString(object["name"], `${here}.name`),
+    status: parseCheckStatus(object["status"], `${here}.status`),
+    conclusion: parseCheckConclusion(object["conclusion"], `${here}.conclusion`),
+    startedAt: parseNullableString(object["started_at"], `${here}.started_at`),
+    completedAt: parseNullableString(object["completed_at"], `${here}.completed_at`),
+  });
+}
+
+function parseCheckRunArray(value: unknown): readonly GitHubCheckRun[] {
+  const object = requireObject(value, "check_runs");
+  const array = requireArray(object["check_runs"], "check_runs.check_runs");
+  return Object.freeze(array.map((entry, index) => parseCheckRun(entry, index)));
+}
+
+function parseCombinedStatusState(value: unknown, context: string): GitHubCombinedStatusState {
+  const text = requireString(value, context);
+  if (text === "success" || text === "failure" || text === "pending" || text === "error") {
+    return text;
+  }
+  throw new GitHubClientError(
+    "response_invalid",
+    `${context}: unknown combined status state '${text}'`,
+    200,
+  );
+}
+
+function parseCombinedStatus(value: unknown): GitHubCombinedStatus {
+  const object = requireObject(value, "combined_status");
+  return Object.freeze({
+    state: parseCombinedStatusState(object["state"], "combined_status.state"),
+    totalCount: requireNumber(object["total_count"], "combined_status.total_count"),
+  });
+}
+
+function parseGitRef(value: unknown, branch: string): GitHubGitRef {
+  const outer = requireObject(value, "git_ref");
+  const ref = requireString(outer["ref"], "git_ref.ref");
+  const expected = `refs/heads/${branch}`;
+  if (ref !== expected) {
+    throw new GitHubClientError(
+      "response_invalid",
+      `git_ref.ref: expected '${expected}', got '${ref}'`,
+      200,
+    );
+  }
+  const inner = requireObject(outer["object"], "git_ref.object");
+  return Object.freeze({ ref, sha: requireString(inner["sha"], "git_ref.object.sha") });
+}
+
+// -------------------------------------------------------------------------------------------------
 // Outbound serialization (typed -> wire).
 // -------------------------------------------------------------------------------------------------
 
@@ -865,6 +1291,38 @@ function serializeRulesetConfig(config: GitHubRulesetConfig): Readonly<Record<st
       bypass_mode: actor.bypassMode,
     })),
   };
+}
+
+function serializeCreatePullRequestInput(
+  input: GitHubCreatePullRequestInput,
+): Readonly<Record<string, unknown>> {
+  const payload: Record<string, unknown> = {
+    title: input.title,
+    head: input.head,
+    base: input.base,
+    draft: input.draft,
+  };
+  payload["body"] = input.body ?? "";
+  return payload;
+}
+
+function serializeUpdatePullRequestInput(
+  input: GitHubUpdatePullRequestInput,
+): Readonly<Record<string, unknown>> {
+  const payload: Record<string, unknown> = {};
+  if (input.title !== undefined) {
+    payload["title"] = input.title;
+  }
+  if (input.body !== undefined) {
+    payload["body"] = input.body ?? "";
+  }
+  if (input.base !== undefined) {
+    payload["base"] = input.base;
+  }
+  if (input.state !== undefined) {
+    payload["state"] = input.state;
+  }
+  return payload;
 }
 
 function errorToString(error: unknown): string {
