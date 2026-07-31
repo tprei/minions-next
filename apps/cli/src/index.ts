@@ -193,7 +193,6 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let mode: DaemonModeName = "local";
   let port = 4_817;
   let configuredHostId: HostId | undefined;
-  let allowRemote = false;
   let maxDepth: number | undefined;
   let maxFanOut: number | undefined;
   let maxNodes: number | undefined;
@@ -237,12 +236,6 @@ function parseInvocation(argv: readonly string[]): Invocation {
         }
         configuredHostId = parseConfiguredHostId(requiredValue(option, value));
         index += 1;
-        break;
-      case "--allow-remote":
-        if (command !== "start") {
-          throw new UsageError("--allow-remote is only valid with start");
-        }
-        allowRemote = true;
         break;
       case "--max-depth":
         if (command !== "tree-create") {
