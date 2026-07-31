@@ -1,11 +1,18 @@
 import { createClient, type Client } from "@connectrpc/connect";
-import { EventService, HostService, RepositoryService, TreeService } from "@minions/contracts";
+import {
+  EventService,
+  HostService,
+  RepositoryService,
+  SteeringService,
+  TreeService,
+} from "@minions/contracts";
 import { createDaemonTransport } from "./transport.js";
 
 export interface ApiClients {
   readonly event: Client<typeof EventService>;
   readonly host: Client<typeof HostService>;
   readonly repository: Client<typeof RepositoryService>;
+  readonly steering: Client<typeof SteeringService>;
   readonly tree: Client<typeof TreeService>;
 }
 
@@ -35,6 +42,7 @@ export function createApiClients(
     event: createClient(EventService, transport),
     host: createClient(HostService, transport),
     repository: createClient(RepositoryService, transport),
+    steering: createClient(SteeringService, transport),
     tree: createClient(TreeService, transport),
   };
 }

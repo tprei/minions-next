@@ -1,0 +1,60 @@
+.mn-node-console {
+  min-height: 100vh;
+  background: var(--mn-app-bg);
+  color: var(--mn-text-fg);
+}
+
+.mn-node-console__back {
+  color: var(--mn-color-fact-fg);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.mn-node-console__back:hover {
+  text-decoration: underline;
+}
+
+.mn-node-console__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 24px;
+}
+
+.mn-node-console__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mn-node-console__title h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.mn-node-console__attention {
+  margin: 0 24px 12px;
+  padding: 12px 16px;
+  background: var(--mn-status-warning-bg);
+  border: 1px solid var(--mn-status-warning-fg);
+  border-radius: var(--mn-radius-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mn-node-console__choices {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 0.875rem;
+}
+
+.mn-node-console__section {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 16px 24px 8px;
+  padding: 0;
+}

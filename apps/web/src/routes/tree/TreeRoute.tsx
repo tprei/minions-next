@@ -167,6 +167,13 @@ export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
     if (workingTree === undefined || tree?.budget === undefined) return [];
     return validateWorkingTree(workingTree, tree.budget);
   }, [workingTree, tree]);
+  const consoleNodeId = useMemo(() => {
+    if (workingTree === undefined || selectedKey === undefined) return undefined;
+    const locked = workingTree.locked.get(selectedKey);
+    if (locked !== undefined) return locked.id;
+    const working = workingTree.working.find((node) => node.key === selectedKey);
+    return working?.sourceNodeId;
+  }, [workingTree, selectedKey]);
 
   const attention = tree?.attention;
   const attentionOpen = attention?.state === PlanAttentionState.OPEN;
@@ -376,6 +383,11 @@ export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
           <StatusBadge status={treeStateBadgeKind(tree.state)} label={treeStateLabel(tree.state)} />
         </div>
         <Fact title={tree.id}>tree {shortId(tree.id)}</Fact>
+        {selectedKey !== undefined && consoleNodeId !== undefined ? (
+          <a className="mn-tree-route__console-link" href={`/tree/${treeId}/node/${consoleNodeId}`}>
+            Open node console →
+          </a>
+        ) : null}
       </div>
 
       {isStale ? (
