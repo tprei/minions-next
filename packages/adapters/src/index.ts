@@ -591,3 +591,20 @@ export type {
   StackParentageManager,
   StackParentageManagerOptions,
 } from "./stack-parentage-adapter.js";
+export { createRestackCoordinator, RestackError } from "./restack-coordinator.js";
+export type {
+  RestackAttentionKind,
+  RestackAttentionSink,
+  RestackCoordinator,
+  RestackCoordinatorOptions,
+  RestackErrorCode,
+  RestackHumanAttention,
+  RestackLogger,
+  RestackRebaseAncestry,
+  RestackRebaseOutcome,
+  RestackRepairAttemptOutcome,
+  RestackRepairHarness,
+  RestackSquashReceipt,
+  RestackStaleSink,
+  RestackWorkingCopy,
+} from "./restack-coordinator.js";
