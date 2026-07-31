@@ -246,7 +246,12 @@ describe("sandbox policy adapters", () => {
         ...valid,
         mounts: [
           { ...workspaceMount, targetPath: "/workspace" },
-          { kind: "cache", sourcePath: "/tmp/minions/nested", targetPath: "/workspace/.secrets", access: "read_write" as const },
+          {
+            kind: "cache",
+            sourcePath: "/tmp/minions/nested",
+            targetPath: "/workspace/.secrets",
+            access: "read_write" as const,
+          },
         ],
       }),
     ).toThrow(SandboxPolicyError);

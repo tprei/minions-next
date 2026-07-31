@@ -165,7 +165,10 @@ function validateMounts(value: unknown): readonly SandboxMount[] {
     // read-only subtree, since the two targets never collided exactly.
     // Reject any pairwise ancestor/descendant overlap between targets.
     for (const existingTarget of targets) {
-      if (isAncestorPosixPath(existingTarget, targetPath) || isAncestorPosixPath(targetPath, existingTarget)) {
+      if (
+        isAncestorPosixPath(existingTarget, targetPath) ||
+        isAncestorPosixPath(targetPath, existingTarget)
+      ) {
         throw new SandboxPolicyError(
           "duplicate_mount_target",
           `mount ${String(index)} target path overlaps an existing mount target`,
