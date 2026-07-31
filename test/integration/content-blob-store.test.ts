@@ -473,25 +473,29 @@ describe("file content blob store", () => {
     });
   });
 
-  it("rejects a FIFO at the canonical path instead of blocking on open", async () => {
-    await withRoot(async (rootPath) => {
-      const store = createFileContentBlobStore(storeOptions(rootPath));
-      const content = new TextEncoder().encode("fifo blob");
-      const stored = await publish(store, content);
-      const finalPath = join(rootPath, stored.relativePath);
+  it(
+    "rejects a FIFO at the canonical path instead of blocking on open",
+    async () => {
+      await withRoot(async (rootPath) => {
+        const store = createFileContentBlobStore(storeOptions(rootPath));
+        const content = new TextEncoder().encode("fifo blob");
+        const stored = await publish(store, content);
+        const finalPath = join(rootPath, stored.relativePath);
 
-      await rm(finalPath);
-      execFileSync("mkfifo", [finalPath]);
+        await rm(finalPath);
+        execFileSync("mkfifo", [finalPath]);
 
-      // A FIFO with no writer attached blocks a plain O_RDONLY open()
-      // indefinitely; readVerified must reject promptly (not hang) once no
-      // writer ever connects.
-      await expect(store.readVerified(stored)).rejects.toMatchObject({
-        code: "blob_corrupt",
-        digest: stored.digest,
+        // A FIFO with no writer attached blocks a plain O_RDONLY open()
+        // indefinitely; readVerified must reject promptly (not hang) once no
+        // writer ever connects.
+        await expect(store.readVerified(stored)).rejects.toMatchObject({
+          code: "blob_corrupt",
+          digest: stored.digest,
+        });
       });
-    }, 5_000);
-  });
+    },
+    5_000,
+  );
 
   it("rejects symlinked layout entries without touching their targets", async () => {
     await withRoot(async (rootPath) => {
