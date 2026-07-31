@@ -223,6 +223,13 @@ export type {
   OmpAcpAdapterErrorCode,
 } from "./omp-acp-adapter.js";
 export { decodeAcpFrame, normalizeAcpNotification } from "./omp-acp-adapter.js";
+export { PINNED_JJ_VERSION, ensureJjCapability, JjCapabilityError } from "./jj-capability.js";
+export type {
+  JjCapabilities,
+  JjCapabilityErrorCode,
+  JjCapabilityOptions,
+  JjCapabilityProbe,
+} from "./jj-capability.js";
 export { CredentialVaultError, createCredentialVault } from "./credential-vault.js";
 export type {
   CredentialVault,
