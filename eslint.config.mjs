@@ -95,6 +95,7 @@ export default tseslint.config(
     files: ["apps/daemon/**/*.ts", "apps/cli/**/*.ts"],
     rules: {
       "no-restricted-imports": restrictedImports(
+        ["@minions/adapters/sqlite-test-support"],
         ["@minions/testkit", "@minions/testkit/*"],
         ["@minions/ui-kit", "@minions/ui-kit/*"],
       ),

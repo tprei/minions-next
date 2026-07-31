@@ -8,6 +8,10 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./dist/index.js"
+    },
+    "./sqlite-test-support": {
+      "types": "./src/sqlite-test-support.ts",
+      "import": "./dist/sqlite-test-support.js"
     }
   },
   "scripts": {

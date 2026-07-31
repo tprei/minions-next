@@ -17,7 +17,8 @@ export type SqliteDatabaseErrorCode =
   | "transaction_async"
   | "transaction_closed"
   | "transaction_failed"
-  | "transaction_reentrant";
+  | "transaction_reentrant"
+  | "write_capability_unavailable";
 
 export class SqliteDatabaseError extends Error {
   readonly code: SqliteDatabaseErrorCode;
