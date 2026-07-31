@@ -4,6 +4,7 @@ import {
   Card,
   Commentary,
   Dialog,
+  DiffList,
   Fact,
   Field,
   NavBar,
@@ -142,6 +143,22 @@ export function FixturesRoute(): ReactNode {
             Light
           </Button>
         </NavBar>
+      </Section>
+
+      <Section title="DiffList">
+        <DiffList
+          entries={[
+            { key: "1", kind: "added", label: "Write the migration script" },
+            {
+              key: "2",
+              kind: "changed",
+              label: "Update the settings screen",
+              detail: "objective, allowed paths",
+            },
+            { key: "3", kind: "removed", label: "Old draft: refactor the sidebar" },
+            { key: "4", kind: "unchanged", label: "Ship the release notes" },
+          ]}
+        />
       </Section>
     </main>
   );

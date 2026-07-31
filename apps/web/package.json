@@ -12,10 +12,12 @@
     "@connectrpc/connect-web": "2.1.2",
     "@minions/contracts": "workspace:*",
     "@minions/ui-kit": "workspace:*",
+    "d3-hierarchy": "3.1.2",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@types/d3-hierarchy": "3.1.7",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.4",

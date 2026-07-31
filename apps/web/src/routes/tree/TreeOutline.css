@@ -1,0 +1,63 @@
+.mn-tree-outline {
+  position: relative;
+  height: 28rem;
+  overflow-y: auto;
+  border: 1px solid var(--mn-color-border);
+  border-radius: var(--mn-radius-md);
+  background-color: var(--mn-color-bg);
+}
+
+.mn-tree-outline:focus-visible {
+  outline: 2px solid var(--mn-color-focus-ring);
+  outline-offset: -2px;
+}
+
+.mn-tree-outline__spacer {
+  position: relative;
+  width: 100%;
+}
+
+.mn-tree-outline__window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.mn-tree-outline__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mn-space-2);
+  padding-right: var(--mn-space-2);
+  border-bottom: 1px solid var(--mn-color-border);
+  cursor: pointer;
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  color: var(--mn-color-fg);
+}
+
+.mn-tree-outline__row:hover {
+  background-color: var(--mn-color-bg-raised);
+}
+
+.mn-tree-outline__row--selected {
+  background-color: var(--mn-color-accent-muted);
+}
+
+.mn-tree-outline__row--locked {
+  color: var(--mn-color-fg-muted);
+}
+
+.mn-tree-outline__objective {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mn-tree-outline__badges {
+  display: flex;
+  align-items: center;
+  gap: var(--mn-space-1);
+  flex-shrink: 0;
+}

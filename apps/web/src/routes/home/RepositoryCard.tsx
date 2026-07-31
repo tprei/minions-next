@@ -51,7 +51,9 @@ export function RepositoryCard({ summary, detail, trees }: RepositoryCardProps):
           <ul className="mn-tree-list">
             {trees.map((tree) => (
               <li key={tree.id} className="mn-tree-list__item">
-                <Fact title={tree.id}>{shortId(tree.id)}</Fact>
+                <a className="mn-tree-list__link" href={`/tree/${tree.id}`} title={tree.id}>
+                  {shortId(tree.id)}
+                </a>
                 <StatusBadge
                   status={treeStateBadgeKind(tree.state)}
                   label={treeStateLabel(tree.state)}

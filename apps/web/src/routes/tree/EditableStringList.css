@@ -1,0 +1,22 @@
+.mn-editable-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-2);
+}
+
+.mn-editable-list__label {
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  font-weight: var(--mn-font-weight-medium);
+  color: var(--mn-color-fg);
+}
+
+.mn-editable-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--mn-space-2);
+}
+
+.mn-editable-list__row > input {
+  flex: 1;
+}

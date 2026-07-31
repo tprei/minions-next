@@ -296,6 +296,12 @@ export function NewTaskDialog({
             label={treeStateLabel(createdTree.state)}
           />
           <div className="mn-dialog-actions">
+            <a
+              className="mn-button mn-button--secondary mn-focus-ring"
+              href={`/tree/${createdTree.id}`}
+            >
+              Open tree
+            </a>
             <Button
               onClick={() => {
                 handleOpenChange(false);

@@ -1,0 +1,32 @@
+.mn-revision-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mn-revision-history__item {
+  padding: var(--mn-space-3);
+  border: 1px solid var(--mn-color-border);
+  border-radius: var(--mn-radius-md);
+  background-color: var(--mn-color-bg-raised);
+}
+
+.mn-revision-history__header {
+  display: flex;
+  align-items: center;
+  gap: var(--mn-space-2);
+}
+
+.mn-revision-history__goal {
+  margin: var(--mn-space-1) 0;
+  color: var(--mn-color-fg);
+}
+
+.mn-revision-history__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mn-space-2);
+}

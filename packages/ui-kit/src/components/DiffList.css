@@ -1,0 +1,73 @@
+.mn-diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mn-diff-list__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mn-space-2);
+  padding: var(--mn-space-1) var(--mn-space-2);
+  border-radius: var(--mn-radius-sm);
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+}
+
+.mn-diff-list__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+  border-radius: var(--mn-radius-sm);
+  font-family: var(--mn-font-mono);
+  font-weight: var(--mn-font-weight-semibold);
+  line-height: 1;
+}
+
+.mn-diff-list__item--added {
+  background-color: var(--mn-color-status-success-bg);
+}
+.mn-diff-list__item--added .mn-diff-list__glyph {
+  color: var(--mn-color-status-success-fg);
+}
+
+.mn-diff-list__item--removed {
+  background-color: var(--mn-color-status-danger-bg);
+}
+.mn-diff-list__item--removed .mn-diff-list__glyph {
+  color: var(--mn-color-status-danger-fg);
+}
+.mn-diff-list__item--removed .mn-diff-list__label {
+  text-decoration: line-through;
+  text-decoration-color: var(--mn-color-status-danger-fg);
+}
+
+.mn-diff-list__item--changed {
+  background-color: var(--mn-color-status-warning-bg);
+}
+.mn-diff-list__item--changed .mn-diff-list__glyph {
+  color: var(--mn-color-status-warning-fg);
+}
+
+.mn-diff-list__item--unchanged {
+  background-color: transparent;
+  color: var(--mn-color-fg-muted);
+}
+.mn-diff-list__item--unchanged .mn-diff-list__glyph {
+  color: var(--mn-color-fg-faint);
+}
+
+.mn-diff-list__label {
+  color: var(--mn-color-fg);
+  font-weight: var(--mn-font-weight-medium);
+}
+
+.mn-diff-list__detail {
+  color: var(--mn-color-fg-muted);
+}
