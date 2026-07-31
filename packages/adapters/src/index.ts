@@ -646,11 +646,13 @@ export type {
 // PR 36 — explicit landing reconciliation (core domain re-export + coordinator).
 export {
   evaluatePreflight,
+  humanApproval,
   isAlreadyLanded,
   LandingReceiptStoreError,
   validateLandingIntent,
 } from "@minions/core";
 export type {
+  HumanApproval,
   LandingIntent,
   LandingMergeMethod,
   LandingPreflight,

@@ -7,12 +7,13 @@
  * single point at which a stack node becomes part of the trunk.
  *
  * ## Only a human initiates (GIT-03, GIT-04, GIT-08, GIT-12)
- * {@link LandingIntent.requestedBy} is the literal `"human"` and nothing else.
- * No timer, queue, webhook, or model output can construct a valid intent: the
- * type forbids any other initiator at compile time, and {@link validateLandingIntent}
- * re-asserts it at runtime so untyped construction paths fail closed. There is
- * no auto-merge: every landing begins with an explicit human command that names
- * exactly one PR.
+ * A landing is authorized solely by a {@link HumanApproval} — an opaque
+ * capability issued at the authenticated boundary from a transport-derived
+ * principal. No timer, queue, webhook, or model can forge one: the capability
+ * tag is a module-private symbol, so a request body or cast lacks it and
+ * {@link validateLandingIntent} fails closed. The legacy `requestedBy` field is
+ * retained for wire-compat but is never a trust input. There is no auto-merge:
+ * every landing begins with an explicit human command that names exactly one PR.
  *
  * ## Fail-closed preflight (PR 32 / PR 35 / PR 31 / PR 25)
  * {@link LandingPreflight} is six booleans, each fail-closed: the corresponding
@@ -29,18 +30,59 @@
  * recording reconciles on restart — see {@link isAlreadyLanded}.
  */
 import type { RetargetPlan } from "./stack-parentage.js";
-import type { GitSha, Timestamp } from "./value-objects.js";
+import type { ActorSessionId, GitSha, Timestamp } from "./value-objects.js";
 
 // -------------------------------------------------------------------------------------------------
 // Initiator + merge method.
 // -------------------------------------------------------------------------------------------------
 
 /**
- * The only actor permitted to initiate a landing. The literal type makes any
- * other initiator (timer, queue, webhook, model) a compile error; the value is
- * re-checked at runtime by {@link validateLandingIntent}.
+ * Wire-compat initiator literal. RETAINED ONLY for backward request-body
+ * compatibility — it is NOT a trust input and is never consulted for
+ * authorization. The actual trust gate is {@link HumanApproval}, which cannot be
+ * self-asserted.
  */
 export type LandingRequestedBy = "human";
+
+/**
+ * Module-private capability tag. Not exported: external code (request bodies,
+ * `JSON.parse`, casts) cannot construct an object keyed by this symbol, so a
+ * {@link HumanApproval} can originate only from {@link humanApproval} at the
+ * authenticated boundary. Forged provenance — `requestedBy: "human"` sent by a
+ * webhook/timer/model — lacks the tag and fails closed.
+ */
+const humanApprovalTag: unique symbol = Symbol("minions.HumanApproval");
+
+/**
+ * Opaque capability proving the landing was triggered by a verified human
+ * principal. Construct ONLY via {@link humanApproval} from a transport-derived
+ * authenticated principal (an {@link ActorSessionId} established at the request
+ * boundary). Because the tag is a module-private symbol, an automated
+ * webhook/timer/model cannot forge one from a request body; this is the sole
+ * trust gate that lets a landing proceed (GIT-03/04/08/12).
+ */
+export type HumanApproval = Readonly<{ readonly [humanApprovalTag]: ActorSessionId }>;
+
+/**
+ * The single construction site for a {@link HumanApproval}. The caller MUST be
+ * the authenticated boundary: `principal` is a transport-derived actor session,
+ * never a value read from the request body. Pure.
+ */
+export function humanApproval(principal: ActorSessionId): HumanApproval {
+  return { [humanApprovalTag]: principal };
+}
+
+/**
+ * Type guard for a genuine {@link HumanApproval} issued by {@link humanApproval}.
+ * A plain object (request body, cast, or forged provenance) fails: it cannot
+ * carry the module-private tag. Pure.
+ */
+function isHumanApproval(value: unknown): value is HumanApproval {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  return humanApprovalTag in value;
+}
 
 /**
  * Typed merge method. Engine commits always squash (GIT-12): one commit per
@@ -53,14 +95,26 @@ export type LandingMergeMethod = "squash" | "merge" | "rebase";
 // -------------------------------------------------------------------------------------------------
 
 /**
- * One explicit human command landing exactly one named PR. Constructed ONLY in
- * response to a human action; carries the expected head SHA so the preflight can
- * detect that the remote head moved between the command and execution.
+ * One explicit human command landing exactly one named PR. Carries a verified
+ * {@link HumanApproval} (the trust gate, supplied at the authenticated boundary)
+ * and the expected head SHA so the preflight can detect that the remote head
+ * moved between the command and execution.
  */
 export type LandingIntent = Readonly<{
   readonly prNumber: number;
   readonly repositoryFullName: string;
-  readonly requestedBy: LandingRequestedBy;
+  /**
+   * Verified human principal capability. The SOLE trust input: it must be a
+   * genuine {@link HumanApproval} issued at the authenticated boundary. An
+   * intent lacking one is rejected by {@link validateLandingIntent}.
+   */
+  readonly humanApproval: HumanApproval;
+  /**
+   * Wire-compat initiator literal; NOT consulted for trust (see
+   * {@link humanApproval}). Optional so untyped callers still parse, but it can
+   * never authorize a landing on its own.
+   */
+  readonly requestedBy?: LandingRequestedBy;
   /** Head SHA the human reviewed; preflight rejects if the live head differs. */
   readonly expectedHeadSha: GitSha;
   /** When the human issued the command (epoch ms). */
@@ -167,19 +221,20 @@ const repositoryFullNamePattern = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u;
 
 /**
  * Validate a {@link LandingIntent} structurally. Throws on any invariant breach
- * — most importantly on a non-human `requestedBy`, which is the acceptance guard
- * (no timer/queue/webhook/model can initiate). Pure.
+ * — most importantly when a genuine {@link HumanApproval} is absent, which is the
+ * acceptance guard (no timer/queue/webhook/model can initiate). `requestedBy`,
+ * if present, is ignored for trust. Pure, fail-closed.
  */
 export function validateLandingIntent(intent: LandingIntent): void {
-  // `requestedBy` is the literal "human" at the type level; read it as a plain
-  // string so the runtime guard stays live for untyped/casted construction paths
-  // (a timer, queue, webhook, or model cannot produce a valid typed intent, but a
-  // stray cast could — fail closed here regardless).
-  const requestedBy: string = intent.requestedBy;
-  if (requestedBy !== "human") {
+  // The SOLE trust gate: a genuine HumanApproval can only be produced by
+  // humanApproval() from a transport-derived authenticated principal. A request
+  // body, cast, or forged provenance (e.g. `requestedBy: "human"` from a
+  // webhook) lacks the module-private tag — fail closed so no automated actor
+  // can land.
+  if (!isHumanApproval(intent.humanApproval)) {
     throw new Error(
-      `landing can only be requested by a human, got '${requestedBy}' ` +
-        `(no timer, queue, webhook, or model may initiate a landing)`,
+      "landing requires a verified human principal (HumanApproval); an automated " +
+        "webhook, timer, queue, or model cannot initiate a landing",
     );
   }
   if (!Number.isInteger(intent.prNumber) || intent.prNumber <= 0) {
@@ -191,7 +246,8 @@ export function validateLandingIntent(intent: LandingIntent): void {
     );
   }
   // expectedHeadSha / requestedAt are branded value objects (validated at
-  // construction); nothing further to assert here.
+  // construction); nothing further to assert here. `requestedBy` is retained for
+  // wire-compat and is deliberately NOT consulted for trust.
 }
 
 /**

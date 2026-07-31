@@ -14,9 +14,11 @@ import {
   type LandingReceiptStore,
 } from "@minions/adapters";
 import {
+  actorSessionId,
   contentHash,
   determineBranchName,
   gitSha,
+  humanApproval,
   STACK_TRUNK_BRANCH,
   taskNodeId,
   taskTreeId,
@@ -28,6 +30,8 @@ import {
   type GateReceiptRecord,
   type GateReceiptStore,
   type GitSha,
+  type HumanApproval,
+  type LandingIntent,
   type LandingReceipt,
   type RequiredCheckSet,
   type TaskNodeId,
@@ -97,6 +101,10 @@ const CHILD_BRANCH = determineBranchName(TREE_ID, CHILD_NODE_ID);
 
 const PARENT_PR = 10;
 const CHILD_PR = 11;
+// A transport-derived authenticated human principal — what the daemon would
+// establish at the request boundary and wrap via humanApproval() before handing
+// the intent to the coordinator. An automated caller cannot mint one.
+const AUTHENTICATED_ACTOR = actorSessionId("01900000-0000-7000-8000-000000000010");
 
 const REQUIRED: RequiredCheckSet = Object.freeze({ requiredChecks: Object.freeze(["ci", "lint"]) });
 const NO_GATES: GateReceiptExpectation = Object.freeze({
@@ -711,6 +719,10 @@ function parentIntent(headSha: GitSha = HEAD_SHA) {
     prNumber: PARENT_PR,
     repositoryFullName: REPO,
     requestedBy: "human" as const,
+    // Capability derived from an authenticated actor session — the trust gate,
+    // supplied at the test boundary exactly as the daemon would derive it from
+    // the transport principal.
+    humanApproval: humanApproval(AUTHENTICATED_ACTOR),
     expectedHeadSha: headSha,
     requestedAt: timestampFromEpochMilliseconds(1_700_000_001_000),
   };
@@ -933,18 +945,53 @@ describe("landing", () => {
   // Acceptance invariants.
   // -------------------------------------------------------------------------------------------
 
-  it("rejects a non-human initiator at the domain boundary", async () => {
+  it("rejects a self-asserted human initiator with no verified principal (forge)", async () => {
     const h = await harness();
-    // Construct an intent with an invalid initiator via a cast (a webhook/timer
-    // cannot produce a typed LandingIntent, but the runtime guard must fire).
-    const badIntent = {
+    // An automated webhook/timer/model can send requestedBy: "human" (forged
+    // provenance) but CANNOT construct a genuine HumanApproval — the
+    // module-private symbol tag is unforgeable from a request body. Omitting the
+    // capability must fail closed even though requestedBy is "human".
+    const forged = {
       prNumber: PARENT_PR,
       repositoryFullName: REPO,
-      requestedBy: "webhook" as "human",
+      requestedBy: "human",
+      expectedHeadSha: HEAD_SHA,
+      requestedAt: timestampFromEpochMilliseconds(1_700_000_001_000),
+    } as unknown as LandingIntent;
+    await expect(h.coordinator.land(forged)).rejects.toThrow(/verified human principal/u);
+    expect(h.mock.merges).toHaveLength(0);
+  });
+
+  it("rejects a capability that an unauthenticated caller casts from a plain object", async () => {
+    const h = await harness();
+    // A cast cannot manufacture the module-private symbol tag: this plain object
+    // carries no genuine HumanApproval and must be rejected at the boundary.
+    const forgedCapability = {
+      prNumber: PARENT_PR,
+      repositoryFullName: REPO,
+      requestedBy: "human",
+      humanApproval: { bogus: true } as unknown as HumanApproval,
+      expectedHeadSha: HEAD_SHA,
+      requestedAt: timestampFromEpochMilliseconds(1_700_000_001_000),
+    } as unknown as LandingIntent;
+    await expect(h.coordinator.land(forgedCapability)).rejects.toThrow(
+      /verified human principal/u,
+    );
+    expect(h.mock.merges).toHaveLength(0);
+  });
+
+  it("lands when the capability is derived from an authenticated principal", async () => {
+    const h = await harness();
+    const intent: LandingIntent = {
+      prNumber: PARENT_PR,
+      repositoryFullName: REPO,
+      humanApproval: humanApproval(AUTHENTICATED_ACTOR),
+      requestedBy: "human",
       expectedHeadSha: HEAD_SHA,
       requestedAt: timestampFromEpochMilliseconds(1_700_000_001_000),
     };
-    await expect(h.coordinator.land(badIntent)).rejects.toThrow(/only be requested by a human/u);
-    expect(h.mock.merges).toHaveLength(0);
+    const receipt = await h.coordinator.land(intent);
+    expect(receipt.verdict).toBe("landed");
+    expect(h.mock.merges).toHaveLength(1);
   });
 });

@@ -12,7 +12,7 @@ import {
   createStackParentageManager,
   resolveEngineBotIdentity,
 } from "@minions/adapters";
-import { taskTreeId, timestampFromEpochMilliseconds } from "@minions/core";
+import { actorSessionId, humanApproval, taskTreeId, timestampFromEpochMilliseconds } from "@minions/core";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 
 // PR 36 focused synthetic: exercise the real landing coordinator's preflight +
@@ -135,9 +135,14 @@ async function runSynthetic(configuration) {
       now: Date.now,
     });
 
+    // The synthetic is the authenticated boundary here: a verified HumanApproval
+    // is minted from a transport-derived principal and attached to the intent.
+    // In the daemon this principal comes from the transport; a request body can
+    // never supply it.
     const intent = {
       prNumber: configuration.prNumber,
       repositoryFullName,
+      humanApproval: humanApproval(actorSessionId("01900000-0000-7000-8000-000000000001")),
       requestedBy: "human",
       expectedHeadSha: configuration.expectedHeadSha,
       requestedAt: timestampFromEpochMilliseconds(Date.now()),

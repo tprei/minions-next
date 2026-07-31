@@ -13,9 +13,11 @@
  *
  * ## Only a human initiates (GIT-03, GIT-04, GIT-08, GIT-12)
  * The only entry point is {@link LandingCoordinator.land}, which takes a
- * {@link LandingIntent} whose `requestedBy` is the literal `"human"`. There is no
- * auto-merge path, no timer, no queue: one explicit command lands exactly one
- * named PR. `validateLandingIntent` re-asserts the initiator at runtime.
+ * {@link LandingIntent} carrying a verified {@link HumanApproval} — a capability
+ * issued at the authenticated boundary, never a request-body field. There is no
+ * auto-merge path, no timer, no queue: one explicit human command lands exactly
+ * one named PR. `validateLandingIntent` re-asserts the capability at runtime and
+ * fails closed when it is absent or forged.
  *
  * ## Preflight order + crash reconciliation
  * 1. Idempotency: a recorded receipt for this PR → `duplicate_command` (return).
