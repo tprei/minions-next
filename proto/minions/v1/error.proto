@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "minions/v1/common.proto";
+
+message ErrorDetail {
+  oneof detail {
+    option (buf.validate.oneof).required = true;
+
+    ValidationError validation = 1;
+    UnsupportedApiVersion unsupported_api_version = 2;
+  }
+}
+
+message ValidationError {
+  repeated buf.validate.Violation violations = 1 [(buf.validate.field).repeated.min_items = 1];
+}
+
+message UnsupportedApiVersion {
+  ApiVersion requested = 1 [(buf.validate.field).required = true];
+  ApiVersion supported = 2 [(buf.validate.field).required = true];
+}

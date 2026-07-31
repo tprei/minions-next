@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+
+message ApiVersion {
+  uint32 major = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 4294967295
+  }];
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
+
+enum ServerCapability {
+  SERVER_CAPABILITY_UNSPECIFIED = 0;
+  SERVER_CAPABILITY_SYSTEM_INFO = 1;
+}
