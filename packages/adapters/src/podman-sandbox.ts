@@ -256,7 +256,12 @@ class PodmanSandboxLifecycle implements SandboxLifecycle {
     const flagSet = containerFlagSet(policy, this.#options, containerName);
     try {
       await this.#runChecked(
-        [this.#options.podmanPath, ...flagSet.globalArguments, "create", ...flagSet.createArguments],
+        [
+          this.#options.podmanPath,
+          ...flagSet.globalArguments,
+          "create",
+          ...flagSet.createArguments,
+        ],
         lifecycleStartTimeoutMs,
         lifecycleOutputLimit,
       );
