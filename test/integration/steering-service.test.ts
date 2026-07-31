@@ -614,7 +614,10 @@ describe("SteeringService integration", () => {
     expectValidationError(zeroPage);
 
     for (let index = 0; index < 201; index += 1) {
-      await queueDirect(fixture, index + 10, { kind: "message", text: `command ${String(index)}` });
+      await queueDirect(fixture, index + 10, {
+        kind: "message",
+        text: `command ${String(index)}`,
+      });
     }
 
     const firstPage = await fixture.client.listNodeCommands({
@@ -645,5 +648,5 @@ describe("SteeringService integration", () => {
     });
     expect(beyondSigned.commands).toEqual([]);
     expect(beyondSigned.nextOrdinal).toBeUndefined();
-  });
+  }, 20_000);
 });

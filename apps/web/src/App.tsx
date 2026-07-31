@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ThemeProvider } from "@minions/ui-kit";
 import { FixturesRoute } from "./routes/Fixtures.js";
 import { HomeRoute } from "./routes/Home.js";
+import { InboxRoute } from "./routes/Inbox.js";
 import { NodeConsole } from "./routes/node/NodeConsole.js";
 import { TreeRoute } from "./routes/tree/TreeRoute.js";
 
@@ -33,6 +34,9 @@ function Shell(): ReactNode {
   const { pathname } = window.location;
   if (pathname === "/fixtures") {
     return <FixturesRoute />;
+  }
+  if (pathname === "/inbox") {
+    return <InboxRoute />;
   }
   const nodeMatch = /^\/tree\/([^/]+)\/node\/([^/]+)$/.exec(pathname);
   if (nodeMatch?.[1] !== undefined && nodeMatch[2] !== undefined) {
