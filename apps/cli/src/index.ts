@@ -172,6 +172,7 @@ type StartInvocation = Readonly<{
   mode: DaemonModeName;
   port: number;
   hostId?: HostId;
+  allowRemote?: boolean;
 }>;
 
 type TreeBudgetInput = Readonly<{
@@ -316,6 +317,7 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let mode: DaemonModeName = "local";
   let port = 4_817;
   let configuredHostId: HostId | undefined;
+  let allowRemote = false;
   let authHostId: HostId | undefined;
   let authProvider: string | undefined;
   let authVia: string | undefined;
@@ -378,6 +380,12 @@ function parseInvocation(argv: readonly string[]): Invocation {
           throw new UsageError("--host-id is only valid with start or auth");
         }
         index += 1;
+        break;
+      case "--allow-remote":
+        if (command !== "start") {
+          throw new UsageError("--allow-remote is only valid with start");
+        }
+        allowRemote = true;
         break;
       case "--max-depth":
         if (command !== "tree-create") {
@@ -524,10 +532,17 @@ function parseInvocation(argv: readonly string[]): Invocation {
     if (mode !== "host" && configuredHostId !== undefined) {
       throw new UsageError("--host-id is only valid in host mode");
     }
-    if (configuredHostId === undefined) {
-      return { command, home, mode, port };
+    if (allowRemote && mode === "supervisor") {
+      throw new UsageError("--allow-remote is not valid in supervisor mode");
     }
-    return { command, home, mode, port, hostId: configuredHostId };
+    return {
+      command,
+      home,
+      mode,
+      port,
+      ...(configuredHostId === undefined ? {} : { hostId: configuredHostId }),
+      ...(allowRemote ? { allowRemote } : {}),
+    };
   }
   if (
     command === "stop" ||
@@ -918,6 +933,9 @@ async function start(invocation: StartInvocation): Promise<number> {
   ];
   if (invocation.hostId !== undefined) {
     arguments_.push("--host-id", invocation.hostId);
+  }
+  if (invocation.allowRemote === true) {
+    arguments_.push("--allow-remote");
   }
   return await runDaemon(arguments_);
 }

@@ -90,6 +90,7 @@ import {
 import type { StructuredLogger } from "./logger.js";
 import { startDaemonServer, type RunningDaemonServer } from "./server.js";
 import type { TreeServiceRevsetOptions } from "./tree-service.js";
+import { createDeviceSessionStore } from "./device-session-store.js";
 import { createSystemRecoveryRestarter, type RecoveryRestarter } from "./recovery-restart.js";
 
 /**
@@ -195,6 +196,20 @@ export type DaemonRuntimeOptions = Readonly<{
    * directory for non-RPC GET requests, making the PWA and RPC API same-origin.
    */
   webDistDir?: string;
+  /**
+   * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing). When
+   * enabled, the daemon constructs a process-lifetime {@link DeviceSessionStore},
+   * shares it between the pairing RPCs and the remote-access interceptor, and binds
+   * every interface instead of loopback only (see `server.ts`'s `remoteAccess` doc for
+   * the full security model). Only meaningful for "local"/"host" mode, which is where
+   * the mutation RPCs a phone session gates actually live; ignored for "supervisor"
+   * mode. Omitted, daemon behaviour is unchanged (REMOTE-01's loopback-only default).
+   */
+  remoteAccess?: RemoteAccessRuntimeOptions;
+}>;
+
+export type RemoteAccessRuntimeOptions = Readonly<{
+  enabled: true;
 }>;
 
 export type ProviderAdmissionRuntimeOptions = Readonly<{
@@ -594,6 +609,10 @@ export async function startDaemonRuntime(
         jj_version: probe.version,
       });
     }
+    const remoteAccess =
+      options.remoteAccess?.enabled === true
+        ? { sessionStore: createDeviceSessionStore() }
+        : undefined;
 
     if (options.mode === "local") {
       server = await startDaemonServer({
@@ -622,6 +641,7 @@ export async function startDaemonRuntime(
         hostRegistry: requireRegistry(hostRegistry),
         ...(revset !== undefined ? { revset } : {}),
         ...(options.webDistDir !== undefined ? { webDistDir: options.webDistDir } : {}),
+        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else if (options.mode === "host") {
       server = await startDaemonServer({
@@ -648,6 +668,7 @@ export async function startDaemonRuntime(
           ...(jjCentralRepo !== undefined ? { jjCentralRepo } : {}),
         },
         ...(revset !== undefined ? { revset } : {}),
+        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else {
       server = await startDaemonServer({
@@ -730,6 +751,7 @@ export function defaultRuntimeOptions(
     hostId?: HostId;
     signal?: AbortSignal;
     jjCapability?: JjCapabilityRuntimeOptions;
+    remoteAccess?: RemoteAccessRuntimeOptions;
   }>,
 ): DaemonRuntimeOptions {
   const clock: Clock = { now: () => timestampFromEpochMilliseconds(Date.now()) };

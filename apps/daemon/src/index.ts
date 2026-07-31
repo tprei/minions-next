@@ -8,7 +8,11 @@ import { LifecycleLockError, type DaemonModeName } from "@minions/adapters";
 import { hostId, type HostId } from "@minions/core";
 
 import { createStructuredLogger } from "./logger.js";
-import { defaultRuntimeOptions, startDaemonRuntime } from "./runtime.js";
+import {
+  defaultRuntimeOptions,
+  startDaemonRuntime,
+  type RemoteAccessRuntimeOptions,
+} from "./runtime.js";
 
 export { createStructuredLogger, defaultRuntimeOptions, startDaemonRuntime };
 export { registerHostService } from "./host-service.js";
@@ -22,6 +26,17 @@ export type { MaintenanceServiceOptions } from "./maintenance-service.js";
 export type { CreateStructuredLoggerOptions, StructuredLogger } from "./logger.js";
 export type { DaemonRuntimeOptions, RunningDaemonRuntime } from "./runtime.js";
 export type { DaemonServerOptions, RunningDaemonServer } from "./server.js";
+export type { RemoteAccessRuntimeOptions } from "./runtime.js";
+export type { RemoteAccessServerOptions } from "./server.js";
+export { createDeviceSessionStore } from "./device-session-store.js";
+export type { DeviceSessionStore } from "./device-session-store.js";
+export {
+  createRemoteAccessInterceptor,
+  isLoopbackAddress,
+  isLoopbackContextKey,
+  PHONE_REMOTE_ACCESS_POLICY,
+} from "./remote-access-interceptor.js";
+export type { RemoteAccessPolicy } from "./remote-access-interceptor.js";
 export { registerPairingService } from "./pairing-service.js";
 export type { PairingServiceOptions } from "./pairing-service.js";
 export { DaemonStartupError, AuthRuntimeStartupError } from "./runtime.js";
@@ -80,6 +95,7 @@ type ProcessArguments = Readonly<{
   mode: DaemonModeName;
   port: number;
   hostId?: HostId;
+  remoteAccess?: RemoteAccessRuntimeOptions;
 }>;
 
 function parseArguments(argv: readonly string[]): ProcessArguments {
@@ -87,6 +103,7 @@ function parseArguments(argv: readonly string[]): ProcessArguments {
   let mode: DaemonModeName = "local";
   let port = 4_817;
   let configuredHostId: HostId | undefined;
+  let allowRemote = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -111,6 +128,9 @@ function parseArguments(argv: readonly string[]): ProcessArguments {
         configuredHostId = hostId(requiredValue(argument, value));
         index += 1;
         break;
+      case "--allow-remote":
+        allowRemote = true;
+        break;
       default:
         throw new TypeError(`unknown daemon argument: ${argument}`);
     }
@@ -122,10 +142,16 @@ function parseArguments(argv: readonly string[]): ProcessArguments {
   if (mode !== "host" && configuredHostId !== undefined) {
     throw new TypeError("--host-id is only valid in host mode");
   }
-  if (configuredHostId === undefined) {
-    return { home, mode, port };
+  if (allowRemote && mode === "supervisor") {
+    throw new TypeError("--allow-remote is not valid in supervisor mode");
   }
-  return { home, mode, port, hostId: configuredHostId };
+  return {
+    home,
+    mode,
+    port,
+    ...(configuredHostId === undefined ? {} : { hostId: configuredHostId }),
+    ...(allowRemote ? { remoteAccess: { enabled: true } } : {}),
+  };
 }
 
 function daemonMode(value: string): DaemonModeName {
