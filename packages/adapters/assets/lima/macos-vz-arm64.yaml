@@ -1,0 +1,66 @@
+minimumLimaVersion: 2.1.4
+vmType: vz
+mountType: virtiofs
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/resolute/release-20260627/ubuntu-26.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+    digest: "sha256:3d8db37fa9a8a0c8676dfc0ee3eb41fd0049d66cb055a792bddc8f4123443ae1"
+containerd:
+  system: false
+  user: false
+mounts: []
+portForwards: []
+hostResolver:
+  enabled: false
+ssh:
+  overVsock: false
+networks:
+  - vzNAT: true
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      marker=/var/lib/minions/template-v1-system.ready
+      if [ ! -e "$marker" ]; then
+        export DEBIAN_FRONTEND=noninteractive
+        curl --fail --silent --show-error --location https://get.docker.com | sh
+        for unit in docker.service docker.socket containerd.service containerd.socket; do
+          if systemctl list-unit-files "$unit" --no-legend | grep -q "^$unit "; then
+            systemctl disable --now "$unit"
+            systemctl mask "$unit"
+          fi
+        done
+        apt-get update
+        apt-get install --yes dbus-user-session iptables uidmap xz-utils
+        node_archive=/tmp/node-v24.18.0-linux-arm64.tar.xz
+        curl --fail --silent --show-error --location \
+          https://nodejs.org/dist/v24.18.0/node-v24.18.0-linux-arm64.tar.xz \
+          --output "$node_archive"
+        echo "58c9520501f6ae2b52d5b210444e24b9d0c029a58c5011b797bc1fe7105886f6  $node_archive" \
+          | sha256sum --check --strict
+        tar --extract --xz --file "$node_archive" --directory /usr/local --strip-components=1
+        rm "$node_archive"
+        test "$(node --version)" = "v24.18.0"
+        install -d -m 0755 /var/lib/minions
+        install -m 0444 /dev/null "$marker"
+      fi
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -euo pipefail
+      marker="$HOME/.local/state/minions/template-v1-user.ready"
+      if [ ! -e "$marker" ]; then
+        systemctl --user start dbus
+        dockerd-rootless-setuptool.sh install
+        install -d -m 0700 "$(dirname "$marker")"
+        install -m 0400 /dev/null "$marker"
+      fi
+      systemctl --user start dbus docker
+      docker context use rootless
+probes:
+  - script: |
+      #!/bin/bash
+      set -euo pipefail
+      command -v docker
+      docker version --format '{{.Server.Version}}'

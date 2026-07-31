@@ -7,6 +7,7 @@ import {
   repositoryId,
   taskNodeId,
   type SandboxMount,
+  type ContentHash,
   type SandboxPolicy,
   type SandboxAttemptContext,
 } from "@minions/core";
@@ -15,6 +16,7 @@ import type { SandboxSensitivePath as TestSandboxSensitivePath } from "./sandbox
 
 export type SandboxContractFixtureOptions = Readonly<{
   prefix?: string;
+  templateDigest?: ContentHash;
 }>;
 
 export type SandboxContractFixture = Readonly<{
@@ -105,7 +107,7 @@ export async function createSandboxContractFixture(
     const policy: SandboxPolicy = Object.freeze({
       version: 1,
       rootFilesystemDigest: contentHash("a".repeat(64)),
-      templateDigest: contentHash("b".repeat(64)),
+      templateDigest: options.templateDigest ?? contentHash("b".repeat(64)),
       mounts: Object.freeze([workspaceMount, scratchMount]),
       network: Object.freeze({
         profile: "implementation",
@@ -113,17 +115,17 @@ export async function createSandboxContractFixture(
         allowProviderGateway: false,
       }),
       tools: Object.freeze({
-        allowedExecutables: Object.freeze(["cat", "curl", "git", "node", "touch"]),
+        allowedExecutables: Object.freeze(["cat", "curl", "docker", "git", "node", "touch"]),
         allowedGitSubcommands: Object.freeze(["status"]),
         blockedGitSubcommands: Object.freeze([...blockedGitSubcommands]),
       }),
       resources: Object.freeze({
         cpuCount: 2,
-        memoryMiB: 512,
+        memoryMiB: 2_048,
         processLimit: 16,
-        storageMiB: 256,
-        executionTimeoutMs: 1_000,
-        maxOutputBytes: 4_096,
+        storageMiB: 20_480,
+        executionTimeoutMs: 120_000,
+        maxOutputBytes: 1_048_576,
       }),
     });
     const sentinelPaths = Object.freeze({

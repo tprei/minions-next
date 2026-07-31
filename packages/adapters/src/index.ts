@@ -187,3 +187,12 @@ export type {
   ProductionSandboxLifecycle,
   ProductionSandboxLifecycleErrorCode,
 } from "./sandbox-lifecycle.js";
+export { LimaTemplateError, prepareLimaTemplate, verifyLimaTemplate } from "./lima-template.js";
+export type {
+  LimaRuntimeArtifact,
+  LimaTemplateBuildOptions,
+  LimaTemplateErrorCode,
+  LimaTemplateReceipt,
+} from "./lima-template.js";
+export { createMacOsLimaSandboxLifecycle, MacOsLimaSandboxError } from "./lima-sandbox.js";
+export type { MacOsLimaSandboxErrorCode, MacOsLimaSandboxOptions } from "./lima-sandbox.js";

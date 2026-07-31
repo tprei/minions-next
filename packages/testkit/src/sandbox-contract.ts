@@ -1,14 +1,15 @@
-import type {
-  CreateSandboxRequest,
-  ExecuteSandboxRequest,
-  SandboxExecutionResult,
-  SandboxInstance,
-  SandboxLifecycle,
-  SandboxPolicy,
-  SandboxPolicyFingerprint,
-  SandboxPolicyFingerprinter,
+import {
+  SandboxDeniedError,
+  type SandboxDenialCode,
+  type CreateSandboxRequest,
+  type ExecuteSandboxRequest,
+  type SandboxExecutionResult,
+  type SandboxInstance,
+  type SandboxLifecycle,
+  type SandboxPolicy,
+  type SandboxPolicyFingerprint,
+  type SandboxPolicyFingerprinter,
 } from "@minions/core";
-import { SandboxDeniedError, type SandboxDenialCode } from "./sandbox.js";
 import type { SandboxContractFixture } from "./sandbox-contract-fixture.js";
 
 export type SandboxContractScenarioId =
@@ -120,6 +121,7 @@ export async function executeSandboxContract(
   lifecycle: SandboxLifecycle,
   fixture: SandboxContractFixture,
   fingerprinter: SandboxPolicyFingerprinter,
+  options: Readonly<{ teardown?: boolean }> = {},
 ): Promise<SandboxContractReport> {
   const policyFingerprint = fingerprinter.fingerprint(fixture.policy);
   const baselineRequest: CreateSandboxRequest = {
@@ -141,9 +143,13 @@ export async function executeSandboxContract(
     baseline,
     policyFingerprint,
     fixture.workspace,
+    Math.min(fixture.policy.resources.executionTimeoutMs, 30_000),
   );
   if (baselineExecution.exitCode !== 0) {
-    throw new Error("sandbox baseline execution did not succeed");
+    const stderr = new TextDecoder("utf-8", { fatal: true }).decode(baselineExecution.stderr);
+    throw new Error(
+      `sandbox baseline execution exited ${String(baselineExecution.exitCode)}: ${stderr}`,
+    );
   }
 
   const sentinelsBefore = await fixture.snapshotSentinels();
@@ -169,10 +175,12 @@ export async function executeSandboxContract(
     );
   }
 
-  await lifecycle.stop(baseline.instanceId, policyFingerprint);
-  await lifecycle.stop(baseline.instanceId, policyFingerprint);
-  await lifecycle.destroy(baseline.instanceId, policyFingerprint);
-  await lifecycle.destroy(baseline.instanceId, policyFingerprint);
+  if (options.teardown !== false) {
+    await lifecycle.stop(baseline.instanceId, policyFingerprint);
+    await lifecycle.stop(baseline.instanceId, policyFingerprint);
+    await lifecycle.destroy(baseline.instanceId, policyFingerprint);
+    await lifecycle.destroy(baseline.instanceId, policyFingerprint);
+  }
   const sentinelsAfter = await fixture.snapshotSentinels();
   const sentinelsUnchanged = recordsEqual(sentinelsBefore, sentinelsAfter);
   const frozenResults = Object.freeze(results);
@@ -192,6 +200,7 @@ async function executeBaseline(
   instance: SandboxInstance,
   policyFingerprint: SandboxPolicyFingerprint,
   workspace: string,
+  timeoutMs: number,
 ): Promise<SandboxExecutionResult> {
   return lifecycle.execute({
     instanceId: instance.instanceId,
@@ -200,7 +209,7 @@ async function executeBaseline(
     arguments: ["-e", ""],
     workingDirectory: workspace,
     environment: Object.freeze({}),
-    timeoutMs: 100,
+    timeoutMs,
     maxOutputBytes: 256,
   });
 }
@@ -243,7 +252,7 @@ function scenarioRequest(
     expectedPolicyFingerprint: policyFingerprint,
     workingDirectory: fixture.workspace,
     environment: Object.freeze({}),
-    timeoutMs: 100,
+    timeoutMs: Math.min(fixture.policy.resources.executionTimeoutMs, 30_000),
     maxOutputBytes: 4_096,
   } satisfies Omit<ExecuteSandboxRequest, "executable" | "arguments">;
   const requests: Record<
@@ -306,6 +315,7 @@ function scenarioRequest(
     },
     "timeout-limit": {
       ...base,
+      timeoutMs: 100,
       executable: "node",
       arguments: ["-e", "setTimeout(()=>{},1000)"],
     },
