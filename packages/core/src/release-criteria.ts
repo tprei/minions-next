@@ -67,7 +67,7 @@ export const RELEASE_CRITERIA_DEFINITIONS: readonly ReleaseCriterion[] = Object.
   },
   {
     id: 10,
-    name: " jj operations: absorb, restack, op-log recovery",
+    name: "jj operations: absorb, restack, op-log recovery",
     demonstrated: false,
     evidenceSha: undefined,
   },
