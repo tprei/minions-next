@@ -451,7 +451,7 @@ function forbiddenGitConfigKey(config: string): string | undefined {
     const header = sectionHeader.exec(line);
     if (header?.groups) {
       // Legacy dotted form `[section.subsection]`: the leading segment is the section.
-      let name = header.groups.name!.toLowerCase();
+      let name = (header.groups["name"] ?? "").toLowerCase();
       const dot = name.indexOf(".");
       if (dot >= 0) name = name.slice(0, dot);
       section = name;
@@ -459,7 +459,7 @@ function forbiddenGitConfigKey(config: string): string | undefined {
     }
     const match = entry.exec(line);
     if (match?.groups) {
-      const segments = match.groups.key!.toLowerCase().split(".");
+      const segments = (match.groups["key"] ?? "").toLowerCase().split(".");
       const key = segments[segments.length - 1] ?? "";
       const qualified = `${section}.${segments.join(".")}`;
       if (FORBIDDEN_GIT_CONFIG_KEYS_ANY_SECTION[key] === true) return qualified;
