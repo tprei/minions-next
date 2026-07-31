@@ -1111,22 +1111,34 @@ export function pathContainsDotJj(path: string): boolean {
  * never fires. Masking `.jj` by inspecting path strings cannot work when the
  * mount source is a directory whose *contents* include `.jj`.
  *
- * The fix masks at the mount/bind layer instead: bind-mount each of the
- * working copy's top-level entries INDIVIDUALLY, skip `.jj`, and never
- * construct (or accept) a mount for the working-copy root itself. `.jj` is
- * never a source or target of any returned mount, so a sandbox built from
- * exactly this list structurally cannot reach it — regardless of whether a
- * caller also inspects path strings. Every remaining top-level entry is
- * bind-mounted directly (not copied/mirrored): sandbox reads and writes land
- * on the SAME files jj tracks, so `status`/`diff`/`commit` see them exactly
- * as before, with no host-side mirror, sync step, or staleness window.
+ * A later "shadow mount" design (mount the whole working-copy root as the
+ * single workspace mount, then mount an empty directory directly over
+ * `/workspace/.jj` to shadow it) was considered and rejected:
+ * `validateSandboxPolicy` explicitly rejects any mount whose TARGET path
+ * traverses a `.jj` segment (the same GIT-15 defense-in-depth check quoted
+ * above), by design — the validator does not distinguish "a mount that
+ * exposes real `.jj` metadata" from "a mount that happens to target a path
+ * spelled `.../.jj`", because allowing the latter is itself the attack
+ * surface a less careful caller could exploit. That rule is not something
+ * this function should punch a hole through.
  *
- * Known, accepted limitation: a BRAND-NEW top-level entry a sandboxed process
- * creates directly under the mount target (a sibling of the entries mounted
- * here, not inside one of them) has no corresponding bind mount and is lost
- * when the sandbox is destroyed. Callers that need to observe genuinely new
- * top-level paths must rebuild the mount list (call this again) before the
- * next sandbox attempt against the same working copy.
+ * The fix instead masks at the mount/bind layer by construction: bind-mount
+ * each of the working copy's top-level entries INDIVIDUALLY, skip `.jj`,
+ * and never construct (or accept) a mount for the working-copy root itself.
+ * `.jj` is never a source or target of any returned mount, so a sandbox
+ * built from exactly this list structurally cannot reach it — regardless of
+ * whether a caller also inspects path strings. Every remaining top-level
+ * entry is bind-mounted directly (not copied/mirrored): sandbox reads and
+ * writes land on the SAME files jj tracks, so `status`/`diff`/`commit` see
+ * them exactly as before, with no host-side mirror, sync step, or staleness
+ * window.
+ *
+ * Known, accepted limitation: a BRAND-NEW top-level entry a sandboxed
+ * process creates directly under the mount target (a sibling of the entries
+ * mounted here, not inside one of them) has no corresponding bind mount and
+ * is lost when the sandbox is destroyed. Callers that need to observe
+ * genuinely new top-level paths must rebuild the mount list (call this
+ * again) before the next sandbox attempt against the same working copy.
  */
 export async function workspaceSandboxMounts(
   workingCopyPath: string,

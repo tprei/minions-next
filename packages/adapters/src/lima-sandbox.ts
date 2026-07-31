@@ -35,6 +35,7 @@ import {
   type SandboxPolicyFingerprint,
 } from "@minions/core";
 import {
+  commonAncestorPath,
   createSandboxPolicyFingerprinter,
   validateSandboxCommand,
   validateSandboxPolicy,
@@ -1118,10 +1119,12 @@ async function enforcePathPolicy(
     if (!isAbsolute(rawPath)) continue;
     const mount = targetMountFor(rawPath, policy);
     if (mount === undefined) {
-      const workspace = policy.mounts.find((candidate) => candidate.kind === "workspace");
+      const workspaceSourceRoot = commonAncestorPath(
+        policy.mounts.filter((candidate) => candidate.kind === "workspace").map((m) => m.sourcePath),
+      );
       if (
-        workspace !== undefined &&
-        resolve(rawPath).startsWith(`${dirname(resolve(workspace.sourcePath))}${sep}`)
+        workspaceSourceRoot !== undefined &&
+        resolve(rawPath).startsWith(`${dirname(resolve(workspaceSourceRoot))}${sep}`)
       ) {
         throw new SandboxDeniedError(
           "sibling_workspace",

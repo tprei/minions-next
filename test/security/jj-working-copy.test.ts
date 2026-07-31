@@ -27,6 +27,7 @@ import {
 import {
   SandboxPolicyError,
   createSandboxPolicyFingerprinter,
+  validateSandboxCommand,
   validateSandboxPolicy,
 } from "../../packages/adapters/src/sandbox-policy.js";
 import { createTestSandboxLifecycle } from "../../packages/testkit/src/sandbox.js";
@@ -359,11 +360,60 @@ describe("GIT-15 — .jj metadata is never reachable inside a sandbox", () => {
       new Set(trueEntries.filter((name) => name !== JJ_METADATA_DIR)),
     );
     // ... and the resulting mount SET passes the existing (unmodified)
-    // validator — this is the actual safe construction, not the single-mount
-    // pattern the previous test exercises.
+    // validator — a policy MAY carry multiple `workspace`-kind mounts (this
+    // is the actual safe construction: masking `.jj` by omission requires
+    // one mount per surviving top-level entry, not the single-mount pattern
+    // the previous test exercises).
     expect(() =>
       validateSandboxPolicy(policyWithMounts(mounts.map((mount) => ({ ...mount })))),
     ).not.toThrow();
+  }, 60_000);
+
+  it("per-entry workspace mounts bound working-directory containment to the shared root, not any ancestor", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-mask-bound-");
+    const hostRoot = await makeDirectory("jj-wc-host-mask-bound-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000ff7"),
+      gitSha(central.baseCommit),
+    );
+    const mounts = await workspaceSandboxMounts(wc.workingCopyPath, "/workspace", "read_write");
+    const policy = policyWithMounts(mounts.map((mount) => ({ ...mount })));
+    const someEntry = mounts[0];
+    if (someEntry === undefined) throw new Error("expected at least one non-.jj entry");
+
+    const baseRequest = {
+      instanceId: "01900000-0000-7000-8000-0000000000f0",
+      expectedPolicyFingerprint: createSandboxPolicyFingerprinter().fingerprint(policy),
+      executable: "node",
+      environment: {},
+      timeoutMs: 1_000,
+      maxOutputBytes: 1_024,
+    };
+
+    // A coarse ancestor of the shared "/workspace" root - e.g. "/" itself -
+    // must NOT satisfy working-directory containment, even though it is
+    // (trivially) an ancestor of every per-entry mount's target. Only the
+    // TIGHTEST common ancestor ("/workspace") or a path inside a mount may.
+    for (const wideOpenWorkingDirectory of ["/", "/etc"]) {
+      const denied = validateSandboxCommand(
+        {
+          ...baseRequest,
+          arguments: [someEntry.targetPath],
+          workingDirectory: wideOpenWorkingDirectory,
+        },
+        policy,
+      );
+      expect(denied.allowed).toBe(false);
+    }
+
+    // The tight shared root IS accepted as a working directory for a script
+    // whose absolute path resolves inside one of the per-entry mounts.
+    const allowed = validateSandboxCommand(
+      { ...baseRequest, arguments: [someEntry.targetPath], workingDirectory: "/workspace" },
+      policy,
+    );
+    expect(allowed.allowed).toBe(true);
   }, 60_000);
 
   it("the test sandbox lifecycle rejects a policy that mounts .jj (invalid_policy)", async () => {

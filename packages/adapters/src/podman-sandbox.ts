@@ -24,6 +24,8 @@ import {
   type SandboxDenialCode,
 } from "@minions/core";
 import {
+  commonAncestorPath,
+  commonWorkspaceRoot,
   createSandboxPolicyFingerprinter,
   validateSandboxCommand,
   validateSandboxPolicy,
@@ -782,7 +784,8 @@ export function containerFlagSet(
     `type=bind,source=${mount.sourcePath},target=${mount.targetPath},${mount.access === "read_write" ? "rw" : "ro"}`,
   ]);
   const workspaceTarget =
-    policy.mounts.find((candidate) => candidate.kind === "workspace")?.targetPath ?? guestHomePath;
+    commonWorkspaceRoot(policy.mounts.filter((candidate) => candidate.kind === "workspace")) ??
+    guestHomePath;
   // `--rootless` is a Podman global option; it must precede the `create` subcommand, or
   // `podman create` rejects it as an unknown flag and the container cannot start.
   const globalArguments = Object.freeze(["--rootless"]);
@@ -1306,10 +1309,12 @@ async function enforcePathPolicy(
     if (!isAbsolute(rawPath)) continue;
     const mount = targetMountFor(rawPath, policy);
     if (mount === undefined) {
-      const workspace = policy.mounts.find((candidate) => candidate.kind === "workspace");
+      const workspaceSourceRoot = commonAncestorPath(
+        policy.mounts.filter((candidate) => candidate.kind === "workspace").map((m) => m.sourcePath),
+      );
       if (
-        workspace !== undefined &&
-        resolve(rawPath).startsWith(`${dirname(resolve(workspace.sourcePath))}${sep}`)
+        workspaceSourceRoot !== undefined &&
+        resolve(rawPath).startsWith(`${dirname(resolve(workspaceSourceRoot))}${sep}`)
       ) {
         throw new SandboxDeniedError(
           "sibling_workspace",
