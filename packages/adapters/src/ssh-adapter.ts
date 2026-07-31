@@ -16,7 +16,11 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SshProfile } from "@minions/core";
+import { create } from "@bufbuild/protobuf";
+import { createClient } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-node";
+import { ApiVersionSchema, SystemService } from "@minions/contracts";
+import { checkVersionSkew, type SshProfile } from "@minions/core";
 
 // -------------------------------------------------------------------------------------------------
 // Errors.
@@ -27,6 +31,7 @@ export type SshErrorCode =
   | "ssh_unavailable"
   | "connection_failed"
   | "host_key_mismatch"
+  | "version_skew"
   | "forward_failed"
   | "timeout";
 
@@ -65,10 +70,21 @@ export type SshAdapterOptions = Readonly<{
   readonly profile: SshProfile;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
-  /** Test seam: run ssh with the given args. Defaults to the bounded subprocess runner. */
+  /** Run ssh with the given args. Test seam — defaults to the bounded subprocess runner. */
   readonly runSsh?: SshRunner;
-  /** Test seam: run ssh-keyscan with the given args. Defaults to the bounded subprocess runner. */
+  /** Run ssh-keyscan with the given args. Test seam — defaults to the bounded subprocess runner. */
   readonly runKeyscan?: SshRunner;
+  /**
+   * This supervisor's own server version, exchanged with the remote host's version on
+   * connect (PR 53 — version skew policy). Connect is rejected fail-closed when
+   * {@link checkVersionSkew} finds the versions incompatible.
+   */
+  readonly supervisorVersion: string;
+  /**
+   * Query the remote host's server version over the just-established tunnel. Test seam —
+   * defaults to a real `GetServerInfo` RPC call against `127.0.0.1:localForwardPort`.
+   */
+  readonly queryHostVersion?: (localForwardPort: number) => Promise<string>;
 }>;
 
 export type SshConnectionState = "disconnected" | "connecting" | "connected" | "error";
@@ -98,10 +114,11 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * persistent TCP connection (no re-authentication per command).
  */
 export function createSshConnection(options: SshAdapterOptions): SshConnection {
-  const { profile, signal, runSsh, runKeyscan } = options;
+  const { profile, signal, runSsh, runKeyscan, supervisorVersion } = options;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const injectedRunner = runSsh;
   const injectedKeyscanRunner = runKeyscan;
+  const queryHostVersion = options.queryHostVersion ?? defaultQueryHostVersion;
 
   let state: SshConnectionState = "disconnected";
 
@@ -217,9 +234,27 @@ export function createSshConnection(options: SshAdapterOptions): SshConnection {
           `${profile.user}@${profile.hostname}`,
         ]);
         state = "connected";
+
+        // 3. Exchange version strings over the tunnel just established (PR 53 — version
+        // skew policy) and reject fail-closed on incompatibility, tearing the ControlMaster
+        // back down rather than leaving a live but untrusted-version connection up.
+        const hostVersion = await queryHostVersion(profile.localForwardPort);
+        const verdict = checkVersionSkew(supervisorVersion, hostVersion);
+        if (!verdict.compatible) {
+          await teardownControlMaster();
+          state = "error";
+          throw sshError(
+            "version_skew",
+            `SSH connection to ${profile.alias} rejected: ${verdict.reason ?? "incompatible versions"}`,
+            "Upgrade the supervisor or the remote host so their major versions match, then retry.",
+          );
+        }
       } catch (error: unknown) {
         state = "error";
-        if (error instanceof SshAdapterError && error.code === "host_key_mismatch") {
+        if (
+          error instanceof SshAdapterError &&
+          (error.code === "host_key_mismatch" || error.code === "version_skew")
+        ) {
           throw error;
         }
         throw sshError(
@@ -238,6 +273,21 @@ export function createSshConnection(options: SshAdapterOptions): SshConnection {
         }
       }
     });
+  }
+
+  /** Best-effort `-O exit` teardown of the ControlMaster socket. Never throws. */
+  async function teardownControlMaster(): Promise<void> {
+    try {
+      await run([
+        "-o",
+        `ControlPath=${profile.controlMasterPath}`,
+        "-O",
+        "exit",
+        `${profile.user}@${profile.hostname}`,
+      ]);
+    } catch {
+      // Best-effort teardown — the ControlPersist timeout will clean up regardless.
+    }
   }
 
   function checkHealth(): Promise<boolean> {
@@ -261,19 +311,8 @@ export function createSshConnection(options: SshAdapterOptions): SshConnection {
   function disconnect(): Promise<void> {
     return serialized(async () => {
       if (state === "disconnected") return;
-      try {
-        await run([
-          "-o",
-          `ControlPath=${profile.controlMasterPath}`,
-          "-O",
-          "exit",
-          `${profile.user}@${profile.hostname}`,
-        ]);
-      } catch {
-        // Best-effort teardown — the ControlPersist timeout will clean up regardless.
-      } finally {
-        state = "disconnected";
-      }
+      await teardownControlMaster();
+      state = "disconnected";
     });
   }
 
@@ -288,6 +327,30 @@ export function createSshConnection(options: SshAdapterOptions): SshConnection {
     checkHealth,
     disconnect,
   });
+}
+
+// -------------------------------------------------------------------------------------------------
+// Version exchange.
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Query the remote host's server version via `GetServerInfo` over the tunnel's forwarded
+ * local port (`127.0.0.1:localForwardPort`, the "remote daemon's loopback Connect API"
+ * this adapter forwards to). A lightweight, read-only, non-application-data call — the
+ * kind of "service command" this adapter's own bootstrap/service boundary permits.
+ */
+async function defaultQueryHostVersion(localForwardPort: number): Promise<string> {
+  const transport = createConnectTransport({
+    baseUrl: `http://127.0.0.1:${String(localForwardPort)}`,
+    httpVersion: "1.1",
+    useBinaryFormat: true,
+  });
+  const client = createClient(SystemService, transport);
+  const response = await client.getServerInfo({
+    clientName: "minions-ssh-adapter",
+    apiVersion: create(ApiVersionSchema, { major: 1 }),
+  });
+  return response.serverVersion;
 }
 
 // -------------------------------------------------------------------------------------------------

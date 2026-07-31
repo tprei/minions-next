@@ -30,6 +30,13 @@ const PROFILE: SshProfile = Object.freeze({
   localForwardPort: 4275,
 });
 
+const SUPERVISOR_VERSION = "1.0.0";
+
+/** Version-exchange test seam returning a version compatible with {@link SUPERVISOR_VERSION}. */
+function compatibleHostVersion(): () => Promise<string> {
+  return () => Promise.resolve("1.4.2");
+}
+
 function successRunner(): SshRunner {
   return () => Promise.resolve<SshRunResult>({ exitCode: 0, stdout: "", stderr: "" });
 }
@@ -59,6 +66,8 @@ describe("SSH connection lifecycle", () => {
       profile: PROFILE,
       runSsh: runner,
       runKeyscan: keyscanRunner(PINNED_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
+      queryHostVersion: compatibleHostVersion(),
     });
     await conn.connect();
     expect(conn.state).toBe("connected");
@@ -84,6 +93,8 @@ describe("SSH connection lifecycle", () => {
       profile: PROFILE,
       runSsh: successRunner(),
       runKeyscan: keyscanRunner(PINNED_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
+      queryHostVersion: compatibleHostVersion(),
     });
     expect(conn.state).toBe("disconnected");
     await conn.connect();
@@ -95,6 +106,8 @@ describe("SSH connection lifecycle", () => {
       profile: PROFILE,
       runSsh: successRunner(),
       runKeyscan: keyscanRunner(PINNED_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
+      queryHostVersion: compatibleHostVersion(),
     });
     await conn.connect();
     const healthy = await conn.checkHealth();
@@ -102,7 +115,11 @@ describe("SSH connection lifecycle", () => {
   });
 
   it("health check returns false when not connected", async () => {
-    const conn = createSshConnection({ profile: PROFILE, runSsh: successRunner() });
+    const conn = createSshConnection({
+      profile: PROFILE,
+      runSsh: successRunner(),
+      supervisorVersion: SUPERVISOR_VERSION,
+    });
     const healthy = await conn.checkHealth();
     expect(healthy).toBe(false);
   });
@@ -117,6 +134,8 @@ describe("SSH connection lifecycle", () => {
       profile: PROFILE,
       runSsh: runner,
       runKeyscan: keyscanRunner(PINNED_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
+      queryHostVersion: compatibleHostVersion(),
     });
     await conn.connect();
     await conn.disconnect();
@@ -133,7 +152,11 @@ describe("SSH connection lifecycle", () => {
       calls.push([...args]);
       return Promise.resolve<SshRunResult>({ exitCode: 0, stdout: "", stderr: "" });
     };
-    const conn = createSshConnection({ profile: PROFILE, runSsh: runner });
+    const conn = createSshConnection({
+      profile: PROFILE,
+      runSsh: runner,
+      supervisorVersion: SUPERVISOR_VERSION,
+    });
     await conn.disconnect();
     expect(calls.length).toBe(0);
     expect(conn.state).toBe("disconnected");
@@ -144,9 +167,65 @@ describe("SSH connection lifecycle", () => {
       profile: PROFILE,
       runSsh: failingRunner(255, "Permission denied"),
       runKeyscan: keyscanRunner(PINNED_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
     });
     await expect(conn.connect()).rejects.toThrow(/SSH connection.*failed/);
     expect(conn.state).toBe("error");
+  });
+});
+
+describe("SSH version exchange on connect (PR 53 — version skew policy)", () => {
+  it("rejects fail-closed with a typed version_skew error on major version mismatch", async () => {
+    const conn = createSshConnection({
+      profile: PROFILE,
+      runSsh: successRunner(),
+      runKeyscan: keyscanRunner(PINNED_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
+      queryHostVersion: () => Promise.resolve("2.0.0"),
+    });
+    try {
+      await conn.connect();
+      expect.unreachable("connect() must reject on a version skew");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SshAdapterError);
+      expect(error instanceof SshAdapterError ? error.code : undefined).toBe("version_skew");
+      expect(error instanceof Error ? error.message : "").toContain("major version mismatch");
+    }
+    expect(conn.state).toBe("error");
+  });
+
+  it("tears the ControlMaster back down when rejecting a version-skewed connection", async () => {
+    const calls: string[][] = [];
+    const runner: SshRunner = (args) => {
+      calls.push([...args]);
+      return Promise.resolve<SshRunResult>({ exitCode: 0, stdout: "", stderr: "" });
+    };
+    const conn = createSshConnection({
+      profile: PROFILE,
+      runSsh: runner,
+      runKeyscan: keyscanRunner(PINNED_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
+      queryHostVersion: () => Promise.resolve("2.0.0"),
+    });
+    await expect(conn.connect()).rejects.toThrow(SshAdapterError);
+    // First call establishes ControlMaster; the rejection must issue a second,
+    // best-effort `-O exit` teardown rather than leaving a live socket dangling.
+    expect(calls.length).toBe(2);
+    const teardownArgs = calls[1];
+    expect(teardownArgs).toContain("-O");
+    expect(teardownArgs).toContain("exit");
+  });
+
+  it("accepts a compatible host version and reports connected", async () => {
+    const conn = createSshConnection({
+      profile: PROFILE,
+      runSsh: successRunner(),
+      runKeyscan: keyscanRunner(PINNED_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
+      queryHostVersion: () => Promise.resolve("1.9.9"),
+    });
+    await conn.connect();
+    expect(conn.state).toBe("connected");
   });
 });
 
@@ -160,6 +239,7 @@ describe("SSH host key verification (PR 59 — ssh_revocation, syntheticId 14)",
         return Promise.resolve<SshRunResult>({ exitCode: 0, stdout: "", stderr: "" });
       },
       runKeyscan: keyscanRunner(OTHER_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
     });
     await expect(conn.connect()).rejects.toThrow(/host key/i);
     expect(conn.state).toBe("error");
@@ -172,6 +252,7 @@ describe("SSH host key verification (PR 59 — ssh_revocation, syntheticId 14)",
       profile: PROFILE,
       runSsh: successRunner(),
       runKeyscan: keyscanRunner(OTHER_KEY_BASE64),
+      supervisorVersion: SUPERVISOR_VERSION,
     });
     try {
       await conn.connect();
@@ -187,6 +268,7 @@ describe("SSH host key verification (PR 59 — ssh_revocation, syntheticId 14)",
       profile: PROFILE,
       runSsh: successRunner(),
       runKeyscan: () => Promise.resolve<SshRunResult>({ exitCode: 0, stdout: "", stderr: "" }),
+      supervisorVersion: SUPERVISOR_VERSION,
     });
     try {
       await conn.connect();
@@ -210,6 +292,8 @@ describe("SSH host key verification (PR 59 — ssh_revocation, syntheticId 14)",
           ].join("\n"),
           stderr: "",
         }),
+      supervisorVersion: SUPERVISOR_VERSION,
+      queryHostVersion: compatibleHostVersion(),
     });
     await conn.connect();
     expect(conn.state).toBe("connected");
