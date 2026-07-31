@@ -1757,13 +1757,21 @@ function appendNodeCommandEvent(
   attention?: NodeAttentionRecord,
 ): void {
   const node = requireNode(transaction, record.nodeId);
-  // P1 (review #12): the sole caller (line ~1747) always runs advanceNodeVersion
-  // FIRST, which already bumps nodes.version from oldVersion to oldVersion+1.
-  // Reading it here (nodeVersion) therefore already IS the correct target
-  // aggregate_version for this event - adding another +1 skips a version and
-  // collides with the next queued command's UNIQUE(aggregate_kind,
-  // aggregate_id, aggregate_version) on its own advanceNodeVersion+event pair.
-  const nodeVersion = safeNumber(node["version"], "node version");
+  // P1 (review #12) — corrected: the generic command-store.ts execute() path
+  // (readResultingAggregateVersion + `resultingVersion + 1`) is the
+  // authoritative, system-wide convention for every aggregate kind: an
+  // event's aggregate_version is the aggregate's version AFTER advancing
+  // (already reflected in the row read here) PLUS one more, because the
+  // aggregate's own `version` column and the per-aggregate `events`
+  // sequence are deliberately offset by one throughout this framework (see
+  // readResultingAggregateVersion in command-store.ts, used identically by
+  // every other command kind - plan-revisions, artifacts, etc.). Matching
+  // that convention here (rather than diverging from it) is what avoids
+  // colliding with the next queued command's own advanceNodeVersion+event
+  // pair - an earlier version of this fix instead DROPPED the +1, which
+  // broke this invariant and reintroduced the exact UNIQUE constraint
+  // collision it was meant to fix.
+  const nodeVersion = safeNumber(node["version"], "node version") + 1;
   const event =
     attention === undefined
       ? nodeCommandProjection(record)
