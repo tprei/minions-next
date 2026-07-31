@@ -15,6 +15,12 @@ import { registerWslHostService } from "@minions/daemon";
  * satisfied/missing values that legitimately vary by host) and an injected probe (for
  * deterministic, environment-independent coverage of the RPC's own request/response
  * mapping and validation).
+ *
+ * RegisterWslHost is fail-closed on the same probe (PR 54 acceptance criterion: missing
+ * systemd, rootless Podman, localhost forwarding, or secure credential storage blocks
+ * registration). The client-supplied `requirementsMet` field is never trusted for that
+ * decision — every registration re-probes independently — so the tests below always
+ * inject a scripted probe rather than relying on the ambient host's real capabilities.
  */
 function wslClient(probe?: WslRequirementProbe) {
   const transport = createRouterTransport((router) => {
@@ -34,9 +40,14 @@ function fakeProbe(result: {
   };
 }
 
+const FULLY_SATISFIED = Object.freeze({
+  satisfied: ["systemd", "rootless_podman", "localhost_forwarding", "secure_storage"] as const,
+  missing: [] as const,
+});
+
 describe("WslHostService integration", () => {
-  it("registerWslHost stores a profile, visible through listWslHosts", async () => {
-    const wsl = wslClient();
+  it("registerWslHost stores a profile, visible through listWslHosts, when the probe reports every requirement satisfied", async () => {
+    const wsl = wslClient(fakeProbe(FULLY_SATISFIED));
     const profile = {
       distro: "Ubuntu-24.04",
       windowsUser: "DESKTOP-ABC\\minions",
@@ -59,6 +70,38 @@ describe("WslHostService integration", () => {
     await expect(
       wsl.registerWslHost({ profile: { distro: "", windowsUser: "x", requirementsMet: [] } }),
     ).rejects.toThrow(ConnectError);
+  });
+
+  it("rejects registerWslHost when the probe reports a missing requirement, and does not add the host", async () => {
+    const wsl = wslClient(
+      fakeProbe({
+        satisfied: ["rootless_podman", "localhost_forwarding", "secure_storage"],
+        missing: ["systemd"],
+      }),
+    );
+    // The client asserts every requirement is met — the server must ignore that claim
+    // and reject anyway, because its own re-probe says systemd is missing.
+    const profile = {
+      distro: "Ubuntu-24.04",
+      windowsUser: "DESKTOP-ABC\\minions",
+      requirementsMet: [
+        WslRequirement.SYSTEMD,
+        WslRequirement.ROOTLESS_PODMAN,
+        WslRequirement.LOCALHOST_FORWARDING,
+        WslRequirement.SECURE_STORAGE,
+      ],
+    };
+
+    try {
+      await wsl.registerWslHost({ profile });
+      expect.unreachable("registerWslHost must reject a host missing a required capability");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConnectError);
+      expect((error as ConnectError).code).toBe(Code.FailedPrecondition);
+    }
+
+    const { hosts } = await wsl.listWslHosts({});
+    expect(hosts.map((h) => h.distro)).not.toContain("Ubuntu-24.04");
   });
 
   it("rejects probeWslHost with an empty distro", async () => {
@@ -89,12 +132,7 @@ describe("WslHostService integration", () => {
   });
 
   it("probeWslHost with an injected fully-satisfied probe reports zero missing", async () => {
-    const wsl = wslClient(
-      fakeProbe({
-        satisfied: ["systemd", "rootless_podman", "localhost_forwarding", "secure_storage"],
-        missing: [],
-      }),
-    );
+    const wsl = wslClient(fakeProbe(FULLY_SATISFIED));
     const { result } = await wsl.probeWslHost({ distro: "Ubuntu-24.04" });
     expect(result?.missing).toEqual([]);
     expect(result?.satisfied).toHaveLength(4);

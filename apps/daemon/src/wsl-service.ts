@@ -8,7 +8,7 @@ import {
   WslRequirement as WireWslRequirement,
   type WslHostProfile,
 } from "@minions/contracts";
-import type { WslRequirement } from "@minions/core";
+import type { WslProbeResult, WslRequirement } from "@minions/core";
 
 /**
  * WSL2 host management service handler (PR 54 — wsl2-host-and-fleet-ui).
@@ -23,6 +23,8 @@ import type { WslRequirement } from "@minions/core";
  * secure credential backend available) don't depend on WSL2 specifically. What this
  * does NOT cover: the Windows-side SSH bootstrap that invokes a named distro in the
  * first place — that needs a real Windows host to build and exercise against.
+ * RegisterWslHost re-probes the same way and fails closed (`FailedPrecondition`) if
+ * any requirement is missing, ignoring the client-supplied `requirementsMet` claim.
  * RegisterWslHost and ListWslHosts manage an in-memory host registry.
  */
 export type WslHostServiceOptions = Readonly<{
@@ -42,6 +44,26 @@ function toWireRequirement(requirement: WslRequirement): WireWslRequirement {
   }
 }
 
+/**
+ * Fail-closed requirement gate for RegisterWslHost (PR 54 acceptance criterion):
+ * missing systemd, rootless Podman, localhost forwarding, or secure credential
+ * storage blocks registration. The client-supplied `requirementsMet` field on the
+ * request is never consulted here — it is a client assertion, not a server-verified
+ * fact. This always re-probes independently via the injected `WslRequirementProbe`.
+ */
+function assertRequirementsMet(distro: string, result: WslProbeResult): void {
+  if (result.missing.length === 0) {
+    return;
+  }
+  throw new ConnectError(
+    `WSL host "${distro}" is missing required capabilities: ${result.missing.join(", ")}`,
+    Code.FailedPrecondition,
+    undefined,
+    undefined,
+    result.missing,
+  );
+}
+
 export function registerWslHostService(
   router: ConnectRouter,
   options: WslHostServiceOptions,
@@ -50,7 +72,7 @@ export function registerWslHostService(
   const hosts = new Map<string, WslHostProfile>();
 
   router.service(WslHostService, {
-    registerWslHost(request) {
+    async registerWslHost(request) {
       if (request.profile === undefined) {
         throw new ConnectError("profile is required", Code.InvalidArgument);
       }
@@ -58,6 +80,8 @@ export function registerWslHostService(
       if (distro.trim().length === 0) {
         throw new ConnectError("distro must not be empty", Code.InvalidArgument);
       }
+      const result = await probe.probeAll(distro);
+      assertRequirementsMet(distro, result);
       hosts.set(distro, request.profile);
       return { profile: request.profile };
     },
