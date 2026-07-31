@@ -102,7 +102,7 @@ describe("validateRecoveryAction", () => {
 describe("RecoveryGateProfile", () => {
   it("describes which kinds a grant may authorize and its approval/duration limits", () => {
     const profile: RecoveryGateProfile = Object.freeze({
-      allowedKinds: ["restart", "signal"],
+      allowedKinds: ["restart", "signal"] as const,
       requiredApprovals: 2,
       maxGrantDurationMs: 900_000,
     });
