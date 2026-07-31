@@ -397,12 +397,6 @@ export async function startDaemonRuntime(
       authGatewayHealth,
       authEnabled: options.authBroker?.enabled ?? false,
     });
-
-    const remoteAccess =
-      options.remoteAccess?.enabled === true
-        ? { sessionStore: createDeviceSessionStore() }
-        : undefined;
-
     if (options.mode === "local") {
       server = await startDaemonServer({
         mode: "local",

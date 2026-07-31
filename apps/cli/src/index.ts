@@ -236,7 +236,6 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let mode: DaemonModeName = "local";
   let port = 4_817;
   let configuredHostId: HostId | undefined;
-  let allowRemote = false;
   let authHostId: HostId | undefined;
   let authProvider: string | undefined;
   let authVia: string | undefined;
