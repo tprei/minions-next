@@ -752,3 +752,18 @@ export type {
   FixupLogger,
   FixupWorkingCopy,
 } from "./fixup-coordinator.js";
+
+export { createJjChangeIdRegistry, JjChangeIdRegistryError } from "./jj-change-registry.js";
+export type {
+  JjChangeIdRegistry,
+  JjChangeIdRegistryErrorCode,
+  ResolvedJjChange,
+} from "./jj-change-registry.js";
+export {
+  createProductionFixupWorkingCopy,
+  ProductionFixupWorkingCopyError,
+} from "./fixup-working-copy.js";
+export type {
+  ProductionFixupWorkingCopy,
+  ProductionFixupWorkingCopyErrorCode,
+} from "./fixup-working-copy.js";
