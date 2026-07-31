@@ -1,0 +1,26 @@
+.mn-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-1);
+}
+
+.mn-field__label {
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  font-weight: var(--mn-font-weight-medium);
+  color: var(--mn-color-fg);
+}
+
+.mn-field__hint {
+  margin: 0;
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  color: var(--mn-color-fg-muted);
+}
+
+.mn-field__error {
+  margin: 0;
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  color: var(--mn-color-status-danger-fg);
+}

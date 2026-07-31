@@ -5,9 +5,14 @@ import {
   Commentary,
   Dialog,
   Fact,
+  Field,
+  NavBar,
+  Select,
   StateView,
   StatusBadge,
   Tabs,
+  TextArea,
+  TextInput,
   type StatusKind,
   type TabItem,
 } from "@minions/ui-kit";
@@ -82,6 +87,61 @@ export function FixturesRoute(): ReactNode {
           description="Reconnect for live data."
         />
         <StateView kind="empty" title="Nothing here yet" />
+      </Section>
+
+      <Section title="Field">
+        <Field
+          label="Repository path"
+          htmlFor="fixture-field-hint"
+          hint="Absolute path on the host filesystem."
+        >
+          <TextInput id="fixture-field-hint" defaultValue="/home/user/code/example" />
+        </Field>
+        <Field label="Goal" htmlFor="fixture-field-error" error="Goal is required.">
+          <TextInput
+            id="fixture-field-error"
+            invalid
+            aria-describedby="fixture-field-error-error"
+          />
+        </Field>
+      </Section>
+
+      <Section title="TextInput">
+        <TextInput aria-label="Placeholder example" placeholder="Placeholder" />
+        <TextInput aria-label="Filled example" defaultValue="Filled value" />
+        <TextInput aria-label="Invalid example" invalid defaultValue="Invalid value" />
+        <TextInput aria-label="Disabled example" defaultValue="Disabled" disabled />
+      </Section>
+
+      <Section title="TextArea">
+        <TextArea aria-label="Placeholder example" placeholder="Describe the goal…" />
+        <TextArea aria-label="Invalid example" invalid defaultValue="Invalid value" />
+      </Section>
+
+      <Section title="Select">
+        <Select
+          aria-label="Placeholder example"
+          placeholder="Select a host"
+          options={[
+            { value: "a", label: "Host A" },
+            { value: "b", label: "Host B" },
+          ]}
+        />
+        <Select
+          aria-label="Invalid example"
+          invalid
+          options={[{ value: "a", label: "Host A" }]}
+          defaultValue="a"
+        />
+      </Section>
+
+      <Section title="NavBar">
+        <NavBar brand="Minions">
+          <StatusBadge status="success" label="daemon: live" />
+          <Button variant="secondary" size="sm">
+            Light
+          </Button>
+        </NavBar>
       </Section>
     </main>
   );

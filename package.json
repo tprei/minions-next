@@ -41,6 +41,7 @@
     "test:unit": "pnpm build:domain && vitest run apps packages test/unit --passWithNoTests",
     "typecheck": "tsc --noEmit --pretty false -p tsconfig.json && tsc --noEmit --pretty false -p .storybook/tsconfig.json && pnpm -r exec tsc --noEmit --pretty false -p tsconfig.json",
     "test:visual": "pnpm --filter @minions/ui-kit run build && pnpm --filter @minions/web run build && playwright test -c playwright.config.ts",
+    "test:e2e": "pnpm build:integration && pnpm --filter @minions/daemon run build && pnpm --filter @minions/ui-kit run build && pnpm --filter @minions/web run build && playwright test -c playwright-e2e.config.ts",
     "verify:pr": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm deadcode && pnpm generate:check && pnpm proto:lint && pnpm proto:breaking && pnpm test:unit && pnpm build && pnpm test:integration && pnpm test:security && pnpm test:visual"
   },
   "devDependencies": {
