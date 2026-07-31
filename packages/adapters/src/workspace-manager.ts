@@ -1441,12 +1441,24 @@ async function captureSourceSnapshot(
   // that filter for modified files - arbitrary commands outside the
   // workspace, bypassing process/path isolation. Discover and disable them
   // here too, exactly like #readCapture does for the workspace side.
-  const sourceFilterOverrides = await discoverFilterOverrides(git, sourcePath, timeoutMs, maxOutputBytes);
+  const sourceFilterOverrides = await discoverFilterOverrides(
+    git,
+    sourcePath,
+    timeoutMs,
+    maxOutputBytes,
+  );
   const status = (
     await runGit(
       git,
       sourcePath,
-      [...sourceFilterOverrides, "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
+      [
+        ...sourceFilterOverrides,
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--branch",
+        "--untracked-files=all",
+      ],
       timeoutMs,
       maxOutputBytes,
     )
