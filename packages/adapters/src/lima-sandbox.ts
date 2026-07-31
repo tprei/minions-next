@@ -1120,7 +1120,9 @@ async function enforcePathPolicy(
     const mount = targetMountFor(rawPath, policy);
     if (mount === undefined) {
       const workspaceSourceRoot = commonAncestorPath(
-        policy.mounts.filter((candidate) => candidate.kind === "workspace").map((m) => m.sourcePath),
+        policy.mounts
+          .filter((candidate) => candidate.kind === "workspace")
+          .map((m) => m.sourcePath),
       );
       if (
         workspaceSourceRoot !== undefined &&

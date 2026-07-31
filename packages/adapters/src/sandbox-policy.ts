@@ -480,7 +480,11 @@ export function commonAncestorPath(paths: readonly string[]): string | undefined
   for (const path of paths.slice(1)) {
     const segments = path.split("/");
     let index = 0;
-    while (index < commonLength && index < segments.length && segments[index] === firstSegments[index]) {
+    while (
+      index < commonLength &&
+      index < segments.length &&
+      segments[index] === firstSegments[index]
+    ) {
       index += 1;
     }
     commonLength = index;
@@ -494,7 +498,10 @@ export function commonWorkspaceRoot(workspaceMounts: readonly SandboxMount[]): s
   return commonAncestorPath(workspaceMounts.map((mount) => mount.targetPath));
 }
 
-function isWithinAnyWorkspaceMount(path: string, workspaceMounts: readonly SandboxMount[]): boolean {
+function isWithinAnyWorkspaceMount(
+  path: string,
+  workspaceMounts: readonly SandboxMount[],
+): boolean {
   // A per-entry mount set has no mount literally targeting the shared
   // conceptual root (e.g. "/workspace" when every mount targets
   // "/workspace/<entry>") - so containment also accepts PATH being EXACTLY
