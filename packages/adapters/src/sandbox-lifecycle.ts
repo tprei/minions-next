@@ -582,9 +582,7 @@ function validateExecuteRequest(request: ExecuteSandboxRequest, policy: SandboxP
  * needed by a sandboxed git invocation the tool policy is meant to confine.
  */
 function parseGitSubcommand(arguments_: readonly string[]): string | undefined {
-  for (let index = 0; index < arguments_.length; index += 1) {
-    const argument = arguments_[index];
-    if (argument === undefined) return undefined;
+  for (const argument of arguments_) {
     if (
       argument === "-c" ||
       argument === "-C" ||
