@@ -279,6 +279,21 @@ export type {
   JjCapabilityOptions,
   JjCapabilityProbe,
 } from "./jj-capability.js";
+export { createJjCentralRepoManager, JjCentralRepoError } from "./jj-central-repo.js";
+export type {
+  JjCentralRepo,
+  JjCentralRepoErrorCode,
+  JjCentralRepoManager,
+  JjCentralRepoManagerOptions,
+  JjPreSnapshotReport,
+} from "./jj-central-repo.js";
+export { checkJjCompatibility } from "./jj-capability-gates.js";
+export type {
+  JjCompatibilityDenial,
+  JjCompatibilityDenialCode,
+  JjCompatibilityGateOptions,
+  JjCompatibilityReport,
+} from "./jj-capability-gates.js";
 export { CredentialVaultError, createCredentialVault } from "./credential-vault.js";
 export type {
   CredentialVault,
