@@ -12,7 +12,7 @@ import {
   type RepositoryRegistry,
   type VcsChangeBindingStore,
 } from "@minions/adapters";
-import { type ConnectRouter, type Interceptor } from "@connectrpc/connect";
+import type { ConnectRouter, Interceptor } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { createValidateInterceptor } from "@connectrpc/validate";
 import {

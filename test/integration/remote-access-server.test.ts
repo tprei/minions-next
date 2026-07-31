@@ -82,7 +82,7 @@ describe("startDaemonServer remote access", () => {
     const client = createClient(
       PairingService,
       createConnectTransport({
-        baseUrl: `http://127.0.0.1:${remotePort}`,
+        baseUrl: `http://127.0.0.1:${String(remotePort)}`,
         httpVersion: "1.1",
         useBinaryFormat: true,
         nodeOptions: { agent: false },
