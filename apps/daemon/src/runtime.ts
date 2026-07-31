@@ -14,6 +14,7 @@ import {
   createEventCommitWaiter,
   createFileContentBlobStore,
   createPlanRegistry,
+  createProviderAdmissionProxy,
   createRepositoryRegistry,
   createSqliteArtifactRegistry,
   createSqliteCommandStore,
@@ -36,6 +37,7 @@ import {
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
   type PlanRegistry,
+  type ProviderAdmissionProxy,
   type RepositoryRegistry,
   type SupervisorHostRegistry,
   type SystemdCredsKeyMode,
@@ -55,6 +57,9 @@ import {
 import {
   hostId,
   timestampFromEpochMilliseconds,
+  validateAdmissionPolicy,
+  type AdmissionEventPayload,
+  type AdmissionPolicyConfig,
   type ArtifactRegistry,
   type Clock,
   type ContentBlobStore,
@@ -127,6 +132,24 @@ export type DaemonRuntimeOptions = Readonly<{
    * When omitted/`enabled === false`, daemon behaviour is unchanged.
    */
   authBroker?: AuthBrokerRuntimeOptions;
+  /**
+   * OPTIONAL per-credential provider admission proxy (PR 20). When enabled, the daemon
+   * constructs a {@link ProviderAdmissionProxy} in front of the auth gateway on the
+   * attempt-execution path and emits admission events (pause/resume/queued/…) into the
+   * daemon log surface. Default policy is one in-flight request per credential; raising
+   * a limit requires an explicit audited override (HAR-09/HAR-10/OPS-05). When omitted,
+   * daemon behaviour is unchanged.
+   */
+  providerAdmission?: ProviderAdmissionRuntimeOptions;
+}>;
+export type ProviderAdmissionRuntimeOptions = Readonly<{
+  enabled: true;
+  /** Unvalidated policy config; validated (fail-closed) at construction. */
+  policy: AdmissionPolicyConfig;
+  /** Max queued requests per credential (proxy default 64). */
+  maxQueuePerCredential?: number;
+  /** Retained admission event history for late subscribers (proxy default 1024). */
+  maxEventHistory?: number;
 }>;
 
 export type AuthBrokerRuntimeOptions = Readonly<{
@@ -157,6 +180,8 @@ export type RunningDaemonRuntime = Readonly<{
   hostId: HostId | undefined;
   lifecycle: DaemonLifecycleRecord;
   server: RunningDaemonServer;
+  /** The admission proxy when enabled; `undefined` when admission is disabled. */
+  providerAdmission: ProviderAdmissionProxy | undefined;
   close: () => Promise<void>;
 }>;
 
@@ -192,6 +217,8 @@ export async function startDaemonRuntime(
   let authVault: CredentialVault | undefined;
   let authBrokerHealth: (() => Promise<unknown>) | undefined;
   let authGatewayHealth: (() => Promise<unknown>) | undefined;
+  let providerAdmission: ProviderAdmissionProxy | undefined;
+  let admissionEventLoop: Promise<void> | undefined;
 
   try {
     options.signal?.throwIfAborted();
@@ -383,6 +410,27 @@ export async function startDaemonRuntime(
       }
     }
     options.signal?.throwIfAborted();
+    if (options.providerAdmission?.enabled) {
+      // PR 20: construct the per-credential admission proxy in front of the auth
+      // gateway. The policy is validated fail-closed here; an un-audited limit raise
+      // is rejected before the daemon accepts any harness provider request.
+      const admissionOptions = options.providerAdmission;
+      providerAdmission = createProviderAdmissionProxy({
+        policy: validateAdmissionPolicy(admissionOptions.policy),
+        clock: options.clock,
+        ...(admissionOptions.maxQueuePerCredential !== undefined
+          ? { maxQueuePerCredential: admissionOptions.maxQueuePerCredential }
+          : {}),
+        ...(admissionOptions.maxEventHistory !== undefined
+          ? { maxEventHistory: admissionOptions.maxEventHistory }
+          : {}),
+      });
+      admissionEventLoop = pumpAdmissionEvents(providerAdmission, options.logger);
+      options.logger.log("info", "provider_admission_enabled", {
+        default_limit: admissionOptions.policy.defaultLimit,
+        overrides: admissionOptions.policy.overrides?.length ?? 0,
+      });
+    }
 
     const health = createHealth(lifecycle, localHostId, startedAt);
     const runDoctor = createDoctor({
@@ -459,6 +507,7 @@ export async function startDaemonRuntime(
       hostId: localHostId,
       lifecycle,
       server,
+      providerAdmission,
       close: () => {
         closePromise ??= closeRuntime({
           server: requireServer(server),
@@ -472,6 +521,8 @@ export async function startDaemonRuntime(
           logger: options.logger,
           instanceId: lifecycle.instanceId,
           authRuntime,
+          providerAdmission,
+          admissionEventLoop,
         });
         return closePromise;
       },
@@ -489,6 +540,8 @@ export async function startDaemonRuntime(
         observedAt: timestampFromEpochMilliseconds(options.clock.now()),
         lock,
         authRuntime,
+        providerAdmission,
+        admissionEventLoop,
       });
     } catch (cleanupError) {
       failure = new AggregateError([error, cleanupError], "daemon startup and cleanup failed");
@@ -569,6 +622,8 @@ async function closeRuntime(
     logger: StructuredLogger;
     instanceId: string;
     authRuntime: RunningAuthRuntime | undefined;
+    providerAdmission: ProviderAdmissionProxy | undefined;
+    admissionEventLoop: Promise<void> | undefined;
   }>,
 ): Promise<void> {
   const errors: unknown[] = [];
@@ -576,6 +631,15 @@ async function closeRuntime(
   if (input.authRuntime !== undefined) {
     unregisterAuthExitCleanup(input.authRuntime);
     await captureFailure(errors, input.authRuntime.close);
+  }
+  if (input.providerAdmission !== undefined) {
+    await captureFailure(errors, async () => {
+      await input.providerAdmission?.shutdown();
+    });
+  }
+  const admissionLoop = input.admissionEventLoop;
+  if (admissionLoop !== undefined) {
+    await captureFailure(errors, async () => admissionLoop);
   }
   if (input.registry !== undefined && input.hostId !== undefined) {
     await captureFailure(errors, async () =>
@@ -603,12 +667,23 @@ async function cleanupFailedStart(
     observedAt: Timestamp;
     lock: AcquiredLifecycleLock;
     authRuntime: RunningAuthRuntime | undefined;
+    providerAdmission: ProviderAdmissionProxy | undefined;
+    admissionEventLoop: Promise<void> | undefined;
   }>,
 ): Promise<void> {
   const errors: unknown[] = [];
   if (input.authRuntime !== undefined) {
     unregisterAuthExitCleanup(input.authRuntime);
     await captureFailure(errors, input.authRuntime.close);
+  }
+  if (input.providerAdmission !== undefined) {
+    await captureFailure(errors, async () => {
+      await input.providerAdmission?.shutdown();
+    });
+  }
+  const admissionLoop = input.admissionEventLoop;
+  if (admissionLoop !== undefined) {
+    await captureFailure(errors, async () => admissionLoop);
   }
   if (input.registry !== undefined && input.hostId !== undefined) {
     await captureFailure(errors, async () =>
@@ -622,6 +697,56 @@ async function cleanupFailedStart(
   if (errors.length > 0) {
     throw new AggregateError(errors, "failed daemon startup could not release every resource");
   }
+}
+
+/**
+ * Pumps the admission proxy's stable-sequence event stream into the daemon log surface
+ * (PR 20 scheduler/UI event wiring). Fire-and-forget: a failure here is logged and the
+ * loop ends — it must never crash the daemon. The loop exits when the proxy is shut down
+ * (the event iterable completes) during {@link closeRuntime}.
+ */
+function pumpAdmissionEvents(
+  proxy: ProviderAdmissionProxy,
+  logger: StructuredLogger,
+): Promise<void> {
+  const loop = proxy.events();
+  return (async () => {
+    try {
+      for await (const event of loop) {
+        logAdmissionEvent(logger, event);
+      }
+    } catch (error) {
+      logger.log("error", "admission_event_stream_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  })();
+}
+
+function logAdmissionEvent(logger: StructuredLogger, event: AdmissionEventPayload): void {
+  const level =
+    event.kind === "credential_paused" || event.kind === "quota_signal" ? "warn" : "info";
+  const fields: Record<string, unknown> = {
+    credential_id: event.credentialId,
+    attempt_id: event.attemptId,
+    sequence: event.sequence,
+  };
+  if (event.nodeId !== undefined) {
+    fields["node_id"] = event.nodeId;
+  }
+  if (event.kind === "credential_paused") {
+    fields["reason"] = event.reason;
+    if (event.retryAfterMs !== undefined) {
+      fields["retry_after_ms"] = event.retryAfterMs;
+    }
+  }
+  if (event.kind === "quota_signal") {
+    fields["signal"] = event.signal;
+    if (event.retryAfterMs !== undefined) {
+      fields["retry_after_ms"] = event.retryAfterMs;
+    }
+  }
+  logger.log(level, `admission_${event.kind}`, fields);
 }
 
 function lifecycleRecord(
