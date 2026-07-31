@@ -574,8 +574,8 @@ export type {
 } from "./github-push.js";
 export { PullRequestError, createPullRequestManager } from "./github-pull-request.js";
 export type {
-  CheckObservation,
-  CheckState,
+  CheckSummary,
+  CheckSummaryState,
   PullRequestAction,
   PullRequestErrorCode,
   PullRequestInput,
@@ -586,6 +586,38 @@ export type {
   ReviewObservation,
   ReviewState,
 } from "./github-pull-request.js";
+export { RemoteCiError, createRemoteCiManager } from "./remote-ci-adapter.js";
+export type {
+  CiNodeRepairInput,
+  CiRepairHarness,
+  CiRepairOutcome,
+  CiRepairOutcomeStatus,
+  RemoteCiErrorCode,
+  RemoteCiManager,
+  RemoteCiManagerOptions,
+  RemoteCiObservationInput,
+  RemoteCiRepairInput,
+  RemoteCiWaitInput,
+} from "./remote-ci-adapter.js";
+export {
+  allRequiredPresent,
+  classifyOverall,
+  FAILURE_VERDICTS,
+  findCheck,
+  isBaseFailure,
+  isCheckPassing,
+  isFailureVerdict,
+  isStaleCheck,
+  isTerminalVerdict,
+  TERMINAL_VERDICTS,
+} from "@minions/core";
+export type {
+  CheckObservation,
+  CheckVerdict,
+  CiEvidence,
+  CiOverallVerdict,
+  RequiredCheckSet,
+} from "@minions/core";
 export { createStackParentageManager } from "./stack-parentage-adapter.js";
 export type {
   StackParentageManager,
