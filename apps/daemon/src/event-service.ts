@@ -284,6 +284,9 @@ function toAttentionKind(kind: string): AttentionKind {
       return AttentionKind.CONFLICT;
     case "gate_failure":
       return AttentionKind.GATE_FAILURE;
+    case "plan_required":
+    case "plan_invalid":
+    case "repair_required":
     case "human_input":
       return AttentionKind.HUMAN_INPUT;
     case "parent":

@@ -4,6 +4,7 @@ import { Code, ConnectError, createClient, type Client } from "@connectrpc/conne
 import { createConnectTransport } from "@connectrpc/connect-node";
 import {
   createEventCommitWaiter,
+  createPlanRegistry,
   createSqliteCommandStore,
   openHostDatabase,
   type EventCommitWaiter,
@@ -13,22 +14,30 @@ import {
 import { executeTestSqliteWrite } from "@minions/adapters/sqlite-test-support";
 import {
   AttentionKind,
+  AttentionSummarySchema,
+  CreateTreeRequestSchema,
   DaemonMode,
   DoctorCheckKind,
   DoctorCheckSchema,
   DoctorCheckStatus,
   DoctorStatus,
-  AttentionSummarySchema,
   ErrorDetailSchema,
-  EventService,
   HostSummarySchema,
+  EventService,
+  GetHealthResponseSchema,
+  ImplementationOutputContractSchema,
   NodeState,
   NodeSummarySchema,
+  PlanNodeMode,
+  ProposePlanRequestSchema,
+  ProposedNodeSchema,
   ProjectionChangeSchema,
+  RepairPlanRequestSchema,
   RepositorySummarySchema,
-  TreeState,
-  GetHealthResponseSchema,
   RunDoctorResponseSchema,
+  TreeBudgetSchema,
+  TreeService,
+  TreeState,
   TreeSummarySchema,
   type WatchEventsResponse,
 } from "@minions/contracts";
@@ -37,6 +46,7 @@ import {
   commandId,
   nonEmptyText,
   repositoryId,
+  hostId,
   timestampFromEpochMilliseconds,
   type CommandRequest,
   type DomainPorts,
@@ -50,6 +60,7 @@ import { startDaemonServer, type RunningDaemonServer } from "@minions/daemon";
 const now = timestampFromEpochMilliseconds(1_725_000_000_123);
 const repositoryIdentifier = repositoryId(uuid(1));
 const hostIdentifier = uuid(2);
+const trustedHostId = hostId(hostIdentifier);
 const actorIdentifier = actorSessionId(uuid(3));
 const eventTypeName = nonEmptyText("minions.v1.ProjectionChange", "event type name");
 const treeIdentifier = uuid(4);
@@ -58,6 +69,24 @@ const rootNodeIdentifier = uuid(6);
 const blockerEvidenceIdentifier = uuid(7);
 const baseCommit = "0123456789abcdef0123456789abcdef01234567";
 const rootObjective = "x".repeat(4_097);
+const planRepositoryIdentifier = repositoryId(uuid(20));
+const planTreeOneIdentifier = uuid(21);
+const planRevisionOneIdentifier = uuid(22);
+const planRootOneIdentifier = uuid(23);
+const planArtifactOneIdentifier = uuid(24);
+const planAttentionOneIdentifier = uuid(25);
+const planChildOneIdentifier = uuid(26);
+const planSiblingChildOneIdentifier = uuid(35);
+const planProposalOneIdentifier = uuid(27);
+const planTreeTwoIdentifier = uuid(28);
+const planRevisionTwoIdentifier = uuid(29);
+const planRootTwoIdentifier = uuid(30);
+const planArtifactTwoIdentifier = uuid(31);
+const planAttentionTwoIdentifier = uuid(32);
+const planChildTwoIdentifier = uuid(33);
+const planRepairTwoIdentifier = uuid(34);
+const planScope = ".";
+const planProfile = "event-plan";
 
 const health = create(GetHealthResponseSchema, {
   instanceId: uuid(100),
@@ -80,6 +109,7 @@ const doctor = create(RunDoctorResponseSchema, {
 interface RunningEventFixture {
   server: RunningDaemonServer;
   client: Client<typeof EventService>;
+  tree: Client<typeof TreeService>;
 }
 
 interface OpenedEventStream {
@@ -99,7 +129,7 @@ describe("EventService integration", () => {
     let database: ManagedSqliteDatabase = temporary.database;
     let waiter: EventCommitWaiter = createEventCommitWaiter();
     let commandStore = createSqliteCommandStore({ database, ports, notifier: waiter });
-    let running = await startEventFixture(database, waiter);
+    let running = await startEventFixture(database, waiter, commandStore, clock);
     let runningOpen = true;
     let reopenedDatabase: ManagedSqliteDatabase | undefined;
 
@@ -179,7 +209,7 @@ describe("EventService integration", () => {
       waiter = createEventCommitWaiter();
       commandStore = createSqliteCommandStore({ database, ports, notifier: waiter });
       await appendRepository(commandStore, 6);
-      running = await startEventFixture(database, waiter);
+      running = await startEventFixture(database, waiter, commandStore, clock);
       runningOpen = true;
 
       const afterRestart = openStream(running.client, 5n);
@@ -241,17 +271,30 @@ describe("EventService integration", () => {
   });
 
   it("rejects incompatible retained events before binding a listener", async () => {
-    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(now));
+    const clock = new FixedClock(now);
+    const temporary = await TemporarySqliteDatabase.create("host", clock);
     const waiter = createEventCommitWaiter();
     try {
       await seedSnapshotProjections(temporary.database);
       await seedIncompatibleEvent(temporary.database);
+      const commandStore = createSqliteCommandStore({
+        database: temporary.database,
+        ports: { clock, ids: new SequenceIdGenerator([uuid(200)]) },
+        notifier: waiter,
+      });
+      const planRegistry = createPlanRegistry({
+        database: temporary.database,
+        commandStore,
+        hostId: trustedHostId,
+      });
       const startup = await startDaemonServer({
         mode: "host",
         port: 0,
         database: temporary.database,
         eventWaiter: waiter,
         eventPollIntervalMs: 10,
+        planRegistry,
+        clock,
         system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
       }).then(
         (server) => ({ case: "started", server }) as const,
@@ -272,18 +315,19 @@ describe("EventService integration", () => {
   });
 
   it("terminates an active event response when the daemon closes", async () => {
-    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(now));
+    const clock = new FixedClock(now);
+    const temporary = await TemporarySqliteDatabase.create("host", clock);
     await seedSnapshotProjections(temporary.database);
     const waiter = createEventCommitWaiter();
     const store = createSqliteCommandStore({
       database: temporary.database,
       ports: {
-        clock: new FixedClock(now),
+        clock,
         ids: new SequenceIdGenerator([uuid(120)]),
       },
       notifier: waiter,
     });
-    const running = await startEventFixture(temporary.database, waiter);
+    const running = await startEventFixture(temporary.database, waiter, store, clock);
     let runningOpen = true;
     try {
       await appendRepository(store, 1);
@@ -308,30 +352,282 @@ describe("EventService integration", () => {
       await temporary.dispose();
     }
   });
+  it("projects plan attention as root human input through create, propose, repair, and restart", async () => {
+    const clock = new FixedClock(now);
+    const temporary = await TemporarySqliteDatabase.create("host", clock);
+    await seedPlanRepository(temporary.database);
+    const ports: DomainPorts = {
+      clock,
+      ids: new SequenceIdGenerator([
+        uuid(130),
+        uuid(131),
+        uuid(132),
+        uuid(133),
+        uuid(134),
+        uuid(135),
+        uuid(136),
+        uuid(137),
+      ]),
+    };
+    let database: ManagedSqliteDatabase = temporary.database;
+    let waiter: EventCommitWaiter = createEventCommitWaiter();
+    let running = await startEventFixture(
+      database,
+      waiter,
+      createSqliteCommandStore({
+        database,
+        ports,
+        notifier: waiter,
+      }),
+      clock,
+    );
+    let runningOpen = true;
+    let reopenedDatabase: ManagedSqliteDatabase | undefined;
+    try {
+      const baseline = await running.client.getSnapshot({});
+      const streamedTrees = new Map(baseline.trees.map((tree) => [tree.id, tree]));
+      const streamedNodes = new Map(baseline.nodes.map((node) => [node.id, node]));
+      const streamedAttention = new Map(
+        baseline.attention.map((attention) => [attention.nodeId, attention]),
+      );
+      const projectionStream = openStream(running.client, baseline.lastSequence);
+      const budget = create(TreeBudgetSchema, {
+        maxDepth: 2,
+        maxFanOut: 3,
+        maxNodes: 3,
+        maxConcurrency: 2,
+        maxAttemptsPerNode: 2,
+      });
+      await running.tree.createTree(
+        create(CreateTreeRequestSchema, {
+          commandId: uuid(40),
+          actorSessionId: uuid(41),
+          repositoryId: planRepositoryIdentifier,
+          treeId: planTreeOneIdentifier,
+          planRevisionId: planRevisionOneIdentifier,
+          rootNodeId: planRootOneIdentifier,
+          rootArtifactId: planArtifactOneIdentifier,
+          goal: "event proposal tree",
+          baseCommit,
+          budget,
+          attentionId: planAttentionOneIdentifier,
+          rootAllowedRepositoryPaths: [planScope],
+          rootCheckProfile: planProfile,
+        }),
+      );
+      expect((await running.client.getSnapshot({})).attention).toEqual([
+        create(AttentionSummarySchema, {
+          nodeId: planRootOneIdentifier,
+          kind: AttentionKind.HUMAN_INPUT,
+        }),
+      ]);
+
+      await running.tree.proposePlan(
+        create(ProposePlanRequestSchema, {
+          commandId: uuid(42),
+          actorSessionId: uuid(43),
+          treeId: planTreeOneIdentifier,
+          planRevisionId: planProposalOneIdentifier,
+          goal: "event proposed tree",
+          nodes: [
+            create(ProposedNodeSchema, {
+              nodeId: planSiblingChildOneIdentifier,
+              parentNodeId: planRootOneIdentifier,
+              mode: PlanNodeMode.IMPLEMENTATION,
+              objective: "implement event proposal sibling",
+              acceptanceCriteria: ["event proposal sibling is implementable"],
+              inputs: [],
+              outputContract: {
+                case: "implementation",
+                value: create(ImplementationOutputContractSchema, {}),
+              },
+              allowedRepositoryPaths: [planScope],
+              checkProfile: planProfile,
+            }),
+            create(ProposedNodeSchema, {
+              nodeId: planChildOneIdentifier,
+              parentNodeId: planRootOneIdentifier,
+              mode: PlanNodeMode.IMPLEMENTATION,
+              objective: "implement event proposal",
+              acceptanceCriteria: ["event proposal is implementable"],
+              inputs: [],
+              outputContract: {
+                case: "implementation",
+                value: create(ImplementationOutputContractSchema, {}),
+              },
+              allowedRepositoryPaths: [planScope],
+              checkProfile: planProfile,
+            }),
+          ],
+        }),
+      );
+      expect((await running.client.getSnapshot({})).attention).toEqual([]);
+
+      await running.tree.createTree(
+        create(CreateTreeRequestSchema, {
+          commandId: uuid(44),
+          actorSessionId: uuid(45),
+          repositoryId: planRepositoryIdentifier,
+          treeId: planTreeTwoIdentifier,
+          planRevisionId: planRevisionTwoIdentifier,
+          rootNodeId: planRootTwoIdentifier,
+          rootArtifactId: planArtifactTwoIdentifier,
+          goal: "event repair tree",
+          baseCommit,
+          budget,
+          attentionId: planAttentionTwoIdentifier,
+          rootAllowedRepositoryPaths: [planScope],
+          rootCheckProfile: planProfile,
+        }),
+      );
+      expect((await running.client.getSnapshot({})).attention).toEqual([
+        create(AttentionSummarySchema, {
+          nodeId: planRootTwoIdentifier,
+          kind: AttentionKind.HUMAN_INPUT,
+        }),
+      ]);
+
+      await running.tree.repairPlan(
+        create(RepairPlanRequestSchema, {
+          commandId: uuid(46),
+          actorSessionId: uuid(47),
+          treeId: planTreeTwoIdentifier,
+          planRevisionId: planRepairTwoIdentifier,
+          attentionId: planAttentionTwoIdentifier,
+          goal: "event repaired tree",
+          nodes: [
+            create(ProposedNodeSchema, {
+              nodeId: planChildTwoIdentifier,
+              parentNodeId: planRootTwoIdentifier,
+              mode: PlanNodeMode.IMPLEMENTATION,
+              objective: "implement event repair",
+              acceptanceCriteria: ["event repair is implementable"],
+              inputs: [],
+              outputContract: {
+                case: "implementation",
+                value: create(ImplementationOutputContractSchema, {}),
+              },
+              allowedRepositoryPaths: [planScope],
+              checkProfile: planProfile,
+            }),
+          ],
+        }),
+      );
+      expect((await running.client.getSnapshot({})).attention).toEqual([]);
+
+      let streamedSequence = baseline.lastSequence;
+      for (let index = 0; index < 4; index += 1) {
+        const response = await receiveNext(projectionStream.iterator);
+        const envelope = response.event;
+        expect(envelope?.sequence).toBe(streamedSequence + 1n);
+        streamedSequence += 1n;
+        expect(envelope?.event.case).toBe("projectionChange");
+        if (envelope?.event.case !== "projectionChange") {
+          throw new Error("tree command event is not a projection change");
+        }
+        const batch = envelope.event.value.change;
+        expect(batch.case).toBe("batch");
+        if (batch.case !== "batch") {
+          throw new Error("tree command projection change is not a batch");
+        }
+        for (const change of batch.value.changes) {
+          expect(change.change.case).not.toBe("batch");
+          switch (change.change.case) {
+            case "treeUpserted":
+              streamedTrees.set(change.change.value.id, change.change.value);
+              break;
+            case "nodeUpserted":
+              streamedNodes.set(change.change.value.id, change.change.value);
+              break;
+            case "attentionUpserted":
+              streamedAttention.set(change.change.value.nodeId, change.change.value);
+              break;
+            case "attentionRemoved":
+              streamedAttention.delete(change.change.value.nodeId);
+              break;
+            case "hostUpserted":
+            case "repositoryUpserted":
+            case "removed":
+            case "batch":
+            case undefined:
+              throw new Error("tree command batch contains an unrelated projection change");
+          }
+        }
+      }
+      projectionStream.controller.abort();
+      const projected = await running.client.getSnapshot({});
+      expect(streamedSequence).toBe(projected.lastSequence);
+      expect(
+        [...streamedTrees.values()].sort((left, right) => left.id.localeCompare(right.id)),
+      ).toEqual([...projected.trees].sort((left, right) => left.id.localeCompare(right.id)));
+      expect(
+        [...streamedNodes.values()].sort((left, right) => left.id.localeCompare(right.id)),
+      ).toEqual([...projected.nodes].sort((left, right) => left.id.localeCompare(right.id)));
+      expect(
+        [...streamedAttention.values()].sort((left, right) =>
+          left.nodeId.localeCompare(right.nodeId),
+        ),
+      ).toEqual(
+        [...projected.attention].sort((left, right) => left.nodeId.localeCompare(right.nodeId)),
+      );
+
+      await running.server.close();
+      runningOpen = false;
+      await database.close();
+      database = await openHostDatabase({ path: temporary.path, clock });
+      reopenedDatabase = database;
+      waiter = createEventCommitWaiter();
+      const restartedStore = createSqliteCommandStore({ database, ports, notifier: waiter });
+      running = await startEventFixture(database, waiter, restartedStore, clock);
+      runningOpen = true;
+      expect((await running.client.getSnapshot({})).attention).toEqual([]);
+      const restarted = await running.client.getSnapshot({});
+      expect(restarted.lastSequence).toBe(projected.lastSequence);
+      expect(restarted.trees).toEqual(projected.trees);
+      expect(restarted.nodes).toEqual(projected.nodes);
+      expect(restarted.attention).toEqual(projected.attention);
+    } finally {
+      if (runningOpen) {
+        await running.server.close();
+      }
+      if (reopenedDatabase !== undefined) {
+        await reopenedDatabase.close();
+      }
+      await temporary.dispose();
+    }
+  });
 });
 
 async function startEventFixture(
   database: ManagedSqliteDatabase,
   waiter: EventCommitWaiter,
+  commandStore: SqliteCommandStore,
+  clock: FixedClock,
 ): Promise<RunningEventFixture> {
+  const planRegistry = createPlanRegistry({
+    database,
+    commandStore,
+    hostId: trustedHostId,
+  });
   const server = await startDaemonServer({
     mode: "host",
     port: 0,
     database,
     eventWaiter: waiter,
     eventPollIntervalMs: 10,
+    planRegistry,
+    clock,
     system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
+  });
+  const transport = createConnectTransport({
+    baseUrl: server.baseUrl,
+    httpVersion: "1.1",
+    useBinaryFormat: true,
   });
   return {
     server,
-    client: createClient(
-      EventService,
-      createConnectTransport({
-        baseUrl: server.baseUrl,
-        httpVersion: "1.1",
-        useBinaryFormat: true,
-      }),
-    ),
+    client: createClient(EventService, transport),
+    tree: createClient(TreeService, transport),
   };
 }
 
@@ -392,8 +688,34 @@ async function seedSnapshotProjections(database: ManagedSqliteDatabase): Promise
   });
 }
 
+async function seedPlanRepository(database: ManagedSqliteDatabase): Promise<void> {
+  await executeTestSqliteWrite(database, (transaction) => {
+    transaction.run(
+      "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      [planRepositoryIdentifier, hostIdentifier, "/workspace/event-plan", now],
+    );
+    transaction.run(
+      `INSERT INTO repository_registrations (
+         repository_id, host_id, canonical_root, canonical_remote, default_branch, base_commit,
+         allowed_workspace_root, case_sensitive, registered_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+      [
+        planRepositoryIdentifier,
+        hostIdentifier,
+        "/workspace/event-plan",
+        "https://example.test/event-plan.git",
+        "main",
+        baseCommit,
+        "/workspace",
+        now,
+      ],
+    );
+  });
+}
+
 async function appendRepository(store: SqliteCommandStore, version: number): Promise<void> {
   const projection = repositoryProjection(version);
+
   const bytes = toBinary(ProjectionChangeSchema, projection);
   const request: CommandRequest = {
     id: commandId(uuid(10 + version)),

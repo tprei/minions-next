@@ -51,7 +51,22 @@ export function decodeProjectionChange(bytes: Uint8Array): ProjectionChange {
       { cause: validation.error },
     );
   }
+  assertNoNestedBatches(validation.message);
   return validation.message;
+}
+
+function assertNoNestedBatches(message: ProjectionChange): void {
+  if (message.change.case !== "batch") {
+    return;
+  }
+  for (const member of message.change.value.changes) {
+    if (member.change.case === "batch") {
+      throw new ProjectionChangeDecodeError(
+        "invalid_message",
+        "projection change batch cannot contain nested batches",
+      );
+    }
+  }
 }
 
 export function findUnknownField<Desc extends DescMessage>(

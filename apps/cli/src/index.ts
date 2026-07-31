@@ -5,6 +5,7 @@ import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -16,14 +17,39 @@ import {
 } from "@minions/adapters";
 import {
   ApiVersionSchema,
+  ApprovePlanRequestSchema,
+  ArtifactInputSchema,
+  ArtifactOutputContractSchema,
+  CreateTreeRequestSchema,
   DoctorStatus,
+  GetTreeRequestSchema,
   HostService,
+  ImplementationOutputContractSchema,
   ListHostsRequestSchema,
-  SystemService,
   ListRepositoriesRequestSchema,
+  ListTreesRequestSchema,
+  NodeState,
+  PlanAttentionKind,
+  PlanAttentionState,
+  PlanNodeMode,
+  PlanRevisionState,
+  ProposePlanRequestSchema,
+  ProposedNodeSchema,
+  RepairPlanRequestSchema,
   RepositoryService,
+  SystemService,
+  TreeBudgetSchema,
+  TreeService,
+  TreeState,
+  type ArtifactInput,
   type ExecutionHost,
+  type PlanAttention,
+  type PlanRevision,
   type RegisteredRepository,
+  type TaskNode,
+  type TaskTree,
+  type TreeBudget,
+  type TreeSummary,
 } from "@minions/contracts";
 import { hostId, timestampFromEpochMilliseconds, type HostId } from "@minions/core";
 import { main as runDaemon } from "@minions/daemon";
@@ -48,6 +74,37 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await getRepository(invocation.home, invocation.repositoryId);
       case "repository-list":
         return await listRepositories(invocation.home);
+      case "tree-create":
+        return await createTree(
+          invocation.home,
+          invocation.repositoryId,
+          invocation.goal,
+          invocation.baseCommit,
+          invocation.rootAllowedRepositoryPath,
+          invocation.rootCheckProfile,
+          invocation.budget,
+        );
+      case "tree-get":
+        return await getTree(invocation.home, invocation.treeId);
+      case "tree-list":
+        return await listTrees(invocation.home);
+      case "tree-propose":
+        return await proposePlan(
+          invocation.home,
+          invocation.treeId,
+          invocation.planRevisionId,
+          invocation.planPath,
+        );
+      case "tree-repair":
+        return await repairPlan(
+          invocation.home,
+          invocation.treeId,
+          invocation.planRevisionId,
+          invocation.attentionId,
+          invocation.planPath,
+        );
+      case "tree-approve":
+        return await approvePlan(invocation.home, invocation.treeId, invocation.planRevisionId);
     }
   } catch (error) {
     writeError(error);
@@ -63,10 +120,18 @@ type StartInvocation = Readonly<{
   hostId?: HostId;
 }>;
 
+type TreeBudgetInput = Readonly<{
+  maxDepth: number;
+  maxFanOut: number;
+  maxNodes: number;
+  maxConcurrency: number;
+  maxAttemptsPerNode: number;
+}>;
+
 type Invocation =
   | StartInvocation
   | Readonly<{
-      command: "stop" | "status" | "doctor" | "host-list" | "repository-list";
+      command: "stop" | "status" | "doctor" | "host-list" | "repository-list" | "tree-list";
       home: string;
     }>
   | Readonly<{
@@ -78,50 +143,152 @@ type Invocation =
       command: "repository-get";
       home: string;
       repositoryId: string;
+    }>
+  | Readonly<{
+      command: "tree-create";
+      home: string;
+      repositoryId: string;
+      goal: string;
+      baseCommit: string;
+      rootAllowedRepositoryPath: string;
+      rootCheckProfile: string;
+      budget: TreeBudgetInput;
+    }>
+  | Readonly<{
+      command: "tree-get";
+      home: string;
+      treeId: string;
+    }>
+  | Readonly<{
+      command: "tree-propose";
+      home: string;
+      treeId: string;
+      planRevisionId: string;
+      planPath: string;
+    }>
+  | Readonly<{
+      command: "tree-repair";
+      home: string;
+      treeId: string;
+      planRevisionId: string;
+      attentionId: string;
+      planPath: string;
+    }>
+  | Readonly<{
+      command: "tree-approve";
+      home: string;
+      treeId: string;
+      planRevisionId: string;
     }>;
 
 function parseInvocation(argv: readonly string[]): Invocation {
   const [first, second, ...rest] = argv;
-  const command =
-    first === "host" && second === "list"
-      ? "host-list"
-      : first === "repository" && (second === "register" || second === "get" || second === "list")
-        ? `repository-${second}`
-        : first;
-  const positional =
-    command === "repository-register" || command === "repository-get" ? rest[0] : undefined;
-  const optionArguments =
-    command === "host-list" || command === "repository-list"
-      ? rest
-      : command === "repository-register" || command === "repository-get"
-        ? rest.slice(1)
-        : argv.slice(1);
+  const command = normalizeCommand(first, second);
+  const commandArguments =
+    first === "host" || first === "repository" || first === "tree" ? rest : argv.slice(1);
+  const positionalCount = invocationPositionalCount(command);
+  const positional = commandArguments.slice(0, positionalCount);
+  const optionArguments = commandArguments.slice(positionalCount);
   let home = process.env["MINIONS_HOME"] ?? join(homedir(), ".minions");
   let mode: DaemonModeName = "local";
   let port = 4_817;
   let configuredHostId: HostId | undefined;
+  let maxDepth: number | undefined;
+  let maxFanOut: number | undefined;
+  let maxNodes: number | undefined;
+  let maxConcurrency: number | undefined;
+  let maxAttemptsPerNode: number | undefined;
+  let rootAllowedRepositoryPath: string | undefined;
+  let rootCheckProfile: string | undefined;
+  const seenOptions = new Set<string>();
   for (let index = 0; index < optionArguments.length; index += 1) {
     const option = optionArguments[index];
     const value = optionArguments[index + 1];
+    if (option === undefined) {
+      throw new UsageError("option is missing");
+    }
+    if (seenOptions.has(option)) {
+      throw new UsageError(`option is repeated: ${option}`);
+    }
+    seenOptions.add(option);
     switch (option) {
       case "--home":
         home = requiredValue(option, value);
         index += 1;
         break;
       case "--mode":
+        if (command !== "start") {
+          throw new UsageError("--mode is only valid with start");
+        }
         mode = parseMode(requiredValue(option, value));
         index += 1;
         break;
       case "--port":
+        if (command !== "start") {
+          throw new UsageError("--port is only valid with start");
+        }
         port = parsePort(requiredValue(option, value));
         index += 1;
         break;
       case "--host-id":
-        configuredHostId = hostId(requiredValue(option, value));
+        if (command !== "start") {
+          throw new UsageError("--host-id is only valid with start");
+        }
+        configuredHostId = parseConfiguredHostId(requiredValue(option, value));
         index += 1;
         break;
-      case undefined:
-        throw new UsageError("option is missing");
+      case "--max-depth":
+        if (command !== "tree-create") {
+          throw new UsageError("--max-depth is only valid with tree create");
+        }
+        maxDepth = parseBudget(requiredValue(option, value), option);
+        index += 1;
+        break;
+      case "--max-fan-out":
+        if (command !== "tree-create") {
+          throw new UsageError("--max-fan-out is only valid with tree create");
+        }
+        maxFanOut = parseBudget(requiredValue(option, value), option);
+        index += 1;
+        break;
+      case "--max-nodes":
+        if (command !== "tree-create") {
+          throw new UsageError("--max-nodes is only valid with tree create");
+        }
+        maxNodes = parseBudget(requiredValue(option, value), option);
+        index += 1;
+        break;
+      case "--max-concurrency":
+        if (command !== "tree-create") {
+          throw new UsageError("--max-concurrency is only valid with tree create");
+        }
+        maxConcurrency = parseBudget(requiredValue(option, value), option);
+        index += 1;
+        break;
+      case "--max-attempts-per-node":
+        if (command !== "tree-create") {
+          throw new UsageError("--max-attempts-per-node is only valid with tree create");
+        }
+        maxAttemptsPerNode = parseBudget(requiredValue(option, value), option);
+        index += 1;
+        break;
+      case "--root-allowed-path":
+        if (command !== "tree-create") {
+          throw new UsageError("--root-allowed-path is only valid with tree create");
+        }
+        rootAllowedRepositoryPath = parseCanonicalRelativePath(
+          requiredValue(option, value),
+          option,
+        );
+        index += 1;
+        break;
+      case "--root-check-profile":
+        if (command !== "tree-create") {
+          throw new UsageError("--root-check-profile is only valid with tree create");
+        }
+        rootCheckProfile = requiredText("root check profile", requiredValue(option, value));
+        index += 1;
+        break;
       default:
         throw new UsageError(`unknown option: ${option}`);
     }
@@ -144,38 +311,223 @@ function parseInvocation(argv: readonly string[]): Invocation {
     command === "status" ||
     command === "doctor" ||
     command === "host-list" ||
-    command === "repository-list"
+    command === "repository-list" ||
+    command === "tree-list"
   ) {
-    assertNonStartOptions(mode, port, configuredHostId);
     return { command, home };
   }
   if (command === "repository-register") {
-    assertNonStartOptions(mode, port, configuredHostId);
-    return { command, home, rootPath: requiredPositional("repository root", positional) };
+    return { command, home, rootPath: requiredPositional("repository root", positional[0]) };
   }
   if (command === "repository-get") {
-    assertNonStartOptions(mode, port, configuredHostId);
-    return { command, home, repositoryId: requiredPositional("repository ID", positional) };
+    return {
+      command,
+      home,
+      repositoryId: requiredPositional("repository ID", positional[0]),
+    };
   }
-  throw new UsageError(
-    "usage: minions <start|stop|status|doctor|host list|repository register|get|list> [options]",
-  );
+  if (command === "tree-create") {
+    if (
+      maxDepth === undefined ||
+      maxFanOut === undefined ||
+      maxNodes === undefined ||
+      maxConcurrency === undefined ||
+      maxAttemptsPerNode === undefined ||
+      rootAllowedRepositoryPath === undefined ||
+      rootCheckProfile === undefined
+    ) {
+      throw new UsageError(
+        "tree create requires --max-depth, --max-fan-out, --max-nodes, --max-concurrency, --max-attempts-per-node, --root-allowed-path, and --root-check-profile",
+      );
+    }
+    return {
+      command,
+      home,
+      repositoryId: parseUuidV7Argument(
+        "repository ID",
+        requiredPositional("repository ID", positional[0]),
+      ),
+      goal: requiredText("tree goal", requiredPositional("tree goal", positional[1])),
+      baseCommit: parseBaseCommit(requiredPositional("base commit", positional[2])),
+      rootAllowedRepositoryPath,
+      rootCheckProfile,
+      budget: {
+        maxDepth,
+        maxFanOut,
+        maxNodes,
+        maxConcurrency,
+        maxAttemptsPerNode,
+      },
+    };
+  }
+  if (command === "tree-get") {
+    return {
+      command,
+      home,
+      treeId: parseUuidV7Argument("tree ID", requiredPositional("tree ID", positional[0])),
+    };
+  }
+  if (command === "tree-propose") {
+    return {
+      command,
+      home,
+      treeId: parseUuidV7Argument("tree ID", requiredPositional("tree ID", positional[0])),
+      planRevisionId: parseUuidV7Argument(
+        "plan revision ID",
+        requiredPositional("plan revision ID", positional[1]),
+      ),
+      planPath: requiredPositional("plan JSON path", positional[2]),
+    };
+  }
+  if (command === "tree-repair") {
+    return {
+      command,
+      home,
+      treeId: parseUuidV7Argument("tree ID", requiredPositional("tree ID", positional[0])),
+      planRevisionId: parseUuidV7Argument(
+        "plan revision ID",
+        requiredPositional("plan revision ID", positional[1]),
+      ),
+      attentionId: parseUuidV7Argument(
+        "attention ID",
+        requiredPositional("attention ID", positional[2]),
+      ),
+      planPath: requiredPositional("plan JSON path", positional[3]),
+    };
+  }
+  if (command === "tree-approve") {
+    return {
+      command,
+      home,
+      treeId: parseUuidV7Argument("tree ID", requiredPositional("tree ID", positional[0])),
+      planRevisionId: parseUuidV7Argument(
+        "plan revision ID",
+        requiredPositional("plan revision ID", positional[1]),
+      ),
+    };
+  }
+  throw new UsageError(usageText());
 }
-function assertNonStartOptions(
-  mode: DaemonModeName,
-  port: number,
-  configuredHostId: HostId | undefined,
-): void {
-  if (mode !== "local" || port !== 4_817 || configuredHostId !== undefined) {
-    throw new UsageError("--mode, --port, and --host-id are only valid with start");
+
+function normalizeCommand(
+  first: string | undefined,
+  second: string | undefined,
+): string | undefined {
+  if (first === "host" && second === "list") {
+    return "host-list";
+  }
+  if (first === "repository" && (second === "register" || second === "get" || second === "list")) {
+    return `repository-${second}`;
+  }
+  if (
+    first === "tree" &&
+    (second === "create" ||
+      second === "get" ||
+      second === "list" ||
+      second === "propose" ||
+      second === "repair" ||
+      second === "approve")
+  ) {
+    return `tree-${second}`;
+  }
+  return first;
+}
+
+function invocationPositionalCount(command: string | undefined): number {
+  switch (command) {
+    case "repository-register":
+    case "repository-get":
+    case "tree-get":
+      return 1;
+    case "tree-create":
+    case "tree-propose":
+      return 3;
+    case "tree-repair":
+      return 4;
+    case "tree-approve":
+      return 2;
+    case undefined:
+    default:
+      return 0;
   }
 }
 
 function requiredPositional(name: string, value: string | undefined): string {
-  if (value === undefined || value.length === 0) {
+  if (value === undefined || value.length === 0 || value.startsWith("--")) {
     throw new UsageError(`${name} is required`);
   }
   return value;
+}
+
+function requiredText(name: string, value: string): string {
+  if (value.trim().length === 0) {
+    throw new UsageError(`${name} must not be empty`);
+  }
+  return value;
+}
+function parseConfiguredHostId(value: string): HostId {
+  if (!uuidV7Pattern.test(value)) {
+    throw new UsageError("--host-id must be a lowercase UUIDv7");
+  }
+  return hostId(value);
+}
+
+function parseUuidV7Argument(name: string, value: string): string {
+  if (!uuidV7Pattern.test(value)) {
+    throw new UsageError(`${name} must be a lowercase UUIDv7`);
+  }
+  return value;
+}
+
+function parseBaseCommit(value: string): string {
+  if (!gitShaPattern.test(value)) {
+    throw new UsageError("base commit must be 40 or 64 lowercase hexadecimal characters");
+  }
+  return value;
+}
+function parseCanonicalRelativePath(value: unknown, context: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new UsageError(`${context} must be a canonical relative path`);
+  }
+  if (value === ".") {
+    return value;
+  }
+  if (
+    value.startsWith("/") ||
+    value.endsWith("/") ||
+    value.includes("\\") ||
+    /^[A-Za-z]:\//u.test(value) ||
+    value
+      .split("/")
+      .some((component) => component === "" || component === "." || component === "..")
+  ) {
+    throw new UsageError(`${context} must be a canonical relative path`);
+  }
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint !== undefined &&
+      (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f))
+    ) {
+      throw new UsageError(`${context} must be a canonical relative path`);
+    }
+  }
+  return value;
+}
+
+function parseBudget(value: string, option: string): number {
+  if (!/^[0-9]+$/u.test(value)) {
+    throw new UsageError(`${option} must be a positive integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 0xffff_ffff) {
+    throw new UsageError(`${option} must be between 1 and 4294967295`);
+  }
+  return parsed;
+}
+
+function usageText(): string {
+  return "usage: minions <start|stop|status|doctor|host list|repository register|repository get|repository list|tree create|tree get|tree list|tree propose|tree repair|tree approve> [options]";
 }
 
 async function start(invocation: StartInvocation): Promise<number> {
@@ -292,6 +644,668 @@ async function listRepositories(home: string): Promise<number> {
   return 0;
 }
 
+async function createTree(
+  home: string,
+  repositoryId: string,
+  goal: string,
+  baseCommit: string,
+  rootAllowedRepositoryPath: string,
+  rootCheckProfile: string,
+  budget: TreeBudgetInput,
+): Promise<number> {
+  const ids = createSecureIdGenerator({
+    now: () => timestampFromEpochMilliseconds(Date.now()),
+  });
+  const response = await clientsForHome(home).tree.createTree(
+    create(CreateTreeRequestSchema, {
+      commandId: ids.nextId(),
+      actorSessionId: ids.nextId(),
+      repositoryId,
+      treeId: ids.nextId(),
+      planRevisionId: ids.nextId(),
+      rootNodeId: ids.nextId(),
+      rootArtifactId: ids.nextId(),
+      goal,
+      baseCommit,
+      budget: create(TreeBudgetSchema, budget),
+      attentionId: ids.nextId(),
+      rootAllowedRepositoryPaths: [rootAllowedRepositoryPath],
+      rootCheckProfile,
+    }),
+  );
+  writeJson({ tree: treeJson(requiredTree(response.tree, "create tree")) });
+  return 0;
+}
+
+async function getTree(home: string, treeId: string): Promise<number> {
+  const response = await clientsForHome(home).tree.getTree(
+    create(GetTreeRequestSchema, { treeId }),
+  );
+  writeJson({ tree: treeJson(requiredTree(response.tree, "get tree")) });
+  return 0;
+}
+
+async function listTrees(home: string): Promise<number> {
+  const client = clientsForHome(home).tree;
+  const trees: TreeSummary[] = [];
+  const seenTokens = new Set<string>();
+  let pageToken: string | undefined;
+  do {
+    const request =
+      pageToken === undefined
+        ? create(ListTreesRequestSchema, { pageSize: 100 })
+        : create(ListTreesRequestSchema, { pageSize: 100, pageToken });
+    const response = await client.listTrees(request);
+    trees.push(...response.trees);
+    pageToken = response.nextPageToken;
+    if (pageToken !== undefined && seenTokens.has(pageToken)) {
+      throw new ConnectError("tree pagination repeated a continuation token", Code.Internal);
+    }
+    if (pageToken !== undefined) {
+      seenTokens.add(pageToken);
+    }
+  } while (pageToken !== undefined);
+  writeJson({ trees: trees.map(treeSummaryJson) });
+  return 0;
+}
+
+async function proposePlan(
+  home: string,
+  treeId: string,
+  planRevisionId: string,
+  planPath: string,
+): Promise<number> {
+  const plan = await readPlanFile(planPath);
+  const ids = createSecureIdGenerator({
+    now: () => timestampFromEpochMilliseconds(Date.now()),
+  });
+  const response = await clientsForHome(home).tree.proposePlan(
+    create(ProposePlanRequestSchema, {
+      commandId: ids.nextId(),
+      actorSessionId: ids.nextId(),
+      treeId,
+      planRevisionId,
+      goal: plan.goal,
+      nodes: plan.nodes.map(proposedNodeMessage),
+    }),
+  );
+  writeJson({ tree: treeJson(requiredTree(response.tree, "propose plan")) });
+  return 0;
+}
+
+async function repairPlan(
+  home: string,
+  treeId: string,
+  planRevisionId: string,
+  attentionId: string,
+  planPath: string,
+): Promise<number> {
+  const plan = await readPlanFile(planPath);
+  const ids = createSecureIdGenerator({
+    now: () => timestampFromEpochMilliseconds(Date.now()),
+  });
+  const response = await clientsForHome(home).tree.repairPlan(
+    create(RepairPlanRequestSchema, {
+      commandId: ids.nextId(),
+      actorSessionId: ids.nextId(),
+      treeId,
+      planRevisionId,
+      attentionId,
+      goal: plan.goal,
+      nodes: plan.nodes.map(proposedNodeMessage),
+    }),
+  );
+  writeJson({ tree: treeJson(requiredTree(response.tree, "repair plan")) });
+  return 0;
+}
+
+async function approvePlan(home: string, treeId: string, planRevisionId: string): Promise<number> {
+  const ids = createSecureIdGenerator({
+    now: () => timestampFromEpochMilliseconds(Date.now()),
+  });
+  const response = await clientsForHome(home).tree.approvePlan(
+    create(ApprovePlanRequestSchema, {
+      commandId: ids.nextId(),
+      actorSessionId: ids.nextId(),
+      treeId,
+      planRevisionId,
+    }),
+  );
+  writeJson({ tree: treeJson(requiredTree(response.tree, "approve plan")) });
+  return 0;
+}
+
+function requiredTree(tree: TaskTree | undefined, operation: string): TaskTree {
+  if (tree === undefined) {
+    throw new ConnectError(`${operation} response is missing tree`, Code.Internal);
+  }
+  return tree;
+}
+
+function treeSummaryJson(summary: TreeSummary) {
+  return {
+    id: summary.id,
+    repository_id: summary.repositoryId,
+    host_id: summary.hostId,
+    root_node_id: summary.rootNodeId,
+    active_plan_revision_id: summary.activePlanRevisionId,
+    state: treeStateJson(summary.state),
+    version: summary.version.toString(),
+  };
+}
+
+function treeJson(tree: TaskTree) {
+  if (tree.budget === undefined) {
+    throw new ConnectError("tree response is missing budget", Code.Internal);
+  }
+  return {
+    id: tree.id,
+    repository_id: tree.repositoryId,
+    host_id: tree.hostId,
+    base_commit: tree.baseCommit,
+    goal: tree.goal,
+    active_plan_revision_id: tree.activePlanRevisionId,
+    root_node_id: tree.rootNodeId,
+    state: treeStateJson(tree.state),
+    version: tree.version.toString(),
+    created_at: requiredTimestamp(tree.createdAt, "tree created_at"),
+    updated_at: requiredTimestamp(tree.updatedAt, "tree updated_at"),
+    revisions: tree.revisions.map(planRevisionJson),
+    nodes: tree.nodes.map(taskNodeJson),
+    budget: treeBudgetJson(tree.budget),
+    ...(tree.attention === undefined ? {} : { attention: planAttentionJson(tree.attention) }),
+  };
+}
+
+function treeBudgetJson(budget: TreeBudget) {
+  return {
+    max_depth: budget.maxDepth,
+    max_fan_out: budget.maxFanOut,
+    max_nodes: budget.maxNodes,
+    max_concurrency: budget.maxConcurrency,
+    max_attempts_per_node: budget.maxAttemptsPerNode,
+  };
+}
+
+function planRevisionJson(revision: PlanRevision) {
+  return {
+    id: revision.id,
+    tree_id: revision.treeId,
+    ordinal: revision.ordinal.toString(),
+    goal: revision.goal,
+    state: planRevisionStateJson(revision.state),
+    version: revision.version.toString(),
+    created_at: requiredTimestamp(revision.createdAt, "plan revision created_at"),
+    ...(revision.approvedAt === undefined
+      ? {}
+      : { approved_at: toJsonTimestamp(revision.approvedAt) }),
+    ...(revision.supersededAt === undefined
+      ? {}
+      : { superseded_at: toJsonTimestamp(revision.supersededAt) }),
+  };
+}
+
+function taskNodeJson(node: TaskNode) {
+  if (node.budget === undefined) {
+    throw new ConnectError("task node response is missing budget", Code.Internal);
+  }
+  const fields = {
+    id: node.id,
+    tree_id: node.treeId,
+    repository_id: node.repositoryId,
+    host_id: node.hostId,
+    ...(node.parentNodeId === undefined ? {} : { parent_node_id: node.parentNodeId }),
+    plan_revision_id: node.planRevisionId,
+    mode: planNodeModeJson(node.mode),
+    objective: node.objective,
+    acceptance_criteria: node.acceptanceCriteria,
+    inputs: node.inputs.map(artifactInputJson),
+    state: nodeStateJson(node.state),
+    version: node.version.toString(),
+    created_at: requiredTimestamp(node.createdAt, "task node created_at"),
+    updated_at: requiredTimestamp(node.updatedAt, "task node updated_at"),
+    allowed_repository_paths: node.allowedRepositoryPaths,
+    check_profile: node.checkProfile,
+    budget: {
+      max_attempts: node.budget.maxAttempts,
+    },
+  };
+  if (node.outputContract.case === "artifact") {
+    return {
+      ...fields,
+      artifact: {
+        artifact_id: node.outputContract.value.artifactId,
+        artifact_type: node.outputContract.value.artifactType,
+      },
+    };
+  }
+  if (node.outputContract.case === "implementation") {
+    return { ...fields, implementation: {} };
+  }
+  throw new ConnectError("task node response has no output contract", Code.Internal);
+}
+
+function artifactInputJson(input: ArtifactInput) {
+  return {
+    artifact_id: input.artifactId,
+    source_node_id: input.sourceNodeId,
+  };
+}
+
+function planAttentionJson(attention: PlanAttention) {
+  return {
+    id: attention.id,
+    tree_id: attention.treeId,
+    ...(attention.planRevisionId === undefined
+      ? {}
+      : { plan_revision_id: attention.planRevisionId }),
+    kind: planAttentionKindJson(attention.kind),
+    message: attention.message,
+    state: planAttentionStateJson(attention.state),
+    created_at: requiredTimestamp(attention.createdAt, "plan attention created_at"),
+    ...(attention.resolvedAt === undefined
+      ? {}
+      : { resolved_at: toJsonTimestamp(attention.resolvedAt) }),
+  };
+}
+
+function treeStateJson(value: TreeState): string {
+  switch (value) {
+    case TreeState.DRAFT:
+      return "TREE_STATE_DRAFT";
+    case TreeState.APPROVED:
+      return "TREE_STATE_APPROVED";
+    case TreeState.ACTIVE:
+      return "TREE_STATE_ACTIVE";
+    case TreeState.SUCCEEDED:
+      return "TREE_STATE_SUCCEEDED";
+    case TreeState.FAILED:
+      return "TREE_STATE_FAILED";
+    case TreeState.CANCELLED:
+      return "TREE_STATE_CANCELLED";
+    case TreeState.UNSPECIFIED:
+      throw new ConnectError(`tree response has unknown state ${String(value)}`, Code.Internal);
+  }
+  throw new ConnectError(`tree response has unknown state ${String(value)}`, Code.Internal);
+}
+
+function planRevisionStateJson(value: PlanRevisionState): string {
+  switch (value) {
+    case PlanRevisionState.DRAFT:
+      return "PLAN_REVISION_STATE_DRAFT";
+    case PlanRevisionState.APPROVED:
+      return "PLAN_REVISION_STATE_APPROVED";
+    case PlanRevisionState.SUPERSEDED:
+      return "PLAN_REVISION_STATE_SUPERSEDED";
+    case PlanRevisionState.UNSPECIFIED:
+      throw new ConnectError(
+        `plan revision response has unknown state ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(
+    `plan revision response has unknown state ${String(value)}`,
+    Code.Internal,
+  );
+}
+
+function planNodeModeJson(value: PlanNodeMode): string {
+  switch (value) {
+    case PlanNodeMode.PLAN:
+      return "PLAN_NODE_MODE_PLAN";
+    case PlanNodeMode.RESEARCH:
+      return "PLAN_NODE_MODE_RESEARCH";
+    case PlanNodeMode.EXPLORE:
+      return "PLAN_NODE_MODE_EXPLORE";
+    case PlanNodeMode.IMPLEMENTATION:
+      return "PLAN_NODE_MODE_IMPLEMENTATION";
+    case PlanNodeMode.UNSPECIFIED:
+      throw new ConnectError(`task node response has unknown mode ${String(value)}`, Code.Internal);
+  }
+  throw new ConnectError(`task node response has unknown mode ${String(value)}`, Code.Internal);
+}
+
+function nodeStateJson(value: NodeState): string {
+  switch (value) {
+    case NodeState.PLANNED:
+      return "NODE_STATE_PLANNED";
+    case NodeState.READY:
+      return "NODE_STATE_READY";
+    case NodeState.ACTIVE:
+      return "NODE_STATE_ACTIVE";
+    case NodeState.BLOCKED:
+      return "NODE_STATE_BLOCKED";
+    case NodeState.SUCCEEDED:
+      return "NODE_STATE_SUCCEEDED";
+    case NodeState.FAILED:
+      return "NODE_STATE_FAILED";
+    case NodeState.CANCELLED:
+      return "NODE_STATE_CANCELLED";
+    case NodeState.SUPERSEDED:
+      return "NODE_STATE_SUPERSEDED";
+    case NodeState.UNSPECIFIED:
+      throw new ConnectError(
+        `task node response has unknown state ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(`task node response has unknown state ${String(value)}`, Code.Internal);
+}
+
+function planAttentionKindJson(value: PlanAttentionKind): string {
+  switch (value) {
+    case PlanAttentionKind.PLAN_REQUIRED:
+      return "PLAN_ATTENTION_KIND_PLAN_REQUIRED";
+    case PlanAttentionKind.PLAN_INVALID:
+      return "PLAN_ATTENTION_KIND_PLAN_INVALID";
+    case PlanAttentionKind.REPAIR_REQUIRED:
+      return "PLAN_ATTENTION_KIND_REPAIR_REQUIRED";
+    case PlanAttentionKind.UNSPECIFIED:
+      throw new ConnectError(
+        `plan attention response has unknown kind ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(
+    `plan attention response has unknown kind ${String(value)}`,
+    Code.Internal,
+  );
+}
+
+function planAttentionStateJson(value: PlanAttentionState): string {
+  switch (value) {
+    case PlanAttentionState.OPEN:
+      return "PLAN_ATTENTION_STATE_OPEN";
+    case PlanAttentionState.RESOLVED:
+      return "PLAN_ATTENTION_STATE_RESOLVED";
+    case PlanAttentionState.UNSPECIFIED:
+      throw new ConnectError(
+        `plan attention response has unknown state ${String(value)}`,
+        Code.Internal,
+      );
+  }
+  throw new ConnectError(
+    `plan attention response has unknown state ${String(value)}`,
+    Code.Internal,
+  );
+}
+
+function requiredTimestamp(
+  timestamp: Timestamp | undefined,
+  fieldName: string,
+): Readonly<{ seconds: string; nanos: number }> {
+  if (timestamp === undefined) {
+    throw new ConnectError(`tree response is missing ${fieldName}`, Code.Internal);
+  }
+  return toJsonTimestamp(timestamp);
+}
+
+type PlanFile = Readonly<{
+  goal: string;
+  nodes: readonly PlanNodeInput[];
+}>;
+
+type PlanNodeInput = Readonly<{
+  nodeId: string;
+  parentNodeId?: string;
+  mode: PlanNodeMode;
+  objective: string;
+  acceptanceCriteria: readonly string[];
+  inputs: readonly PlanArtifactInput[];
+  allowedRepositoryPaths: readonly string[];
+  checkProfile: string;
+  output:
+    | Readonly<{ case: "artifact"; artifactId: string; artifactType: string }>
+    | Readonly<{ case: "implementation" }>;
+}>;
+
+type PlanArtifactInput = Readonly<{
+  artifactId: string;
+  sourceNodeId: string;
+}>;
+
+type JsonObject = Record<string, unknown>;
+
+const planFileKeys: Readonly<Record<string, boolean>> = {
+  goal: true,
+  nodes: true,
+};
+const planNodeKeys: Readonly<Record<string, boolean>> = {
+  nodeId: true,
+  parentNodeId: true,
+  mode: true,
+  objective: true,
+  acceptanceCriteria: true,
+  inputs: true,
+  allowedRepositoryPaths: true,
+  checkProfile: true,
+  artifact: true,
+  implementation: true,
+};
+const planInputKeys: Readonly<Record<string, boolean>> = {
+  artifactId: true,
+  sourceNodeId: true,
+};
+const planArtifactOutputKeys: Readonly<Record<string, boolean>> = {
+  artifactId: true,
+  artifactType: true,
+};
+
+async function readPlanFile(planPath: string): Promise<PlanFile> {
+  let source: string;
+  try {
+    source = await readFile(planPath, "utf8");
+  } catch (error) {
+    throw new UsageError(`cannot read plan JSON file: ${errorMessage(error)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    throw new UsageError(`plan JSON is malformed: ${errorMessage(error)}`);
+  }
+  if (!isJsonObject(parsed)) {
+    throw new UsageError("plan JSON must contain an object");
+  }
+  assertExactKeys(parsed, planFileKeys, "plan");
+  const goal = parseNonEmptyJsonString(parsed["goal"], "plan.goal");
+  const rawNodes = parsed["nodes"];
+  if (!Array.isArray(rawNodes) || rawNodes.length === 0) {
+    throw new UsageError("plan.nodes must be a non-empty array");
+  }
+  return {
+    goal,
+    nodes: rawNodes.map((node, index) => parsePlanNode(node, index)),
+  };
+}
+
+function parsePlanNode(value: unknown, index: number): PlanNodeInput {
+  const context = `plan.nodes[${String(index)}]`;
+  if (!isJsonObject(value)) {
+    throw new UsageError(`${context} must contain an object`);
+  }
+  assertExactKeys(value, planNodeKeys, context);
+  const parentNodeId = hasOwn(value, "parentNodeId")
+    ? parseJsonUuid(value["parentNodeId"], `${context}.parentNodeId`)
+    : undefined;
+  const rawCriteria = value["acceptanceCriteria"];
+  if (!Array.isArray(rawCriteria) || rawCriteria.length === 0) {
+    throw new UsageError(`${context}.acceptanceCriteria must be a non-empty array`);
+  }
+  const acceptanceCriteria = rawCriteria.map((criterion, criterionIndex) =>
+    parseNonEmptyJsonString(criterion, `${context}.acceptanceCriteria[${String(criterionIndex)}]`),
+  );
+  const rawInputs = value["inputs"];
+  let inputs: readonly PlanArtifactInput[] = [];
+  if (rawInputs !== undefined) {
+    if (!Array.isArray(rawInputs)) {
+      throw new UsageError(`${context}.inputs must be an array`);
+    }
+    inputs = rawInputs.map((input, inputIndex) =>
+      parsePlanInput(input, `${context}.inputs[${String(inputIndex)}]`),
+    );
+  }
+  const rawAllowedRepositoryPaths = value["allowedRepositoryPaths"];
+  if (!Array.isArray(rawAllowedRepositoryPaths) || rawAllowedRepositoryPaths.length === 0) {
+    throw new UsageError(`${context}.allowedRepositoryPaths must be a non-empty array`);
+  }
+  const allowedRepositoryPaths = rawAllowedRepositoryPaths.map((path, pathIndex) =>
+    parseCanonicalRelativePath(path, `${context}.allowedRepositoryPaths[${String(pathIndex)}]`),
+  );
+  const checkProfile = parseNonEmptyJsonString(value["checkProfile"], `${context}.checkProfile`);
+  const mode = parsePlanMode(value["mode"], `${context}.mode`);
+  const hasArtifact = hasOwn(value, "artifact");
+  const hasImplementation = hasOwn(value, "implementation");
+  if (hasArtifact === hasImplementation) {
+    throw new UsageError(`${context} must contain exactly one output contract`);
+  }
+  const output = hasArtifact
+    ? parseArtifactOutput(value["artifact"], `${context}.artifact`)
+    : parseImplementationOutput(value["implementation"], `${context}.implementation`);
+  if (
+    (output.case === "implementation" && mode !== PlanNodeMode.IMPLEMENTATION) ||
+    (output.case === "artifact" && mode === PlanNodeMode.IMPLEMENTATION)
+  ) {
+    throw new UsageError(`${context} output contract does not match mode`);
+  }
+  return {
+    nodeId: parseJsonUuid(value["nodeId"], `${context}.nodeId`),
+    ...(parentNodeId === undefined ? {} : { parentNodeId }),
+    mode,
+    objective: parseNonEmptyJsonString(value["objective"], `${context}.objective`),
+    acceptanceCriteria,
+    inputs,
+    allowedRepositoryPaths,
+    checkProfile,
+    output,
+  };
+}
+
+function parsePlanInput(value: unknown, context: string): PlanArtifactInput {
+  if (!isJsonObject(value)) {
+    throw new UsageError(`${context} must contain an object`);
+  }
+  assertExactKeys(value, planInputKeys, context);
+  return {
+    artifactId: parseJsonUuid(value["artifactId"], `${context}.artifactId`),
+    sourceNodeId: parseJsonUuid(value["sourceNodeId"], `${context}.sourceNodeId`),
+  };
+}
+
+function parseArtifactOutput(
+  value: unknown,
+  context: string,
+): Readonly<{ case: "artifact"; artifactId: string; artifactType: string }> {
+  if (!isJsonObject(value)) {
+    throw new UsageError(`${context} must contain an object`);
+  }
+  assertExactKeys(value, planArtifactOutputKeys, context);
+  return {
+    case: "artifact",
+    artifactId: parseJsonUuid(value["artifactId"], `${context}.artifactId`),
+    artifactType: parseNonEmptyJsonString(value["artifactType"], `${context}.artifactType`),
+  };
+}
+
+function parseImplementationOutput(
+  value: unknown,
+  context: string,
+): Readonly<{ case: "implementation" }> {
+  if (!isJsonObject(value)) {
+    throw new UsageError(`${context} must contain an empty object`);
+  }
+  assertExactKeys(value, {}, context);
+  return { case: "implementation" };
+}
+
+function parsePlanMode(value: unknown, context: string): PlanNodeMode {
+  if (typeof value !== "string") {
+    throw new UsageError(`${context} must be a generated PlanNodeMode name`);
+  }
+  switch (value) {
+    case "PLAN_NODE_MODE_PLAN":
+      return PlanNodeMode.PLAN;
+    case "PLAN_NODE_MODE_RESEARCH":
+      return PlanNodeMode.RESEARCH;
+    case "PLAN_NODE_MODE_EXPLORE":
+      return PlanNodeMode.EXPLORE;
+    case "PLAN_NODE_MODE_IMPLEMENTATION":
+      return PlanNodeMode.IMPLEMENTATION;
+    default:
+      throw new UsageError(`${context} contains an unknown PlanNodeMode`);
+  }
+}
+
+function proposedNodeMessage(node: PlanNodeInput) {
+  const fields = {
+    nodeId: node.nodeId,
+    ...(node.parentNodeId === undefined ? {} : { parentNodeId: node.parentNodeId }),
+    mode: node.mode,
+    objective: node.objective,
+    acceptanceCriteria: [...node.acceptanceCriteria],
+    inputs: node.inputs.map((input) =>
+      create(ArtifactInputSchema, {
+        artifactId: input.artifactId,
+        sourceNodeId: input.sourceNodeId,
+      }),
+    ),
+    allowedRepositoryPaths: [...node.allowedRepositoryPaths],
+    checkProfile: node.checkProfile,
+  };
+  if (node.output.case === "artifact") {
+    return create(ProposedNodeSchema, {
+      ...fields,
+      outputContract: {
+        case: "artifact",
+        value: create(ArtifactOutputContractSchema, {
+          artifactId: node.output.artifactId,
+          artifactType: node.output.artifactType,
+        }),
+      },
+    });
+  }
+  return create(ProposedNodeSchema, {
+    ...fields,
+    outputContract: {
+      case: "implementation",
+      value: create(ImplementationOutputContractSchema, {}),
+    },
+  });
+}
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOwn(value: JsonObject, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function assertExactKeys(
+  value: JsonObject,
+  allowedKeys: Readonly<Record<string, boolean>>,
+  context: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (allowedKeys[key] !== true) {
+      throw new UsageError(`${context} contains unknown field ${key}`);
+    }
+  }
+}
+
+function parseNonEmptyJsonString(value: unknown, context: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new UsageError(`${context} must be a non-empty string`);
+  }
+  return value;
+}
+
+function parseJsonUuid(value: unknown, context: string): string {
+  if (typeof value !== "string" || !uuidV7Pattern.test(value)) {
+    throw new UsageError(`${context} must be a lowercase UUIDv7`);
+  }
+  return value;
+}
+
 function repositoryJson(repository: RegisteredRepository) {
   return {
     id: repository.id,
@@ -369,6 +1383,7 @@ function clientsForHome(home: string) {
     system: createClient(SystemService, transport),
     host: createClient(HostService, transport),
     repository: createClient(RepositoryService, transport),
+    tree: createClient(TreeService, transport),
   };
 }
 
@@ -440,6 +1455,9 @@ function requiredValue(option: string | undefined, value: string | undefined): s
   }
   return value;
 }
+
+const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const gitShaPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
 function parseMode(value: string): DaemonModeName {
   if (value === "host" || value === "local" || value === "supervisor") {

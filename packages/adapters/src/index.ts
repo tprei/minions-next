@@ -67,6 +67,27 @@ export type {
   RepositoryRegistry,
   RepositoryRegistryErrorCode,
 } from "./sqlite/repository-registry.js";
+export { createPlanRegistry, PlanRegistryError } from "./sqlite/plan-registry.js";
+export type {
+  ApprovePlanInput,
+  ArtifactInputRecord,
+  ArtifactOutputRecord,
+  CreatePlanRegistryOptions,
+  CreateTreeInput,
+  ImplementationOutputRecord,
+  ListTreesInput,
+  PlanAttentionRecord,
+  PlanRegistry,
+  PlanRegistryErrorCode,
+  PlanRevisionRecord,
+  ProposePlanInput,
+  RepairPlanInput,
+  TaskNodeOutputRecord,
+  TaskNodeRecord,
+  TreeBudgetRecord,
+  TreeRecord,
+  TreeSummaryRecord,
+} from "./sqlite/plan-registry.js";
 export { openHostDatabase, openSupervisorDatabase } from "./sqlite/database.js";
 export type {
   ManagedSqliteDatabase,
