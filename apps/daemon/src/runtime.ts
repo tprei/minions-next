@@ -22,6 +22,7 @@ import {
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
   createSqliteTranscriptStore,
+  createSqliteVcsChangeBindingStore,
   createSecureIdGenerator,
   createSupervisorHostRegistry,
   daemonLifecyclePath,
@@ -48,6 +49,7 @@ import {
   type RepositoryRegistry,
   type SupervisorHostRegistry,
   type SystemdCredsKeyMode,
+  type VcsChangeBindingStore,
 } from "@minions/adapters";
 import {
   DaemonMode,
@@ -267,6 +269,7 @@ export async function startDaemonRuntime(
   let planRegistry: PlanRegistry | undefined;
   let steeringStore: SteeringCommandStore | undefined;
   let artifactRegistry: ArtifactRegistry | undefined;
+  let vcsChangeBindingStore: VcsChangeBindingStore | undefined;
   let blobStore: ContentBlobStore | undefined;
   let localHostId: HostId | undefined;
   let server: RunningDaemonServer | undefined;
@@ -345,6 +348,7 @@ export async function startDaemonRuntime(
         commandStore,
         hostId: activeHostId,
       });
+      vcsChangeBindingStore = createSqliteVcsChangeBindingStore({ database: hostDatabase });
       if (options.nodeExecution?.enabled) {
         const nodeExecution = options.nodeExecution;
         executionCoordinator = createExecutionCoordinator({
@@ -561,6 +565,7 @@ export async function startDaemonRuntime(
         eventPollIntervalMs: 1_000,
         planRegistry: requirePlanRegistry(planRegistry),
         clock: options.clock,
+        vcsChangeBindingStore: requireVcsChangeBindingStore(vcsChangeBindingStore),
         steeringStore: requireSteeringStore(steeringStore),
         artifactRegistry: requireArtifactRegistry(artifactRegistry),
         blobStore: requireBlobStore(blobStore),
@@ -582,6 +587,7 @@ export async function startDaemonRuntime(
         eventPollIntervalMs: 1_000,
         planRegistry: requirePlanRegistry(planRegistry),
         clock: options.clock,
+        vcsChangeBindingStore: requireVcsChangeBindingStore(vcsChangeBindingStore),
         steeringStore: requireSteeringStore(steeringStore),
         artifactRegistry: requireArtifactRegistry(artifactRegistry),
         blobStore: requireBlobStore(blobStore),
@@ -1239,6 +1245,15 @@ function requirePlanRegistry(value: PlanRegistry | undefined): PlanRegistry {
 function requireArtifactRegistry(value: ArtifactRegistry | undefined): ArtifactRegistry {
   if (value === undefined) {
     throw new Error("artifact registry is not initialized");
+  }
+  return value;
+}
+
+function requireVcsChangeBindingStore(
+  value: VcsChangeBindingStore | undefined,
+): VcsChangeBindingStore {
+  if (value === undefined) {
+    throw new Error("vcs change binding store is not initialized");
   }
   return value;
 }

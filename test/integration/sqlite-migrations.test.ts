@@ -704,6 +704,36 @@ function createHostV11GateReceiptsFixture(path: string, appliedAtMs: number): vo
     database.close();
   }
 }
+function createHostV12VcsChangeBindingsFixture(path: string, appliedAtMs: number): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const migration of hostMigrations.slice(0, 12)) {
+      database.exec(migration.sql);
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .run(migration.version, migration.name, migration.checksum, appliedAtMs);
+    }
+    database
+      .prepare(
+        "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      )
+      .run(planRepositoryId, planHostId, "/workspace/plan", appliedAtMs);
+    database
+      .prepare(
+        `INSERT INTO attempt_checkpoints (
+           attempt_id, node_id, sequence, phase, harness_id, session_id,
+           sandbox_instance_id, sandbox_backend_kind, sandbox_policy_digest,
+           sandbox_state, context_digest, recorded_at_ms
+         ) VALUES (?, ?, 0, 'claimed', 'harness-1', 'session-1', 'sandbox-1', 'podman', ?, 'created', ?, ?)`,
+      )
+      .run(harnessAttemptId, planRootNodeId, harnessPolicyDigest, planContentDigest, appliedAtMs);
+  } finally {
+    database.close();
+  }
+}
 
 function tamperHostV1Checksum(path: string, checksum: string): void {
   const database = new DatabaseSync(path);
@@ -1016,8 +1046,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 12,
-          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+          currentVersion: 13,
+          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1239,7 +1269,7 @@ describe("SQLite migration integration", () => {
           .prepare(
             "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
           )
-          .run(13, "future_state", "f".repeat(64), fixedTimestamp);
+          .run(14, "future_state", "f".repeat(64), fixedTimestamp);
       } finally {
         futureDatabase.close();
       }
@@ -1258,7 +1288,7 @@ describe("SQLite migration integration", () => {
       ).toEqual([
         ...expectedHistory(hostMigrations, fixedTimestamp),
         {
-          version: 13n,
+          version: 14n,
           name: "future_state",
           checksum: "f".repeat(64),
           applied_at_ms: BigInt(fixedTimestamp),
@@ -1304,8 +1334,8 @@ describe("SQLite v7 durable steering schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 12,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        currentVersion: 13,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         backupPath: null,
       });
       expect(
@@ -1379,8 +1409,8 @@ describe("SQLite v7 durable steering schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 6,
-          currentVersion: 12,
-          appliedVersions: [7, 8, 9, 10, 11, 12],
+          currentVersion: 13,
+          appliedVersions: [7, 8, 9, 10, 11, 12, 13],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1434,8 +1464,8 @@ describe("SQLite v6 scheduler lease schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 12,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        currentVersion: 13,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         backupPath: null,
       });
       expect(
@@ -1501,8 +1531,8 @@ describe("SQLite v6 scheduler lease schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 5,
-          currentVersion: 12,
-          appliedVersions: [6, 7, 8, 9, 10, 11, 12],
+          currentVersion: 13,
+          appliedVersions: [6, 7, 8, 9, 10, 11, 12, 13],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -2981,8 +3011,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 12,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        currentVersion: 13,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         backupPath: null,
       });
       expect(
@@ -3119,8 +3149,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 12,
-          appliedVersions: [8, 9, 10, 11, 12],
+          currentVersion: 13,
+          appliedVersions: [8, 9, 10, 11, 12, 13],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3221,8 +3251,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 12,
-          appliedVersions: [8, 9, 10, 11, 12],
+          currentVersion: 13,
+          appliedVersions: [8, 9, 10, 11, 12, 13],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3693,8 +3723,8 @@ describe("SQLite v10 attempt transcript schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 12,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        currentVersion: 13,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         backupPath: null,
       });
       expect(
@@ -3774,8 +3804,8 @@ describe("SQLite v10 attempt transcript schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 9,
-          currentVersion: 12,
-          appliedVersions: [10, 11, 12],
+          currentVersion: 13,
+          appliedVersions: [10, 11, 12, 13],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3881,8 +3911,8 @@ describe("SQLite v11 attempt checkpoint schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 12,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        currentVersion: 13,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         backupPath: null,
       });
       expect(
@@ -3968,8 +3998,8 @@ describe("SQLite v11 attempt checkpoint schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 10,
-          currentVersion: 12,
-          appliedVersions: [11, 12],
+          currentVersion: 13,
+          appliedVersions: [11, 12, 13],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -4172,8 +4202,8 @@ describe("SQLite v12 gate receipts schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 12,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        currentVersion: 13,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         backupPath: null,
       });
       expect(
@@ -4301,8 +4331,8 @@ describe("SQLite v12 gate receipts schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 11,
-          currentVersion: 12,
-          appliedVersions: [12],
+          currentVersion: 13,
+          appliedVersions: [12, 13],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -4474,6 +4504,394 @@ describe("SQLite v12 gate receipts schema", () => {
           reader.get("SELECT COUNT(*) AS receipts FROM gate_receipts"),
         ),
       ).toEqual({ receipts: 1n });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+});
+describe("SQLite v13 vcs change bindings schema", () => {
+  it("creates vcs change bindings table, indexes, and triggers on a fresh host database", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      expect(temporary.database.migration).toEqual({
+        databaseKind: "host",
+        previousVersion: 0,
+        currentVersion: 13,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        backupPath: null,
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader.all(
+            `SELECT type, name
+               FROM sqlite_schema
+              WHERE name IN (
+                'vcs_change_bindings',
+                'vcs_change_bindings_tree_change',
+                'vcs_change_bindings_tree_commit',
+                'vcs_change_binding_identity_is_immutable',
+                'vcs_change_binding_rewrite_is_monotonic',
+                'vcs_change_binding_is_durable'
+              )
+              ORDER BY type, name`,
+          ),
+        ),
+      ).toEqual([
+        { type: "index", name: "vcs_change_bindings_tree_change" },
+        { type: "index", name: "vcs_change_bindings_tree_commit" },
+        { type: "table", name: "vcs_change_bindings" },
+        { type: "trigger", name: "vcs_change_binding_identity_is_immutable" },
+        { type: "trigger", name: "vcs_change_binding_is_durable" },
+        { type: "trigger", name: "vcs_change_binding_rewrite_is_monotonic" },
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA table_info(vcs_change_bindings)")
+            .all()
+            .map((row) => [row["name"], row["type"], row["notnull"], row["pk"]]),
+        ),
+      ).toEqual([
+        ["tree_id", "TEXT", 1n, 1n],
+        ["node_id", "TEXT", 1n, 2n],
+        ["jj_change_id", "TEXT", 1n, 0n],
+        ["current_commit_id", "TEXT", 1n, 0n],
+        ["parent_change_id", "TEXT", 0n, 0n],
+        ["bookmark", "TEXT", 0n, 0n],
+        ["rewrite_generation", "INTEGER", 1n, 0n],
+        ["last_jj_operation_id", "TEXT", 1n, 0n],
+        ["last_pushed_commit_id", "TEXT", 0n, 0n],
+        ["last_reviewed_commit_id", "TEXT", 0n, 0n],
+        ["conflict_state", "TEXT", 1n, 0n],
+        ["recorded_at_ms", "INTEGER", 1n, 0n],
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA index_info(vcs_change_bindings_tree_change)")
+            .all()
+            .map((row) => [row["seqno"], row["name"]]),
+        ),
+      ).toEqual([
+        [0n, "tree_id"],
+        [1n, "jj_change_id"],
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA index_info(vcs_change_bindings_tree_commit)")
+            .all()
+            .map((row) => [row["seqno"], row["name"]]),
+        ),
+      ).toEqual([
+        [0n, "tree_id"],
+        [1n, "current_commit_id"],
+      ]);
+      const tableSql = temporary.database.read(
+        (reader) =>
+          reader.get(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'vcs_change_bindings'",
+          )?.["sql"],
+      );
+      expect(tableSql).toEqual(expect.stringContaining("STRICT"));
+      expect(tableSql).toEqual(expect.stringContaining("length(tree_id) = 36"));
+      expect(tableSql).toEqual(expect.stringContaining("length(node_id) = 36"));
+      expect(tableSql).toEqual(expect.stringContaining("length(jj_change_id) = 64"));
+      expect(tableSql).toEqual(expect.stringContaining("jj_change_id NOT GLOB '*[^0-9a-f]*'"));
+      expect(tableSql).toEqual(expect.stringContaining("length(current_commit_id) IN (40, 64)"));
+      expect(tableSql).toEqual(expect.stringContaining("current_commit_id NOT GLOB '*[^0-9a-f]*'"));
+      expect(tableSql).toEqual(expect.stringContaining("parent_change_id IS NULL"));
+      expect(tableSql).toEqual(expect.stringContaining("length(parent_change_id) = 64"));
+      expect(tableSql).toEqual(expect.stringContaining("bookmark IS NULL OR length(bookmark) > 0"));
+      expect(tableSql).toEqual(expect.stringContaining("rewrite_generation >= 0"));
+      expect(tableSql).toEqual(expect.stringContaining("length(last_jj_operation_id) = 64"));
+      expect(tableSql).toEqual(expect.stringContaining("last_jj_operation_id NOT GLOB"));
+      expect(tableSql).toEqual(
+        expect.stringContaining("conflict_state IN ('clean', 'conflict', 'resolved')"),
+      );
+      expect(tableSql).toEqual(expect.stringContaining("recorded_at_ms >= 0"));
+      expect(tableSql).toEqual(expect.stringContaining("PRIMARY KEY (tree_id, node_id)"));
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT COUNT(*) AS bindings FROM vcs_change_bindings"),
+        ),
+      ).toEqual({ bindings: 0n });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+
+  it("upgrades a v12 host database and preserves existing rows", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-vcs-change-binding-migration-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV12VcsChangeBindingsFixture(path, fixedTimestamp);
+      const database = await openHostDatabase({
+        path,
+        clock: new FixedClock(fixedTimestamp),
+        backupPath,
+      });
+      try {
+        expect(database.migration).toEqual({
+          databaseKind: "host",
+          previousVersion: 12,
+          currentVersion: 13,
+          appliedVersions: [13],
+          backupPath: resolve(backupPath),
+        });
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT id, host_id, root_path, version FROM repositories WHERE id = ?", [
+              planRepositoryId,
+            ]),
+          ),
+        ).toEqual({
+          id: planRepositoryId,
+          host_id: planHostId,
+          root_path: "/workspace/plan",
+          version: 0n,
+        });
+        expect(
+          database.read((reader) =>
+            reader.get(
+              "SELECT attempt_id, node_id, phase, sandbox_state FROM attempt_checkpoints WHERE attempt_id = ?",
+              [harnessAttemptId],
+            ),
+          ),
+        ).toEqual({
+          attempt_id: harnessAttemptId,
+          node_id: planRootNodeId,
+          phase: "claimed",
+          sandbox_state: "created",
+        });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'vcs_change_bindings'",
+            ),
+          ),
+        ).toEqual([{ name: "vcs_change_bindings" }]);
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT COUNT(*) AS bindings FROM vcs_change_bindings"),
+          ),
+        ).toEqual({ bindings: 0n });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            ),
+          ),
+        ).toEqual(expectedHistory(hostMigrations, fixedTimestamp));
+      } finally {
+        await database.close();
+      }
+      expect(
+        withReadOnlyDatabase(backupPath, (backup) =>
+          backup
+            .prepare(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            )
+            .all(),
+        ),
+      ).toEqual(expectedHistory(hostMigrations.slice(0, 12), fixedTimestamp));
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("enforces composite identity, rewrite monotonicity, durability, and column checks", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      const insertBinding = (
+        overrides: {
+          tree_id?: string;
+          node_id?: string;
+          jj_change_id?: string;
+          current_commit_id?: string;
+          parent_change_id?: string | null;
+          bookmark?: string | null;
+          rewrite_generation?: number;
+          last_jj_operation_id?: string;
+          last_pushed_commit_id?: string | null;
+          last_reviewed_commit_id?: string | null;
+          conflict_state?: string;
+          recorded_at_ms?: number;
+        } = {},
+      ): Promise<void> => {
+        const values = {
+          tree_id: planTreeId,
+          node_id: planRootNodeId,
+          jj_change_id: planContentDigest,
+          current_commit_id: planBaseCommit,
+          parent_change_id: null,
+          bookmark: null,
+          rewrite_generation: 0,
+          last_jj_operation_id: harnessPolicyDigest,
+          last_pushed_commit_id: null,
+          last_reviewed_commit_id: null,
+          conflict_state: "clean",
+          recorded_at_ms: fixedTimestamp,
+          ...overrides,
+        };
+        return temporary.database.write((transaction) => {
+          transaction.run(
+            `INSERT INTO vcs_change_bindings (
+               tree_id, node_id, jj_change_id, current_commit_id, parent_change_id,
+               bookmark, rewrite_generation, last_jj_operation_id, last_pushed_commit_id,
+               last_reviewed_commit_id, conflict_state, recorded_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              values.tree_id,
+              values.node_id,
+              values.jj_change_id,
+              values.current_commit_id,
+              values.parent_change_id,
+              values.bookmark,
+              values.rewrite_generation,
+              values.last_jj_operation_id,
+              values.last_pushed_commit_id,
+              values.last_reviewed_commit_id,
+              values.conflict_state,
+              values.recorded_at_ms,
+            ],
+          );
+        });
+      };
+      await insertBinding();
+      // Identity immutability: the composite key (tree_id, node_id) never moves.
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE vcs_change_bindings SET tree_id = ? WHERE node_id = ?", [
+              "01900000-0000-7000-8000-000000000099",
+              planRootNodeId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE vcs_change_bindings SET node_id = ? WHERE tree_id = ?", [
+              "01900000-0000-7000-8000-000000000099",
+              planTreeId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      // Rewrite monotonicity: generation may increase, but never decrease.
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          "UPDATE vcs_change_bindings SET rewrite_generation = ? WHERE tree_id = ? AND node_id = ?",
+          [1, planTreeId, planRootNodeId],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              "UPDATE vcs_change_bindings SET rewrite_generation = ? WHERE tree_id = ? AND node_id = ?",
+              [0, planTreeId, planRootNodeId],
+            );
+          }),
+        "transaction_failed",
+      );
+      // Durability: bindings are never deleted.
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM vcs_change_bindings WHERE tree_id = ? AND node_id = ?", [
+              planTreeId,
+              planRootNodeId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      // Composite PK: a second row with the same (tree_id, node_id) is rejected.
+      await expectSqliteFailure(() => insertBinding(), "transaction_failed");
+      await expectSqliteFailure(
+        () => insertBinding({ tree_id: "too-short" }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000042",
+            jj_change_id: "b".repeat(63),
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000043",
+            jj_change_id: "g".repeat(64),
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000044",
+            current_commit_id: "a".repeat(39),
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000045",
+            parent_change_id: "a".repeat(63),
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000046",
+            bookmark: "",
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000047",
+            last_jj_operation_id: "g".repeat(64),
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000048",
+            rewrite_generation: -1,
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000049",
+            conflict_state: "bogus",
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          insertBinding({
+            node_id: "01900000-0000-7000-8000-000000000050",
+            recorded_at_ms: -1,
+          }),
+        "transaction_failed",
+      );
+      expect(
+        temporary.database.read((reader) =>
+          reader.get("SELECT COUNT(*) AS bindings FROM vcs_change_bindings"),
+        ),
+      ).toEqual({ bindings: 1n });
     } finally {
       await temporary.dispose();
     }

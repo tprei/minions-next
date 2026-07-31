@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file minions/v1/tree.proto.
  */
 export const file_minions_v1_tree: GenFile = /*@__PURE__*/
-  fileDesc("ChVtaW5pb25zL3YxL3RyZWUucHJvdG8SCm1pbmlvbnMudjEirAEKClRyZWVCdWRnZXQSGgoJbWF4X2RlcHRoGAEgASgNQge6SAQqAigBEhwKC21heF9mYW5fb3V0GAIgASgNQge6SAQqAigBEhoKCW1heF9ub2RlcxgDIAEoDUIHukgEKgIoARIgCg9tYXhfY29uY3VycmVuY3kYBCABKA1CB7pIBCoCKAESJgoVbWF4X2F0dGVtcHRzX3Blcl9ub2RlGAUgASgNQge6SAQqAigBIisKCk5vZGVCdWRnZXQSHQoMbWF4X2F0dGVtcHRzGAEgASgNQge6SAQqAigBIlAKDUFydGlmYWN0SW5wdXQSHQoLYXJ0aWZhY3RfaWQYASABKAlCCLpIBXIDsAEBEiAKDnNvdXJjZV9ub2RlX2lkGAIgASgJQgi6SAVyA7ABASJXChZBcnRpZmFjdE91dHB1dENvbnRyYWN0Eh0KC2FydGlmYWN0X2lkGAEgASgJQgi6SAVyA7ABARIeCg1hcnRpZmFjdF90eXBlGAIgASgJQge6SARyAhABIh4KHEltcGxlbWVudGF0aW9uT3V0cHV0Q29udHJhY3Qi/AMKDFByb3Bvc2VkTm9kZRIZCgdub2RlX2lkGAEgASgJQgi6SAVyA7ABARIlCg5wYXJlbnRfbm9kZV9pZBgCIAEoCUIIukgFcgOwAQFIAYgBARIyCgRtb2RlGAMgASgOMhgubWluaW9ucy52MS5QbGFuTm9kZU1vZGVCCrpIB4IBBBABIAASGgoJb2JqZWN0aXZlGAQgASgJQge6SARyAhABEisKE2FjY2VwdGFuY2VfY3JpdGVyaWEYBSADKAlCDrpIC5IBCAgBIgRyAhABEikKBmlucHV0cxgGIAMoCzIZLm1pbmlvbnMudjEuQXJ0aWZhY3RJbnB1dBI2CghhcnRpZmFjdBgHIAEoCzIiLm1pbmlvbnMudjEuQXJ0aWZhY3RPdXRwdXRDb250cmFjdEgAEkIKDmltcGxlbWVudGF0aW9uGAggASgLMigubWluaW9ucy52MS5JbXBsZW1lbnRhdGlvbk91dHB1dENvbnRyYWN0SAASNgoYYWxsb3dlZF9yZXBvc2l0b3J5X3BhdGhzGAkgAygJQhS6SBGSAQ4IARCAASIHcgUQARiABBIhCg1jaGVja19wcm9maWxlGAogASgJQgq6SAdyBRABGIAEQhgKD291dHB1dF9jb250cmFjdBIFukgCCAFCEQoPX3BhcmVudF9ub2RlX2lkIoMDCgxQbGFuUmV2aXNpb24SFAoCaWQYASABKAlCCLpIBXIDsAEBEhkKB3RyZWVfaWQYAiABKAlCCLpIBXIDsAEBEhgKB29yZGluYWwYAyABKARCB7pIBDICKAESFQoEZ29hbBgEIAEoCUIHukgEcgIQARI4CgVzdGF0ZRgFIAEoDjIdLm1pbmlvbnMudjEuUGxhblJldmlzaW9uU3RhdGVCCrpIB4IBBBABIAASDwoHdmVyc2lvbhgGIAEoBBI2CgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEjQKC2FwcHJvdmVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgAiAEBEjYKDXN1cGVyc2VkZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSAGIAQFCDgoMX2FwcHJvdmVkX2F0QhAKDl9zdXBlcnNlZGVkX2F0ItEGCghUYXNrTm9kZRIUCgJpZBgBIAEoCUIIukgFcgOwAQESGQoHdHJlZV9pZBgCIAEoCUIIukgFcgOwAQESHwoNcmVwb3NpdG9yeV9pZBgDIAEoCUIIukgFcgOwAQESGQoHaG9zdF9pZBgEIAEoCUIIukgFcgOwAQESJQoOcGFyZW50X25vZGVfaWQYBSABKAlCCLpIBXIDsAEBSAGIAQESIgoQcGxhbl9yZXZpc2lvbl9pZBgGIAEoCUIIukgFcgOwAQESMgoEbW9kZRgHIAEoDjIYLm1pbmlvbnMudjEuUGxhbk5vZGVNb2RlQgq6SAeCAQQQASAAEhoKCW9iamVjdGl2ZRgIIAEoCUIHukgEcgIQARIrChNhY2NlcHRhbmNlX2NyaXRlcmlhGAkgAygJQg66SAuSAQgIASIEcgIQARIpCgZpbnB1dHMYCiADKAsyGS5taW5pb25zLnYxLkFydGlmYWN0SW5wdXQSNgoIYXJ0aWZhY3QYCyABKAsyIi5taW5pb25zLnYxLkFydGlmYWN0T3V0cHV0Q29udHJhY3RIABJCCg5pbXBsZW1lbnRhdGlvbhgMIAEoCzIoLm1pbmlvbnMudjEuSW1wbGVtZW50YXRpb25PdXRwdXRDb250cmFjdEgAEjAKBXN0YXRlGA0gASgOMhUubWluaW9ucy52MS5Ob2RlU3RhdGVCCrpIB4IBBBABIAASDwoHdmVyc2lvbhgOIAEoBBI2CgpjcmVhdGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEjYKCnVwZGF0ZWRfYXQYECABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESNgoYYWxsb3dlZF9yZXBvc2l0b3J5X3BhdGhzGBEgAygJQhS6SBGSAQ4IARCAASIHcgUQARiABBIhCg1jaGVja19wcm9maWxlGBIgASgJQgq6SAdyBRABGIAEEi4KBmJ1ZGdldBgTIAEoCzIWLm1pbmlvbnMudjEuTm9kZUJ1ZGdldEIGukgDyAEBQhgKD291dHB1dF9jb250cmFjdBIFukgCCAFCEQoPX3BhcmVudF9ub2RlX2lkIooDCg1QbGFuQXR0ZW50aW9uEhQKAmlkGAEgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAIgASgJQgi6SAVyA7ABARInChBwbGFuX3JldmlzaW9uX2lkGAMgASgJQgi6SAVyA7ABAUgAiAEBEjcKBGtpbmQYBCABKA4yHS5taW5pb25zLnYxLlBsYW5BdHRlbnRpb25LaW5kQgq6SAeCAQQQASAAEhgKB21lc3NhZ2UYBSABKAlCB7pIBHICEAESOQoFc3RhdGUYBiABKA4yHi5taW5pb25zLnYxLlBsYW5BdHRlbnRpb25TdGF0ZUIKukgHggEEEAEgABI2CgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEjQKC3Jlc29sdmVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBQhMKEV9wbGFuX3JldmlzaW9uX2lkQg4KDF9yZXNvbHZlZF9hdCLvBAoIVGFza1RyZWUSFAoCaWQYASABKAlCCLpIBXIDsAEBEh8KDXJlcG9zaXRvcnlfaWQYAiABKAlCCLpIBXIDsAEBEhkKB2hvc3RfaWQYAyABKAlCCLpIBXIDsAEBEjkKC2Jhc2VfY29tbWl0GAQgASgJQiS6SCFyHzIdXlswLTlhLWZdezQwfShbMC05YS1mXXsyNH0pPyQSFQoEZ29hbBgFIAEoCUIHukgEcgIQARIpChdhY3RpdmVfcGxhbl9yZXZpc2lvbl9pZBgGIAEoCUIIukgFcgOwAQESHgoMcm9vdF9ub2RlX2lkGAcgASgJQgi6SAVyA7ABARIwCgVzdGF0ZRgIIAEoDjIVLm1pbmlvbnMudjEuVHJlZVN0YXRlQgq6SAeCAQQQASAAEg8KB3ZlcnNpb24YCSABKAQSNgoKY3JlYXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI2Cgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEisKCXJldmlzaW9ucxgMIAMoCzIYLm1pbmlvbnMudjEuUGxhblJldmlzaW9uEiMKBW5vZGVzGA0gAygLMhQubWluaW9ucy52MS5UYXNrTm9kZRIuCgZidWRnZXQYDiABKAsyFi5taW5pb25zLnYxLlRyZWVCdWRnZXRCBrpIA8gBARIxCglhdHRlbnRpb24YDyABKAsyGS5taW5pb25zLnYxLlBsYW5BdHRlbnRpb25IAIgBAUIMCgpfYXR0ZW50aW9uIoAEChFDcmVhdGVUcmVlUmVxdWVzdBIcCgpjb21tYW5kX2lkGAEgASgJQgi6SAVyA7ABARIiChBhY3Rvcl9zZXNzaW9uX2lkGAIgASgJQgi6SAVyA7ABARIfCg1yZXBvc2l0b3J5X2lkGAMgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAQgASgJQgi6SAVyA7ABARIiChBwbGFuX3JldmlzaW9uX2lkGAUgASgJQgi6SAVyA7ABARIeCgxyb290X25vZGVfaWQYBiABKAlCCLpIBXIDsAEBEiIKEHJvb3RfYXJ0aWZhY3RfaWQYByABKAlCCLpIBXIDsAEBEhUKBGdvYWwYCCABKAlCB7pIBHICEAESOQoLYmFzZV9jb21taXQYCSABKAlCJLpIIXIfMh1eWzAtOWEtZl17NDB9KFswLTlhLWZdezI0fSk/JBIuCgZidWRnZXQYCiABKAsyFi5taW5pb25zLnYxLlRyZWVCdWRnZXRCBrpIA8gBARIeCgxhdHRlbnRpb25faWQYCyABKAlCCLpIBXIDsAEBEjsKHXJvb3RfYWxsb3dlZF9yZXBvc2l0b3J5X3BhdGhzGAwgAygJQhS6SBGSAQ4IARCAASIHcgUQARiABBImChJyb290X2NoZWNrX3Byb2ZpbGUYDSABKAlCCrpIB3IFEAEYgAQiQAoSQ3JlYXRlVHJlZVJlc3BvbnNlEioKBHRyZWUYASABKAsyFC5taW5pb25zLnYxLlRhc2tUcmVlQga6SAPIAQEiKwoOR2V0VHJlZVJlcXVlc3QSGQoHdHJlZV9pZBgBIAEoCUIIukgFcgOwAQEiPQoPR2V0VHJlZVJlc3BvbnNlEioKBHRyZWUYASABKAsyFC5taW5pb25zLnYxLlRhc2tUcmVlQga6SAPIAQEiYgoQTGlzdFRyZWVzUmVxdWVzdBIcCglwYWdlX3NpemUYASABKA1CCbpIBioEGGQoARIhCgpwYWdlX3Rva2VuGAIgASgJQgi6SAVyA7ABAUgAiAEBQg0KC19wYWdlX3Rva2VuIncKEUxpc3RUcmVlc1Jlc3BvbnNlEiYKBXRyZWVzGAEgAygLMhcubWluaW9ucy52MS5UcmVlU3VtbWFyeRImCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAlCCLpIBXIDsAEBSACIAQFCEgoQX25leHRfcGFnZV90b2tlbiLfAQoSUHJvcG9zZVBsYW5SZXF1ZXN0EhwKCmNvbW1hbmRfaWQYASABKAlCCLpIBXIDsAEBEiIKEGFjdG9yX3Nlc3Npb25faWQYAiABKAlCCLpIBXIDsAEBEhkKB3RyZWVfaWQYAyABKAlCCLpIBXIDsAEBEiIKEHBsYW5fcmV2aXNpb25faWQYBCABKAlCCLpIBXIDsAEBEhUKBGdvYWwYBSABKAlCB7pIBHICEAESMQoFbm9kZXMYBiADKAsyGC5taW5pb25zLnYxLlByb3Bvc2VkTm9kZUIIukgFkgECCAEiQQoTUHJvcG9zZVBsYW5SZXNwb25zZRIqCgR0cmVlGAEgASgLMhQubWluaW9ucy52MS5UYXNrVHJlZUIGukgDyAEBIv4BChFSZXBhaXJQbGFuUmVxdWVzdBIcCgpjb21tYW5kX2lkGAEgASgJQgi6SAVyA7ABARIiChBhY3Rvcl9zZXNzaW9uX2lkGAIgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAMgASgJQgi6SAVyA7ABARIiChBwbGFuX3JldmlzaW9uX2lkGAQgASgJQgi6SAVyA7ABARIeCgxhdHRlbnRpb25faWQYBSABKAlCCLpIBXIDsAEBEhUKBGdvYWwYBiABKAlCB7pIBHICEAESMQoFbm9kZXMYByADKAsyGC5taW5pb25zLnYxLlByb3Bvc2VkTm9kZUIIukgFkgECCAEiQAoSUmVwYWlyUGxhblJlc3BvbnNlEioKBHRyZWUYASABKAsyFC5taW5pb25zLnYxLlRhc2tUcmVlQga6SAPIAQEilQEKEkFwcHJvdmVQbGFuUmVxdWVzdBIcCgpjb21tYW5kX2lkGAEgASgJQgi6SAVyA7ABARIiChBhY3Rvcl9zZXNzaW9uX2lkGAIgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAMgASgJQgi6SAVyA7ABARIiChBwbGFuX3JldmlzaW9uX2lkGAQgASgJQgi6SAVyA7ABASJBChNBcHByb3ZlUGxhblJlc3BvbnNlEioKBHRyZWUYASABKAsyFC5taW5pb25zLnYxLlRhc2tUcmVlQga6SAPIAQEqnQEKEVBsYW5SZXZpc2lvblN0YXRlEiMKH1BMQU5fUkVWSVNJT05fU1RBVEVfVU5TUEVDSUZJRUQQABIdChlQTEFOX1JFVklTSU9OX1NUQVRFX0RSQUZUEAESIAocUExBTl9SRVZJU0lPTl9TVEFURV9BUFBST1ZFRBACEiIKHlBMQU5fUkVWSVNJT05fU1RBVEVfU1VQRVJTRURFRBADKqMBCgxQbGFuTm9kZU1vZGUSHgoaUExBTl9OT0RFX01PREVfVU5TUEVDSUZJRUQQABIXChNQTEFOX05PREVfTU9ERV9QTEFOEAESGwoXUExBTl9OT0RFX01PREVfUkVTRUFSQ0gQAhIaChZQTEFOX05PREVfTU9ERV9FWFBMT1JFEAMSIQodUExBTl9OT0RFX01PREVfSU1QTEVNRU5UQVRJT04QBCquAQoRUGxhbkF0dGVudGlvbktpbmQSIwofUExBTl9BVFRFTlRJT05fS0lORF9VTlNQRUNJRklFRBAAEiUKIVBMQU5fQVRURU5USU9OX0tJTkRfUExBTl9SRVFVSVJFRBABEiQKIFBMQU5fQVRURU5USU9OX0tJTkRfUExBTl9JTlZBTElEEAISJwojUExBTl9BVFRFTlRJT05fS0lORF9SRVBBSVJfUkVRVUlSRUQQAyp8ChJQbGFuQXR0ZW50aW9uU3RhdGUSJAogUExBTl9BVFRFTlRJT05fU1RBVEVfVU5TUEVDSUZJRUQQABIdChlQTEFOX0FUVEVOVElPTl9TVEFURV9PUEVOEAESIQodUExBTl9BVFRFTlRJT05fU1RBVEVfUkVTT0xWRUQQAjLVAwoLVHJlZVNlcnZpY2USSwoKQ3JlYXRlVHJlZRIdLm1pbmlvbnMudjEuQ3JlYXRlVHJlZVJlcXVlc3QaHi5taW5pb25zLnYxLkNyZWF0ZVRyZWVSZXNwb25zZRJCCgdHZXRUcmVlEhoubWluaW9ucy52MS5HZXRUcmVlUmVxdWVzdBobLm1pbmlvbnMudjEuR2V0VHJlZVJlc3BvbnNlEkgKCUxpc3RUcmVlcxIcLm1pbmlvbnMudjEuTGlzdFRyZWVzUmVxdWVzdBodLm1pbmlvbnMudjEuTGlzdFRyZWVzUmVzcG9uc2USTgoLUHJvcG9zZVBsYW4SHi5taW5pb25zLnYxLlByb3Bvc2VQbGFuUmVxdWVzdBofLm1pbmlvbnMudjEuUHJvcG9zZVBsYW5SZXNwb25zZRJLCgpSZXBhaXJQbGFuEh0ubWluaW9ucy52MS5SZXBhaXJQbGFuUmVxdWVzdBoeLm1pbmlvbnMudjEuUmVwYWlyUGxhblJlc3BvbnNlEk4KC0FwcHJvdmVQbGFuEh4ubWluaW9ucy52MS5BcHByb3ZlUGxhblJlcXVlc3QaHy5taW5pb25zLnYxLkFwcHJvdmVQbGFuUmVzcG9uc2ViBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_minions_v1_event]);
+  fileDesc("ChVtaW5pb25zL3YxL3RyZWUucHJvdG8SCm1pbmlvbnMudjEirAEKClRyZWVCdWRnZXQSGgoJbWF4X2RlcHRoGAEgASgNQge6SAQqAigBEhwKC21heF9mYW5fb3V0GAIgASgNQge6SAQqAigBEhoKCW1heF9ub2RlcxgDIAEoDUIHukgEKgIoARIgCg9tYXhfY29uY3VycmVuY3kYBCABKA1CB7pIBCoCKAESJgoVbWF4X2F0dGVtcHRzX3Blcl9ub2RlGAUgASgNQge6SAQqAigBIisKCk5vZGVCdWRnZXQSHQoMbWF4X2F0dGVtcHRzGAEgASgNQge6SAQqAigBIlAKDUFydGlmYWN0SW5wdXQSHQoLYXJ0aWZhY3RfaWQYASABKAlCCLpIBXIDsAEBEiAKDnNvdXJjZV9ub2RlX2lkGAIgASgJQgi6SAVyA7ABASJXChZBcnRpZmFjdE91dHB1dENvbnRyYWN0Eh0KC2FydGlmYWN0X2lkGAEgASgJQgi6SAVyA7ABARIeCg1hcnRpZmFjdF90eXBlGAIgASgJQge6SARyAhABIh4KHEltcGxlbWVudGF0aW9uT3V0cHV0Q29udHJhY3Qi1gQKEFZjc0NoYW5nZUJpbmRpbmcSKwoMampfY2hhbmdlX2lkGAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSPwoRY3VycmVudF9jb21taXRfaWQYAiABKAlCJLpIIXIfMh1eWzAtOWEtZl17NDB9KFswLTlhLWZdezI0fSk/JBI0ChBwYXJlbnRfY2hhbmdlX2lkGAMgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSRIAIgBARIfCghib29rbWFyaxgEIAEoCUIIukgFcgMYgARIAYgBARIaChJyZXdyaXRlX2dlbmVyYXRpb24YBSABKA0SMwoUbGFzdF9qal9vcGVyYXRpb25faWQYBiABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBJIChVsYXN0X3B1c2hlZF9jb21taXRfaWQYByABKAlCJLpIIXIfMh1eWzAtOWEtZl17NDB9KFswLTlhLWZdezI0fSk/JEgCiAEBEkoKF2xhc3RfcmV2aWV3ZWRfY29tbWl0X2lkGAggASgJQiS6SCFyHzIdXlswLTlhLWZdezQwfShbMC05YS1mXXsyNH0pPyRIA4gBARI+Cg5jb25mbGljdF9zdGF0ZRgJIAEoDjIcLm1pbmlvbnMudjEuVmNzQ29uZmxpY3RTdGF0ZUIIukgFggECEAFCEwoRX3BhcmVudF9jaGFuZ2VfaWRCCwoJX2Jvb2ttYXJrQhgKFl9sYXN0X3B1c2hlZF9jb21taXRfaWRCGgoYX2xhc3RfcmV2aWV3ZWRfY29tbWl0X2lkIvwDCgxQcm9wb3NlZE5vZGUSGQoHbm9kZV9pZBgBIAEoCUIIukgFcgOwAQESJQoOcGFyZW50X25vZGVfaWQYAiABKAlCCLpIBXIDsAEBSAGIAQESMgoEbW9kZRgDIAEoDjIYLm1pbmlvbnMudjEuUGxhbk5vZGVNb2RlQgq6SAeCAQQQASAAEhoKCW9iamVjdGl2ZRgEIAEoCUIHukgEcgIQARIrChNhY2NlcHRhbmNlX2NyaXRlcmlhGAUgAygJQg66SAuSAQgIASIEcgIQARIpCgZpbnB1dHMYBiADKAsyGS5taW5pb25zLnYxLkFydGlmYWN0SW5wdXQSNgoIYXJ0aWZhY3QYByABKAsyIi5taW5pb25zLnYxLkFydGlmYWN0T3V0cHV0Q29udHJhY3RIABJCCg5pbXBsZW1lbnRhdGlvbhgIIAEoCzIoLm1pbmlvbnMudjEuSW1wbGVtZW50YXRpb25PdXRwdXRDb250cmFjdEgAEjYKGGFsbG93ZWRfcmVwb3NpdG9yeV9wYXRocxgJIAMoCUIUukgRkgEOCAEQgAEiB3IFEAEYgAQSIQoNY2hlY2tfcHJvZmlsZRgKIAEoCUIKukgHcgUQARiABEIYCg9vdXRwdXRfY29udHJhY3QSBbpIAggBQhEKD19wYXJlbnRfbm9kZV9pZCKDAwoMUGxhblJldmlzaW9uEhQKAmlkGAEgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAIgASgJQgi6SAVyA7ABARIYCgdvcmRpbmFsGAMgASgEQge6SAQyAigBEhUKBGdvYWwYBCABKAlCB7pIBHICEAESOAoFc3RhdGUYBSABKA4yHS5taW5pb25zLnYxLlBsYW5SZXZpc2lvblN0YXRlQgq6SAeCAQQQASAAEg8KB3ZlcnNpb24YBiABKAQSNgoKY3JlYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI0CgthcHByb3ZlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBARI2Cg1zdXBlcnNlZGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBQg4KDF9hcHByb3ZlZF9hdEIQCg5fc3VwZXJzZWRlZF9hdCKnBwoIVGFza05vZGUSFAoCaWQYASABKAlCCLpIBXIDsAEBEhkKB3RyZWVfaWQYAiABKAlCCLpIBXIDsAEBEh8KDXJlcG9zaXRvcnlfaWQYAyABKAlCCLpIBXIDsAEBEhkKB2hvc3RfaWQYBCABKAlCCLpIBXIDsAEBEiUKDnBhcmVudF9ub2RlX2lkGAUgASgJQgi6SAVyA7ABAUgBiAEBEiIKEHBsYW5fcmV2aXNpb25faWQYBiABKAlCCLpIBXIDsAEBEjIKBG1vZGUYByABKA4yGC5taW5pb25zLnYxLlBsYW5Ob2RlTW9kZUIKukgHggEEEAEgABIaCglvYmplY3RpdmUYCCABKAlCB7pIBHICEAESKwoTYWNjZXB0YW5jZV9jcml0ZXJpYRgJIAMoCUIOukgLkgEICAEiBHICEAESKQoGaW5wdXRzGAogAygLMhkubWluaW9ucy52MS5BcnRpZmFjdElucHV0EjYKCGFydGlmYWN0GAsgASgLMiIubWluaW9ucy52MS5BcnRpZmFjdE91dHB1dENvbnRyYWN0SAASQgoOaW1wbGVtZW50YXRpb24YDCABKAsyKC5taW5pb25zLnYxLkltcGxlbWVudGF0aW9uT3V0cHV0Q29udHJhY3RIABIwCgVzdGF0ZRgNIAEoDjIVLm1pbmlvbnMudjEuTm9kZVN0YXRlQgq6SAeCAQQQASAAEg8KB3ZlcnNpb24YDiABKAQSNgoKY3JlYXRlZF9hdBgPIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI2Cgp1cGRhdGVkX2F0GBAgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEjYKGGFsbG93ZWRfcmVwb3NpdG9yeV9wYXRocxgRIAMoCUIUukgRkgEOCAEQgAEiB3IFEAEYgAQSIQoNY2hlY2tfcHJvZmlsZRgSIAEoCUIKukgHcgUQARiABBIuCgZidWRnZXQYEyABKAsyFi5taW5pb25zLnYxLk5vZGVCdWRnZXRCBrpIA8gBARI9ChJ2Y3NfY2hhbmdlX2JpbmRpbmcYFCABKAsyHC5taW5pb25zLnYxLlZjc0NoYW5nZUJpbmRpbmdIAogBAUIYCg9vdXRwdXRfY29udHJhY3QSBbpIAggBQhEKD19wYXJlbnRfbm9kZV9pZEIVChNfdmNzX2NoYW5nZV9iaW5kaW5nIooDCg1QbGFuQXR0ZW50aW9uEhQKAmlkGAEgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAIgASgJQgi6SAVyA7ABARInChBwbGFuX3JldmlzaW9uX2lkGAMgASgJQgi6SAVyA7ABAUgAiAEBEjcKBGtpbmQYBCABKA4yHS5taW5pb25zLnYxLlBsYW5BdHRlbnRpb25LaW5kQgq6SAeCAQQQASAAEhgKB21lc3NhZ2UYBSABKAlCB7pIBHICEAESOQoFc3RhdGUYBiABKA4yHi5taW5pb25zLnYxLlBsYW5BdHRlbnRpb25TdGF0ZUIKukgHggEEEAEgABI2CgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEjQKC3Jlc29sdmVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBQhMKEV9wbGFuX3JldmlzaW9uX2lkQg4KDF9yZXNvbHZlZF9hdCLvBAoIVGFza1RyZWUSFAoCaWQYASABKAlCCLpIBXIDsAEBEh8KDXJlcG9zaXRvcnlfaWQYAiABKAlCCLpIBXIDsAEBEhkKB2hvc3RfaWQYAyABKAlCCLpIBXIDsAEBEjkKC2Jhc2VfY29tbWl0GAQgASgJQiS6SCFyHzIdXlswLTlhLWZdezQwfShbMC05YS1mXXsyNH0pPyQSFQoEZ29hbBgFIAEoCUIHukgEcgIQARIpChdhY3RpdmVfcGxhbl9yZXZpc2lvbl9pZBgGIAEoCUIIukgFcgOwAQESHgoMcm9vdF9ub2RlX2lkGAcgASgJQgi6SAVyA7ABARIwCgVzdGF0ZRgIIAEoDjIVLm1pbmlvbnMudjEuVHJlZVN0YXRlQgq6SAeCAQQQASAAEg8KB3ZlcnNpb24YCSABKAQSNgoKY3JlYXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI2Cgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEisKCXJldmlzaW9ucxgMIAMoCzIYLm1pbmlvbnMudjEuUGxhblJldmlzaW9uEiMKBW5vZGVzGA0gAygLMhQubWluaW9ucy52MS5UYXNrTm9kZRIuCgZidWRnZXQYDiABKAsyFi5taW5pb25zLnYxLlRyZWVCdWRnZXRCBrpIA8gBARIxCglhdHRlbnRpb24YDyABKAsyGS5taW5pb25zLnYxLlBsYW5BdHRlbnRpb25IAIgBAUIMCgpfYXR0ZW50aW9uIoAEChFDcmVhdGVUcmVlUmVxdWVzdBIcCgpjb21tYW5kX2lkGAEgASgJQgi6SAVyA7ABARIiChBhY3Rvcl9zZXNzaW9uX2lkGAIgASgJQgi6SAVyA7ABARIfCg1yZXBvc2l0b3J5X2lkGAMgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAQgASgJQgi6SAVyA7ABARIiChBwbGFuX3JldmlzaW9uX2lkGAUgASgJQgi6SAVyA7ABARIeCgxyb290X25vZGVfaWQYBiABKAlCCLpIBXIDsAEBEiIKEHJvb3RfYXJ0aWZhY3RfaWQYByABKAlCCLpIBXIDsAEBEhUKBGdvYWwYCCABKAlCB7pIBHICEAESOQoLYmFzZV9jb21taXQYCSABKAlCJLpIIXIfMh1eWzAtOWEtZl17NDB9KFswLTlhLWZdezI0fSk/JBIuCgZidWRnZXQYCiABKAsyFi5taW5pb25zLnYxLlRyZWVCdWRnZXRCBrpIA8gBARIeCgxhdHRlbnRpb25faWQYCyABKAlCCLpIBXIDsAEBEjsKHXJvb3RfYWxsb3dlZF9yZXBvc2l0b3J5X3BhdGhzGAwgAygJQhS6SBGSAQ4IARCAASIHcgUQARiABBImChJyb290X2NoZWNrX3Byb2ZpbGUYDSABKAlCCrpIB3IFEAEYgAQiQAoSQ3JlYXRlVHJlZVJlc3BvbnNlEioKBHRyZWUYASABKAsyFC5taW5pb25zLnYxLlRhc2tUcmVlQga6SAPIAQEiKwoOR2V0VHJlZVJlcXVlc3QSGQoHdHJlZV9pZBgBIAEoCUIIukgFcgOwAQEiPQoPR2V0VHJlZVJlc3BvbnNlEioKBHRyZWUYASABKAsyFC5taW5pb25zLnYxLlRhc2tUcmVlQga6SAPIAQEiYgoQTGlzdFRyZWVzUmVxdWVzdBIcCglwYWdlX3NpemUYASABKA1CCbpIBioEGGQoARIhCgpwYWdlX3Rva2VuGAIgASgJQgi6SAVyA7ABAUgAiAEBQg0KC19wYWdlX3Rva2VuIncKEUxpc3RUcmVlc1Jlc3BvbnNlEiYKBXRyZWVzGAEgAygLMhcubWluaW9ucy52MS5UcmVlU3VtbWFyeRImCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAlCCLpIBXIDsAEBSACIAQFCEgoQX25leHRfcGFnZV90b2tlbiLfAQoSUHJvcG9zZVBsYW5SZXF1ZXN0EhwKCmNvbW1hbmRfaWQYASABKAlCCLpIBXIDsAEBEiIKEGFjdG9yX3Nlc3Npb25faWQYAiABKAlCCLpIBXIDsAEBEhkKB3RyZWVfaWQYAyABKAlCCLpIBXIDsAEBEiIKEHBsYW5fcmV2aXNpb25faWQYBCABKAlCCLpIBXIDsAEBEhUKBGdvYWwYBSABKAlCB7pIBHICEAESMQoFbm9kZXMYBiADKAsyGC5taW5pb25zLnYxLlByb3Bvc2VkTm9kZUIIukgFkgECCAEiQQoTUHJvcG9zZVBsYW5SZXNwb25zZRIqCgR0cmVlGAEgASgLMhQubWluaW9ucy52MS5UYXNrVHJlZUIGukgDyAEBIv4BChFSZXBhaXJQbGFuUmVxdWVzdBIcCgpjb21tYW5kX2lkGAEgASgJQgi6SAVyA7ABARIiChBhY3Rvcl9zZXNzaW9uX2lkGAIgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAMgASgJQgi6SAVyA7ABARIiChBwbGFuX3JldmlzaW9uX2lkGAQgASgJQgi6SAVyA7ABARIeCgxhdHRlbnRpb25faWQYBSABKAlCCLpIBXIDsAEBEhUKBGdvYWwYBiABKAlCB7pIBHICEAESMQoFbm9kZXMYByADKAsyGC5taW5pb25zLnYxLlByb3Bvc2VkTm9kZUIIukgFkgECCAEiQAoSUmVwYWlyUGxhblJlc3BvbnNlEioKBHRyZWUYASABKAsyFC5taW5pb25zLnYxLlRhc2tUcmVlQga6SAPIAQEilQEKEkFwcHJvdmVQbGFuUmVxdWVzdBIcCgpjb21tYW5kX2lkGAEgASgJQgi6SAVyA7ABARIiChBhY3Rvcl9zZXNzaW9uX2lkGAIgASgJQgi6SAVyA7ABARIZCgd0cmVlX2lkGAMgASgJQgi6SAVyA7ABARIiChBwbGFuX3JldmlzaW9uX2lkGAQgASgJQgi6SAVyA7ABASJBChNBcHByb3ZlUGxhblJlc3BvbnNlEioKBHRyZWUYASABKAsyFC5taW5pb25zLnYxLlRhc2tUcmVlQga6SAPIAQEqnQEKEVBsYW5SZXZpc2lvblN0YXRlEiMKH1BMQU5fUkVWSVNJT05fU1RBVEVfVU5TUEVDSUZJRUQQABIdChlQTEFOX1JFVklTSU9OX1NUQVRFX0RSQUZUEAESIAocUExBTl9SRVZJU0lPTl9TVEFURV9BUFBST1ZFRBACEiIKHlBMQU5fUkVWSVNJT05fU1RBVEVfU1VQRVJTRURFRBADKqMBCgxQbGFuTm9kZU1vZGUSHgoaUExBTl9OT0RFX01PREVfVU5TUEVDSUZJRUQQABIXChNQTEFOX05PREVfTU9ERV9QTEFOEAESGwoXUExBTl9OT0RFX01PREVfUkVTRUFSQ0gQAhIaChZQTEFOX05PREVfTU9ERV9FWFBMT1JFEAMSIQodUExBTl9OT0RFX01PREVfSU1QTEVNRU5UQVRJT04QBCquAQoRUGxhbkF0dGVudGlvbktpbmQSIwofUExBTl9BVFRFTlRJT05fS0lORF9VTlNQRUNJRklFRBAAEiUKIVBMQU5fQVRURU5USU9OX0tJTkRfUExBTl9SRVFVSVJFRBABEiQKIFBMQU5fQVRURU5USU9OX0tJTkRfUExBTl9JTlZBTElEEAISJwojUExBTl9BVFRFTlRJT05fS0lORF9SRVBBSVJfUkVRVUlSRUQQAyp8ChJQbGFuQXR0ZW50aW9uU3RhdGUSJAogUExBTl9BVFRFTlRJT05fU1RBVEVfVU5TUEVDSUZJRUQQABIdChlQTEFOX0FUVEVOVElPTl9TVEFURV9PUEVOEAESIQodUExBTl9BVFRFTlRJT05fU1RBVEVfUkVTT0xWRUQQAiqWAQoQVmNzQ29uZmxpY3RTdGF0ZRIiCh5WQ1NfQ09ORkxJQ1RfU1RBVEVfVU5TUEVDSUZJRUQQABIcChhWQ1NfQ09ORkxJQ1RfU1RBVEVfQ0xFQU4QARIfChtWQ1NfQ09ORkxJQ1RfU1RBVEVfQ09ORkxJQ1QQAhIfChtWQ1NfQ09ORkxJQ1RfU1RBVEVfUkVTT0xWRUQQAzLVAwoLVHJlZVNlcnZpY2USSwoKQ3JlYXRlVHJlZRIdLm1pbmlvbnMudjEuQ3JlYXRlVHJlZVJlcXVlc3QaHi5taW5pb25zLnYxLkNyZWF0ZVRyZWVSZXNwb25zZRJCCgdHZXRUcmVlEhoubWluaW9ucy52MS5HZXRUcmVlUmVxdWVzdBobLm1pbmlvbnMudjEuR2V0VHJlZVJlc3BvbnNlEkgKCUxpc3RUcmVlcxIcLm1pbmlvbnMudjEuTGlzdFRyZWVzUmVxdWVzdBodLm1pbmlvbnMudjEuTGlzdFRyZWVzUmVzcG9uc2USTgoLUHJvcG9zZVBsYW4SHi5taW5pb25zLnYxLlByb3Bvc2VQbGFuUmVxdWVzdBofLm1pbmlvbnMudjEuUHJvcG9zZVBsYW5SZXNwb25zZRJLCgpSZXBhaXJQbGFuEh0ubWluaW9ucy52MS5SZXBhaXJQbGFuUmVxdWVzdBoeLm1pbmlvbnMudjEuUmVwYWlyUGxhblJlc3BvbnNlEk4KC0FwcHJvdmVQbGFuEh4ubWluaW9ucy52MS5BcHByb3ZlUGxhblJlcXVlc3QaHy5taW5pb25zLnYxLkFwcHJvdmVQbGFuUmVzcG9uc2ViBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_minions_v1_event]);
 
 /**
  * @generated from message minions.v1.TreeBudget
@@ -129,6 +129,63 @@ export const ImplementationOutputContractSchema: GenMessage<ImplementationOutput
   messageDesc(file_minions_v1_tree, 4);
 
 /**
+ * @generated from message minions.v1.VcsChangeBinding
+ */
+export type VcsChangeBinding = Message<"minions.v1.VcsChangeBinding"> & {
+  /**
+   * @generated from field: string jj_change_id = 1;
+   */
+  jjChangeId: string;
+
+  /**
+   * @generated from field: string current_commit_id = 2;
+   */
+  currentCommitId: string;
+
+  /**
+   * @generated from field: optional string parent_change_id = 3;
+   */
+  parentChangeId?: string | undefined;
+
+  /**
+   * @generated from field: optional string bookmark = 4;
+   */
+  bookmark?: string | undefined;
+
+  /**
+   * @generated from field: uint32 rewrite_generation = 5;
+   */
+  rewriteGeneration: number;
+
+  /**
+   * @generated from field: string last_jj_operation_id = 6;
+   */
+  lastJjOperationId: string;
+
+  /**
+   * @generated from field: optional string last_pushed_commit_id = 7;
+   */
+  lastPushedCommitId?: string | undefined;
+
+  /**
+   * @generated from field: optional string last_reviewed_commit_id = 8;
+   */
+  lastReviewedCommitId?: string | undefined;
+
+  /**
+   * @generated from field: minions.v1.VcsConflictState conflict_state = 9;
+   */
+  conflictState: VcsConflictState;
+};
+
+/**
+ * Describes the message minions.v1.VcsChangeBinding.
+ * Use `create(VcsChangeBindingSchema)` to create a new message.
+ */
+export const VcsChangeBindingSchema: GenMessage<VcsChangeBinding> = /*@__PURE__*/
+  messageDesc(file_minions_v1_tree, 5);
+
+/**
  * @generated from message minions.v1.ProposedNode
  */
 export type ProposedNode = Message<"minions.v1.ProposedNode"> & {
@@ -195,7 +252,7 @@ export type ProposedNode = Message<"minions.v1.ProposedNode"> & {
  * Use `create(ProposedNodeSchema)` to create a new message.
  */
 export const ProposedNodeSchema: GenMessage<ProposedNode> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 5);
+  messageDesc(file_minions_v1_tree, 6);
 
 /**
  * @generated from message minions.v1.PlanRevision
@@ -252,7 +309,7 @@ export type PlanRevision = Message<"minions.v1.PlanRevision"> & {
  * Use `create(PlanRevisionSchema)` to create a new message.
  */
 export const PlanRevisionSchema: GenMessage<PlanRevision> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 6);
+  messageDesc(file_minions_v1_tree, 7);
 
 /**
  * @generated from message minions.v1.TaskNode
@@ -359,6 +416,11 @@ export type TaskNode = Message<"minions.v1.TaskNode"> & {
    * @generated from field: minions.v1.NodeBudget budget = 19;
    */
   budget?: NodeBudget | undefined;
+
+  /**
+   * @generated from field: optional minions.v1.VcsChangeBinding vcs_change_binding = 20;
+   */
+  vcsChangeBinding?: VcsChangeBinding | undefined;
 };
 
 /**
@@ -366,7 +428,7 @@ export type TaskNode = Message<"minions.v1.TaskNode"> & {
  * Use `create(TaskNodeSchema)` to create a new message.
  */
 export const TaskNodeSchema: GenMessage<TaskNode> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 7);
+  messageDesc(file_minions_v1_tree, 8);
 
 /**
  * @generated from message minions.v1.PlanAttention
@@ -418,7 +480,7 @@ export type PlanAttention = Message<"minions.v1.PlanAttention"> & {
  * Use `create(PlanAttentionSchema)` to create a new message.
  */
 export const PlanAttentionSchema: GenMessage<PlanAttention> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 8);
+  messageDesc(file_minions_v1_tree, 9);
 
 /**
  * @generated from message minions.v1.TaskTree
@@ -505,7 +567,7 @@ export type TaskTree = Message<"minions.v1.TaskTree"> & {
  * Use `create(TaskTreeSchema)` to create a new message.
  */
 export const TaskTreeSchema: GenMessage<TaskTree> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 9);
+  messageDesc(file_minions_v1_tree, 10);
 
 /**
  * @generated from message minions.v1.CreateTreeRequest
@@ -582,7 +644,7 @@ export type CreateTreeRequest = Message<"minions.v1.CreateTreeRequest"> & {
  * Use `create(CreateTreeRequestSchema)` to create a new message.
  */
 export const CreateTreeRequestSchema: GenMessage<CreateTreeRequest> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 10);
+  messageDesc(file_minions_v1_tree, 11);
 
 /**
  * @generated from message minions.v1.CreateTreeResponse
@@ -599,7 +661,7 @@ export type CreateTreeResponse = Message<"minions.v1.CreateTreeResponse"> & {
  * Use `create(CreateTreeResponseSchema)` to create a new message.
  */
 export const CreateTreeResponseSchema: GenMessage<CreateTreeResponse> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 11);
+  messageDesc(file_minions_v1_tree, 12);
 
 /**
  * @generated from message minions.v1.GetTreeRequest
@@ -616,7 +678,7 @@ export type GetTreeRequest = Message<"minions.v1.GetTreeRequest"> & {
  * Use `create(GetTreeRequestSchema)` to create a new message.
  */
 export const GetTreeRequestSchema: GenMessage<GetTreeRequest> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 12);
+  messageDesc(file_minions_v1_tree, 13);
 
 /**
  * @generated from message minions.v1.GetTreeResponse
@@ -633,7 +695,7 @@ export type GetTreeResponse = Message<"minions.v1.GetTreeResponse"> & {
  * Use `create(GetTreeResponseSchema)` to create a new message.
  */
 export const GetTreeResponseSchema: GenMessage<GetTreeResponse> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 13);
+  messageDesc(file_minions_v1_tree, 14);
 
 /**
  * @generated from message minions.v1.ListTreesRequest
@@ -655,7 +717,7 @@ export type ListTreesRequest = Message<"minions.v1.ListTreesRequest"> & {
  * Use `create(ListTreesRequestSchema)` to create a new message.
  */
 export const ListTreesRequestSchema: GenMessage<ListTreesRequest> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 14);
+  messageDesc(file_minions_v1_tree, 15);
 
 /**
  * @generated from message minions.v1.ListTreesResponse
@@ -677,7 +739,7 @@ export type ListTreesResponse = Message<"minions.v1.ListTreesResponse"> & {
  * Use `create(ListTreesResponseSchema)` to create a new message.
  */
 export const ListTreesResponseSchema: GenMessage<ListTreesResponse> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 15);
+  messageDesc(file_minions_v1_tree, 16);
 
 /**
  * @generated from message minions.v1.ProposePlanRequest
@@ -719,7 +781,7 @@ export type ProposePlanRequest = Message<"minions.v1.ProposePlanRequest"> & {
  * Use `create(ProposePlanRequestSchema)` to create a new message.
  */
 export const ProposePlanRequestSchema: GenMessage<ProposePlanRequest> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 16);
+  messageDesc(file_minions_v1_tree, 17);
 
 /**
  * @generated from message minions.v1.ProposePlanResponse
@@ -736,7 +798,7 @@ export type ProposePlanResponse = Message<"minions.v1.ProposePlanResponse"> & {
  * Use `create(ProposePlanResponseSchema)` to create a new message.
  */
 export const ProposePlanResponseSchema: GenMessage<ProposePlanResponse> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 17);
+  messageDesc(file_minions_v1_tree, 18);
 
 /**
  * @generated from message minions.v1.RepairPlanRequest
@@ -783,7 +845,7 @@ export type RepairPlanRequest = Message<"minions.v1.RepairPlanRequest"> & {
  * Use `create(RepairPlanRequestSchema)` to create a new message.
  */
 export const RepairPlanRequestSchema: GenMessage<RepairPlanRequest> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 18);
+  messageDesc(file_minions_v1_tree, 19);
 
 /**
  * @generated from message minions.v1.RepairPlanResponse
@@ -800,7 +862,7 @@ export type RepairPlanResponse = Message<"minions.v1.RepairPlanResponse"> & {
  * Use `create(RepairPlanResponseSchema)` to create a new message.
  */
 export const RepairPlanResponseSchema: GenMessage<RepairPlanResponse> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 19);
+  messageDesc(file_minions_v1_tree, 20);
 
 /**
  * @generated from message minions.v1.ApprovePlanRequest
@@ -832,7 +894,7 @@ export type ApprovePlanRequest = Message<"minions.v1.ApprovePlanRequest"> & {
  * Use `create(ApprovePlanRequestSchema)` to create a new message.
  */
 export const ApprovePlanRequestSchema: GenMessage<ApprovePlanRequest> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 20);
+  messageDesc(file_minions_v1_tree, 21);
 
 /**
  * @generated from message minions.v1.ApprovePlanResponse
@@ -849,7 +911,7 @@ export type ApprovePlanResponse = Message<"minions.v1.ApprovePlanResponse"> & {
  * Use `create(ApprovePlanResponseSchema)` to create a new message.
  */
 export const ApprovePlanResponseSchema: GenMessage<ApprovePlanResponse> = /*@__PURE__*/
-  messageDesc(file_minions_v1_tree, 21);
+  messageDesc(file_minions_v1_tree, 22);
 
 /**
  * @generated from enum minions.v1.PlanRevisionState
@@ -974,6 +1036,37 @@ export enum PlanAttentionState {
  */
 export const PlanAttentionStateSchema: GenEnum<PlanAttentionState> = /*@__PURE__*/
   enumDesc(file_minions_v1_tree, 3);
+
+/**
+ * @generated from enum minions.v1.VcsConflictState
+ */
+export enum VcsConflictState {
+  /**
+   * @generated from enum value: VCS_CONFLICT_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: VCS_CONFLICT_STATE_CLEAN = 1;
+   */
+  CLEAN = 1,
+
+  /**
+   * @generated from enum value: VCS_CONFLICT_STATE_CONFLICT = 2;
+   */
+  CONFLICT = 2,
+
+  /**
+   * @generated from enum value: VCS_CONFLICT_STATE_RESOLVED = 3;
+   */
+  RESOLVED = 3,
+}
+
+/**
+ * Describes the enum minions.v1.VcsConflictState.
+ */
+export const VcsConflictStateSchema: GenEnum<VcsConflictState> = /*@__PURE__*/
+  enumDesc(file_minions_v1_tree, 4);
 
 /**
  * @generated from service minions.v1.TreeService

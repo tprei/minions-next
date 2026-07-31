@@ -7,6 +7,7 @@ import {
   createPlanRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
+  createSqliteVcsChangeBindingStore,
 } from "@minions/adapters";
 import {
   ArtifactRetention,
@@ -168,6 +169,7 @@ async function createFixture(): Promise<ShutdownFixture> {
     eventPollIntervalMs: 10,
     planRegistry,
     clock: { now: () => NOW },
+    vcsChangeBindingStore: createSqliteVcsChangeBindingStore({ database }),
     steeringStore,
     artifactRegistry,
     blobStore,

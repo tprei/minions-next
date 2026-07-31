@@ -12,6 +12,7 @@ import {
   loadGateProfile,
   PlanRegistryError,
   RepositoryRegistryError,
+  type ConflictState,
   type HostGateMinimum,
   type PlanAttentionRecord,
   type PlanRegistry,
@@ -20,6 +21,7 @@ import {
   type TaskNodeRecord,
   type TreeRecord,
   type TreeSummaryRecord,
+  type VcsChangeBinding,
 } from "@minions/adapters";
 import {
   ApprovePlanResponseSchema,
@@ -39,12 +41,15 @@ import {
   TreeBudgetSchema,
   TreeService,
   TreeSummarySchema,
+  VcsChangeBindingSchema,
+  VcsConflictState,
 } from "@minions/contracts";
 import {
   repositoryId,
   timestampFromEpochMilliseconds,
   taskTreeId,
   type Clock,
+  type VcsChangeBindingStore,
 } from "@minions/core";
 
 const responseValidator = createValidator();
@@ -52,6 +57,7 @@ const responseValidator = createValidator();
 export type TreeServiceOptions = Readonly<{
   planRegistry: PlanRegistry;
   clock: Clock;
+  vcsChangeBindingStore: VcsChangeBindingStore;
   repositoryRegistry?: RepositoryRegistry;
   hostMinimum?: HostGateMinimum;
 }>;
@@ -72,20 +78,22 @@ export function registerTreeService(router: ConnectRouter, options: TreeServiceO
           request,
           at: timestampFromEpochMilliseconds(options.clock.now()),
         });
+        const bindings = await loadBindingsByNodeId(options.vcsChangeBindingStore, tree);
         return validateResponse(
           CreateTreeResponseSchema,
-          create(CreateTreeResponseSchema, { tree: toTreeMessage(tree) }),
+          create(CreateTreeResponseSchema, { tree: toTreeMessage(tree, bindings) }),
         );
       } catch (error) {
         throw toConnectError(error);
       }
     },
-    getTree(request) {
+    async getTree(request) {
       try {
         const tree = options.planRegistry.get(parseTreeId(request.treeId));
+        const bindings = await loadBindingsByNodeId(options.vcsChangeBindingStore, tree);
         return validateResponse(
           GetTreeResponseSchema,
-          create(GetTreeResponseSchema, { tree: toTreeMessage(tree) }),
+          create(GetTreeResponseSchema, { tree: toTreeMessage(tree, bindings) }),
         );
       } catch (error) {
         throw toConnectError(error);
@@ -115,9 +123,10 @@ export function registerTreeService(router: ConnectRouter, options: TreeServiceO
           request,
           at: timestampFromEpochMilliseconds(options.clock.now()),
         });
+        const bindings = await loadBindingsByNodeId(options.vcsChangeBindingStore, tree);
         return validateResponse(
           ProposePlanResponseSchema,
-          create(ProposePlanResponseSchema, { tree: toTreeMessage(tree) }),
+          create(ProposePlanResponseSchema, { tree: toTreeMessage(tree, bindings) }),
         );
       } catch (error) {
         throw toConnectError(error);
@@ -129,9 +138,10 @@ export function registerTreeService(router: ConnectRouter, options: TreeServiceO
           request,
           at: timestampFromEpochMilliseconds(options.clock.now()),
         });
+        const bindings = await loadBindingsByNodeId(options.vcsChangeBindingStore, tree);
         return validateResponse(
           RepairPlanResponseSchema,
-          create(RepairPlanResponseSchema, { tree: toTreeMessage(tree) }),
+          create(RepairPlanResponseSchema, { tree: toTreeMessage(tree, bindings) }),
         );
       } catch (error) {
         throw toConnectError(error);
@@ -143,9 +153,10 @@ export function registerTreeService(router: ConnectRouter, options: TreeServiceO
           request,
           at: timestampFromEpochMilliseconds(options.clock.now()),
         });
+        const bindings = await loadBindingsByNodeId(options.vcsChangeBindingStore, tree);
         return validateResponse(
           ApprovePlanResponseSchema,
-          create(ApprovePlanResponseSchema, { tree: toTreeMessage(tree) }),
+          create(ApprovePlanResponseSchema, { tree: toTreeMessage(tree, bindings) }),
         );
       } catch (error) {
         throw toConnectError(error);
@@ -154,7 +165,7 @@ export function registerTreeService(router: ConnectRouter, options: TreeServiceO
   });
 }
 
-function toTreeMessage(tree: TreeRecord) {
+function toTreeMessage(tree: TreeRecord, bindings: ReadonlyMap<string, VcsChangeBinding>) {
   return create(TaskTreeSchema, {
     id: tree.id,
     repositoryId: tree.repositoryId,
@@ -168,7 +179,7 @@ function toTreeMessage(tree: TreeRecord) {
     createdAt: timestampMessage(tree.createdAt),
     updatedAt: timestampMessage(tree.updatedAt),
     revisions: tree.revisions.map(toPlanRevisionMessage),
-    nodes: tree.nodes.map(toTaskNodeMessage),
+    nodes: tree.nodes.map((node) => toTaskNodeMessage(node, bindings.get(node.id))),
     budget: create(TreeBudgetSchema, tree.budget),
     ...(tree.attention === undefined ? {} : { attention: toAttentionMessage(tree.attention) }),
   });
@@ -192,7 +203,7 @@ function toPlanRevisionMessage(revision: PlanRevisionRecord) {
   });
 }
 
-function toTaskNodeMessage(node: TaskNodeRecord) {
+function toTaskNodeMessage(node: TaskNodeRecord, binding: VcsChangeBinding | undefined) {
   const outputContract =
     node.outputContract.case === "artifact"
       ? {
@@ -222,7 +233,45 @@ function toTaskNodeMessage(node: TaskNodeRecord) {
     version: BigInt(node.version),
     createdAt: timestampMessage(node.createdAt),
     updatedAt: timestampMessage(node.updatedAt),
+    ...(binding === undefined ? {} : { vcsChangeBinding: toVcsChangeBindingMessage(binding) }),
   });
+}
+
+function toVcsChangeBindingMessage(binding: VcsChangeBinding) {
+  return create(VcsChangeBindingSchema, {
+    jjChangeId: binding.jjChangeId,
+    currentCommitId: binding.currentCommitId,
+    ...(binding.parentChangeId === undefined ? {} : { parentChangeId: binding.parentChangeId }),
+    ...(binding.bookmark === undefined ? {} : { bookmark: binding.bookmark }),
+    rewriteGeneration: binding.rewriteGeneration,
+    lastJjOperationId: binding.lastJjOperationId,
+    ...(binding.lastPushedCommitId === undefined
+      ? {}
+      : { lastPushedCommitId: binding.lastPushedCommitId }),
+    ...(binding.lastReviewedCommitId === undefined
+      ? {}
+      : { lastReviewedCommitId: binding.lastReviewedCommitId }),
+    conflictState: vcsConflictStateMessage(binding.conflictState),
+  });
+}
+
+function vcsConflictStateMessage(state: ConflictState): VcsConflictState {
+  switch (state) {
+    case "clean":
+      return VcsConflictState.CLEAN;
+    case "conflict":
+      return VcsConflictState.CONFLICT;
+    case "resolved":
+      return VcsConflictState.RESOLVED;
+  }
+}
+
+async function loadBindingsByNodeId(
+  store: VcsChangeBindingStore,
+  tree: TreeRecord,
+): Promise<ReadonlyMap<string, VcsChangeBinding>> {
+  const bindings = await store.listForTree(tree.id);
+  return new Map(bindings.map((binding) => [binding.nodeId, binding] as const));
 }
 
 function toAttentionMessage(attention: PlanAttentionRecord) {
