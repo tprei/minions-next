@@ -348,17 +348,19 @@ export function createRevsetManager(options: RevsetManagerOptions): RevsetManage
         headers.push(buildReviewHeader(binding, true));
         continue;
       }
-      // Commits differ — run jj interdiff to check if content actually changed.
-      // `--summary` gives one line per modified file; empty output = ancestry-only.
+      // Commits differ — run jj interdiff to check whether content actually changed. No
+      // `--summary`: that flag only lists one line per changed file and discards the actual
+      // diff body, which the reviewer needs (PR 48). Empty stdout = ancestry-only (a restack
+      // with no file content change); non-empty stdout is the full diff, carried on the header.
       const from = binding.lastReviewedCommitId;
       const to = binding.currentCommitId;
       if (from === undefined) {
         headers.push(buildReviewHeader(binding, true));
         continue;
       }
-      const result = await run(["interdiff", "--from", from, "--to", to, "--summary"]);
+      const result = await run(["interdiff", "--from", from, "--to", to]);
       const interdiffEmpty = result.stdout.trim().length === 0;
-      headers.push(buildReviewHeader(binding, interdiffEmpty));
+      headers.push(buildReviewHeader(binding, interdiffEmpty, result.stdout));
     }
     return Object.freeze(headers);
   }

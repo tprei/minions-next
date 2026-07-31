@@ -39,6 +39,14 @@ export type ReviewHeader = Readonly<{
   readonly contentChangedSinceReview: boolean;
   /** Full classification — distinguishes ancestry-only from content deltas. */
   readonly freshness: ReviewFreshness;
+  /**
+   * Full `jj interdiff` body (unified diff) between the last-reviewed and current
+   * commit. Populated only when the adapter actually ran the interdiff AND it found
+   * a genuine content delta (`freshness === "stale_content"`). Undefined for every
+   * other freshness, including `ancestry_only` — where the interdiff ran but turned
+   * up no content change, so there is nothing to show.
+   */
+  readonly interdiffContent: string | undefined;
 }>;
 
 /**
@@ -58,17 +66,22 @@ export function classifyReviewFreshness(binding: VcsChangeBinding): ReviewFreshn
 }
 
 /**
- * Build a complete ReviewHeader from a binding and a pre-computed interdiff result.
+ * Build a complete ReviewHeader from a binding, a pre-computed interdiff result, and
+ * (when content changed) the full interdiff body the caller captured.
  *
  * When `interdiffEmpty` is true, the commits differ but the file content is identical
- * (ancestry-only rewrite — jj rebased the change without modifying files). When false,
- * genuine content changed since the review.
+ * (ancestry-only rewrite — jj rebased the change without modifying files); `interdiffContent`
+ * is dropped even if the caller passed one. When false, genuine content changed since the
+ * review and `interdiffContent` (the full `jj interdiff` stdout the caller captured) is
+ * attached.
  *
- * Pure: the caller (adapter) is responsible for running jj to obtain `interdiffEmpty`.
+ * Pure: the caller (adapter) is responsible for running jj to obtain `interdiffEmpty` and
+ * `interdiffContent`.
  */
 export function buildReviewHeader(
   binding: VcsChangeBinding,
   interdiffEmpty: boolean,
+  interdiffContent?: string,
 ): ReviewHeader {
   const base = classifyReviewFreshness(binding);
   const freshness: ReviewFreshness =
@@ -80,5 +93,6 @@ export function buildReviewHeader(
     parentChangeId: binding.parentChangeId,
     contentChangedSinceReview: freshness === "stale_content",
     freshness,
+    interdiffContent: freshness === "stale_content" ? interdiffContent : undefined,
   });
 }

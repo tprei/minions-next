@@ -52,11 +52,12 @@ describe("classifyReviewFreshness", () => {
 describe("buildReviewHeader", () => {
   it("builds never_reviewed header when not reviewed", () => {
     const binding = makeBinding();
-    const header = buildReviewHeader(binding, true);
+    const header = buildReviewHeader(binding, true, "unused diff text");
     expect(header.freshness).toBe("never_reviewed");
     expect(header.contentChangedSinceReview).toBe(false);
     expect(header.logicalChangeId).toBe(binding.jjChangeId);
     expect(header.rewriteGeneration).toBe(0);
+    expect(header.interdiffContent).toBeUndefined();
   });
 
   it("builds fresh header when same commit", () => {
@@ -76,10 +77,11 @@ describe("buildReviewHeader", () => {
       currentCommitId: "b".repeat(40) as never,
       rewriteGeneration: 1,
     });
-    const header = buildReviewHeader(binding, true);
+    const header = buildReviewHeader(binding, true, "unused diff text");
     expect(header.freshness).toBe("ancestry_only");
     expect(header.contentChangedSinceReview).toBe(false);
     expect(header.rewriteGeneration).toBe(1);
+    expect(header.interdiffContent).toBeUndefined();
   });
 
   it("builds stale_content header when interdiff is non-empty", () => {
@@ -87,9 +89,11 @@ describe("buildReviewHeader", () => {
       lastReviewedCommitId: "a".repeat(40) as never,
       currentCommitId: "b".repeat(40) as never,
     });
-    const header = buildReviewHeader(binding, false);
+    const diff = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n";
+    const header = buildReviewHeader(binding, false, diff);
     expect(header.freshness).toBe("stale_content");
     expect(header.contentChangedSinceReview).toBe(true);
+    expect(header.interdiffContent).toBe(diff);
   });
 
   it("carries parentChangeId from the binding", () => {

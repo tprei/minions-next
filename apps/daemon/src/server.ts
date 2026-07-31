@@ -31,7 +31,7 @@ import { registerHostService } from "./host-service.js";
 import { registerRepositoryService } from "./repository-service.js";
 import { registerSteeringService } from "./steering-service.js";
 import { registerSystemService } from "./system-service.js";
-import { registerTreeService } from "./tree-service.js";
+import { registerTreeService, type TreeServiceRevsetOptions } from "./tree-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
 
 type DaemonSystemOptions = Readonly<{
@@ -65,6 +65,7 @@ export type DaemonServerOptions =
         artifactRegistry: ArtifactRegistry;
         blobStore: ContentBlobStore;
         repository?: DaemonRepositoryOptions;
+        revset?: TreeServiceRevsetOptions;
       }>)
   | (BaseDaemonServerOptions &
       Readonly<{
@@ -84,6 +85,7 @@ export type DaemonServerOptions =
         artifactRegistry: ArtifactRegistry;
         blobStore: ContentBlobStore;
         repository?: DaemonRepositoryOptions;
+        revset?: TreeServiceRevsetOptions;
         hostRegistry: SupervisorHostRegistry;
       }>);
 
@@ -127,6 +129,7 @@ export async function startDaemonServer(
             ? {}
             : { repositoryRegistry: options.repository.registry }),
           vcsChangeBindingStore: options.vcsChangeBindingStore,
+          ...(options.revset === undefined ? {} : { revset: options.revset }),
         });
         registerSteeringService(router, {
           store: options.steeringStore,
