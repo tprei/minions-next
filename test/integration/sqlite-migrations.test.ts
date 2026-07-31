@@ -230,7 +230,7 @@ describe("SQLite migration integration", () => {
     },
   );
 
-  it("backs up an existing host v1 database before applying only v2", async () => {
+  it("backs up an existing host v1 database before applying later migrations", async () => {
     const directory = await mkdtemp(join(tmpdir(), "minions-host-migration-"));
     const path = join(directory, "host.db");
     const backupPath = join(directory, "host.backup.db");
@@ -246,8 +246,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 2,
-          appliedVersions: [2],
+          currentVersion: 3,
+          appliedVersions: [2, 3],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -409,7 +409,7 @@ describe("SQLite migration integration", () => {
           .prepare(
             "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
           )
-          .run(3, "future_state", "f".repeat(64), fixedTimestamp);
+          .run(4, "future_state", "f".repeat(64), fixedTimestamp);
       } finally {
         futureDatabase.close();
       }
@@ -428,7 +428,7 @@ describe("SQLite migration integration", () => {
       ).toEqual([
         ...expectedHistory(hostMigrations, fixedTimestamp),
         {
-          version: 3n,
+          version: 4n,
           name: "future_state",
           checksum: "f".repeat(64),
           applied_at_ms: BigInt(fixedTimestamp),

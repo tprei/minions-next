@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+service RepositoryService {
+  rpc RegisterRepository(RegisterRepositoryRequest) returns (RegisterRepositoryResponse);
+  rpc GetRepository(GetRepositoryRequest) returns (GetRepositoryResponse);
+  rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
+}
+
+message RegisteredRepository {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string host_id = 2 [(buf.validate.field).string.uuid = true];
+  string canonical_root = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  string canonical_remote = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+  string default_branch = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+  string base_commit = 6 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"];
+  string allowed_workspace_root = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  bool case_sensitive = 8;
+  repeated string submodule_paths = 9 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  repeated string lfs_paths = 10 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  repeated string nested_repository_paths = 11 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  google.protobuf.Timestamp registered_at = 12 [(buf.validate.field).required = true];
+}
+
+message RegisterRepositoryRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string repository_id = 3 [(buf.validate.field).string.uuid = true];
+  string root_path = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message RegisterRepositoryResponse {
+  RegisteredRepository repository = 1 [(buf.validate.field).required = true];
+}
+
+message GetRepositoryRequest {
+  string repository_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetRepositoryResponse {
+  RegisteredRepository repository = 1 [(buf.validate.field).required = true];
+}
+
+message ListRepositoriesRequest {
+  uint32 page_size = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 100
+  }];
+  optional string page_token = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message ListRepositoriesResponse {
+  repeated RegisteredRepository repositories = 1;
+  optional string next_page_token = 2 [(buf.validate.field).string.uuid = true];
+}

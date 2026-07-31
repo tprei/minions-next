@@ -8,16 +8,24 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { daemonLifecyclePath, inspectLifecycleLock, type DaemonModeName } from "@minions/adapters";
+import {
+  createSecureIdGenerator,
+  daemonLifecyclePath,
+  inspectLifecycleLock,
+  type DaemonModeName,
+} from "@minions/adapters";
 import {
   ApiVersionSchema,
   DoctorStatus,
   HostService,
   ListHostsRequestSchema,
   SystemService,
+  ListRepositoriesRequestSchema,
+  RepositoryService,
   type ExecutionHost,
+  type RegisteredRepository,
 } from "@minions/contracts";
-import { hostId, type HostId } from "@minions/core";
+import { hostId, timestampFromEpochMilliseconds, type HostId } from "@minions/core";
 import { main as runDaemon } from "@minions/daemon";
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -34,6 +42,12 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await doctor(invocation.home);
       case "host-list":
         return await listHosts(invocation.home);
+      case "repository-register":
+        return await registerRepository(invocation.home, invocation.rootPath);
+      case "repository-get":
+        return await getRepository(invocation.home, invocation.repositoryId);
+      case "repository-list":
+        return await listRepositories(invocation.home);
     }
   } catch (error) {
     writeError(error);
@@ -52,14 +66,36 @@ type StartInvocation = Readonly<{
 type Invocation =
   | StartInvocation
   | Readonly<{
-      command: "stop" | "status" | "doctor" | "host-list";
+      command: "stop" | "status" | "doctor" | "host-list" | "repository-list";
       home: string;
+    }>
+  | Readonly<{
+      command: "repository-register";
+      home: string;
+      rootPath: string;
+    }>
+  | Readonly<{
+      command: "repository-get";
+      home: string;
+      repositoryId: string;
     }>;
 
 function parseInvocation(argv: readonly string[]): Invocation {
   const [first, second, ...rest] = argv;
-  const command = first === "host" && second === "list" ? "host-list" : first;
-  const optionArguments = command === "host-list" ? rest : argv.slice(1);
+  const command =
+    first === "host" && second === "list"
+      ? "host-list"
+      : first === "repository" && (second === "register" || second === "get" || second === "list")
+        ? `repository-${second}`
+        : first;
+  const positional =
+    command === "repository-register" || command === "repository-get" ? rest[0] : undefined;
+  const optionArguments =
+    command === "host-list" || command === "repository-list"
+      ? rest
+      : command === "repository-register" || command === "repository-get"
+        ? rest.slice(1)
+        : argv.slice(1);
   let home = process.env["MINIONS_HOME"] ?? join(homedir(), ".minions");
   let mode: DaemonModeName = "local";
   let port = 4_817;
@@ -107,14 +143,39 @@ function parseInvocation(argv: readonly string[]): Invocation {
     command === "stop" ||
     command === "status" ||
     command === "doctor" ||
-    command === "host-list"
+    command === "host-list" ||
+    command === "repository-list"
   ) {
-    if (mode !== "local" || port !== 4_817) {
-      throw new UsageError("--mode and --port are only valid with start");
-    }
+    assertNonStartOptions(mode, port, configuredHostId);
     return { command, home };
   }
-  throw new UsageError("usage: minions <start|stop|status|doctor|host list> [options]");
+  if (command === "repository-register") {
+    assertNonStartOptions(mode, port, configuredHostId);
+    return { command, home, rootPath: requiredPositional("repository root", positional) };
+  }
+  if (command === "repository-get") {
+    assertNonStartOptions(mode, port, configuredHostId);
+    return { command, home, repositoryId: requiredPositional("repository ID", positional) };
+  }
+  throw new UsageError(
+    "usage: minions <start|stop|status|doctor|host list|repository register|get|list> [options]",
+  );
+}
+function assertNonStartOptions(
+  mode: DaemonModeName,
+  port: number,
+  configuredHostId: HostId | undefined,
+): void {
+  if (mode !== "local" || port !== 4_817 || configuredHostId !== undefined) {
+    throw new UsageError("--mode, --port, and --host-id are only valid with start");
+  }
+}
+
+function requiredPositional(name: string, value: string | undefined): string {
+  if (value === undefined || value.length === 0) {
+    throw new UsageError(`${name} is required`);
+  }
+  return value;
 }
 
 async function start(invocation: StartInvocation): Promise<number> {
@@ -181,6 +242,73 @@ async function status(home: string): Promise<number> {
   });
   return 0;
 }
+async function registerRepository(home: string, rootPath: string): Promise<number> {
+  const ids = createSecureIdGenerator({
+    now: () => timestampFromEpochMilliseconds(Date.now()),
+  });
+  const response = await clientsForHome(home).repository.registerRepository({
+    commandId: ids.nextId(),
+    actorSessionId: ids.nextId(),
+    repositoryId: ids.nextId(),
+    rootPath,
+  });
+  if (response.repository === undefined) {
+    throw new ConnectError("repository registration response is missing repository", Code.Internal);
+  }
+  writeJson({ repository: repositoryJson(response.repository) });
+  return 0;
+}
+
+async function getRepository(home: string, repositoryId: string): Promise<number> {
+  const response = await clientsForHome(home).repository.getRepository({ repositoryId });
+  if (response.repository === undefined) {
+    throw new ConnectError("repository response is missing repository", Code.Internal);
+  }
+  writeJson({ repository: repositoryJson(response.repository) });
+  return 0;
+}
+
+async function listRepositories(home: string): Promise<number> {
+  const client = clientsForHome(home).repository;
+  const repositories: RegisteredRepository[] = [];
+  const seenTokens = new Set<string>();
+  let pageToken: string | undefined;
+  do {
+    const request =
+      pageToken === undefined
+        ? create(ListRepositoriesRequestSchema, { pageSize: 100 })
+        : create(ListRepositoriesRequestSchema, { pageSize: 100, pageToken });
+    const response = await client.listRepositories(request);
+    repositories.push(...response.repositories);
+    pageToken = response.nextPageToken;
+    if (pageToken !== undefined && seenTokens.has(pageToken)) {
+      throw new ConnectError("repository pagination repeated a continuation token", Code.Internal);
+    }
+    if (pageToken !== undefined) {
+      seenTokens.add(pageToken);
+    }
+  } while (pageToken !== undefined);
+  writeJson({ repositories: repositories.map(repositoryJson) });
+  return 0;
+}
+
+function repositoryJson(repository: RegisteredRepository) {
+  return {
+    id: repository.id,
+    host_id: repository.hostId,
+    canonical_root: repository.canonicalRoot,
+    canonical_remote: repository.canonicalRemote,
+    default_branch: repository.defaultBranch,
+    base_commit: repository.baseCommit,
+    allowed_workspace_root: repository.allowedWorkspaceRoot,
+    case_sensitive: repository.caseSensitive,
+    submodule_paths: repository.submodulePaths,
+    lfs_paths: repository.lfsPaths,
+    nested_repository_paths: repository.nestedRepositoryPaths,
+    registered_at:
+      repository.registeredAt === undefined ? undefined : toJsonTimestamp(repository.registeredAt),
+  };
+}
 
 async function doctor(home: string): Promise<number> {
   const response = await clientsForHome(home).system.runDoctor({});
@@ -240,6 +368,7 @@ function clientsForHome(home: string) {
   return {
     system: createClient(SystemService, transport),
     host: createClient(HostService, transport),
+    repository: createClient(RepositoryService, transport),
   };
 }
 

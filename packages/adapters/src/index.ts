@@ -1,3 +1,8 @@
+export { inspectRepository, RepositoryInspectionError } from "./repository-inspector.js";
+export type {
+  RepositoryInspection,
+  RepositoryInspectionErrorCode,
+} from "./repository-inspector.js";
 export { createSecureIdGenerator } from "./secure-id-generator.js";
 export {
   acquireLifecycleLock,
@@ -53,6 +58,15 @@ export type {
   ListExecutionHostsInput,
   SupervisorHostRegistry,
 } from "./sqlite/host-registry.js";
+export { createRepositoryRegistry, RepositoryRegistryError } from "./sqlite/repository-registry.js";
+export type {
+  CreateRepositoryRegistryOptions,
+  ListRepositoriesInput,
+  RegisterRepositoryInput,
+  RepositoryRegistration,
+  RepositoryRegistry,
+  RepositoryRegistryErrorCode,
+} from "./sqlite/repository-registry.js";
 export { openHostDatabase, openSupervisorDatabase } from "./sqlite/database.js";
 export type {
   ManagedSqliteDatabase,
