@@ -806,3 +806,24 @@ export type {
   ProductionSplitWorkingCopy,
   ProductionSplitWorkingCopyErrorCode,
 } from "./split-working-copy.js";
+// PR 41 — per-revision gates via jj run (core domain re-export + runner).
+export { buildRevisionRevset, validateNoUnexpectedMutation } from "@minions/core";
+export type {
+  MutationProof,
+  RevisionGateRequest,
+  RevisionGateResult,
+  RevisionIdSnapshot,
+  RevisionOutcome,
+} from "@minions/core";
+export { createRevisionGateRunner, RevisionGateError } from "./revision-gate-runner.js";
+export type {
+  RevisionGateErrorCode,
+  RevisionGateJjRunner,
+  RevisionGateRawResult,
+  RevisionGateRunner,
+  RevisionGateRunnerOptions,
+  RevisionGateRevisionRunner,
+  RevisionOperationIdFn,
+  RevisionRestoreOpFn,
+  RevisionSnapshotFn,
+} from "./revision-gate-runner.js";

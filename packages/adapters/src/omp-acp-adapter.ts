@@ -162,6 +162,8 @@ const metadataSessionUpdates: Record<string, true> = {
   available_commands_update: true,
   plan_update: true,
   session_info_update: true,
+  agent_thought_chunk: true,
+  agent_message_chunk: true,
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -391,7 +393,7 @@ function normalizeSessionUpdate(params: unknown): readonly HarnessEventPayload[]
         {
           kind: "error",
           code: "frame_invalid",
-          message: `unknown sessionUpdate kind: ${sessionUpdate}`,
+          message: `unknown session/update kind: ${sessionUpdate}`,
           retryable: false,
         },
       ];
@@ -1384,7 +1386,7 @@ class OmpAcpHarnessSession implements HarnessSession {
     try {
       await this.client.send("session/prompt", {
         sessionId: this.identity.sessionId,
-        message: text,
+        prompt: [{ type: "text", text }],
       });
     } catch (error: unknown) {
       this.state = "idle";
@@ -1400,6 +1402,7 @@ class OmpAcpHarnessSession implements HarnessSession {
     }
     this.emit({ kind: "prompt_finished", promptId });
     this.emit({ kind: "turn_finished", turnId: promptId });
+    this.emit({ kind: "result", outcome: "succeeded", text: "" });
     this.state = "idle";
   }
 
