@@ -1,9 +1,4 @@
-import {
-  Code,
-  ConnectError,
-  createClient,
-  createRouterTransport,
-} from "@connectrpc/connect";
+import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
 import { PairingService } from "@minions/contracts";
 import { describe, expect, it } from "vitest";
 
