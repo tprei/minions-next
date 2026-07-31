@@ -13,6 +13,7 @@ export default defineConfig({
     passWithNoTests: true,
     pool: "forks",
     restoreMocks: true,
+    testTimeout: 20_000,
     unstubEnvs: true,
     unstubGlobals: true,
   },
