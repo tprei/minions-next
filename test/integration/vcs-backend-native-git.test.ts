@@ -419,4 +419,26 @@ describe("native-git VcsBackend", () => {
     const remoteHead = await rawGit(bareRoot, ["rev-parse", `refs/heads/${receipt.branchName}`]);
     expect(remoteHead).toBe(receipt.headCommit);
   });
+
+  it("rejects an option-shaped push remote or bookmark instead of forwarding it to git push", async () => {
+    // A remote like '--upload-pack=/bin/sh' or a bookmark starting with '-'
+    // was previously forwarded as a bare positional argument with no `--`
+    // separator, so git push parsed it as an OPTION (helper execution or
+    // an arbitrary destination) instead of a repository name/refspec.
+    const receipt = await env.createWorkspace(0);
+    await expect(
+      env.backend.pushBookmark({
+        attemptId: receipt.attemptId,
+        bookmark: nonEmptyText(receipt.branchName, "bookmark"),
+        remote: "--upload-pack=/bin/sh",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(
+      env.backend.pushBookmark({
+        attemptId: receipt.attemptId,
+        bookmark: nonEmptyText("--force-with-lease=refs/heads/x", "bookmark"),
+        remote: "origin",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+  });
 });

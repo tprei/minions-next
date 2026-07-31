@@ -207,9 +207,20 @@ class NativeGitVcsBackend implements VcsBackend {
   async pushBookmark(input: VcsPushBookmarkInput): Promise<VcsPushReceipt> {
     const workspace = this.#workspaceOf(input.attemptId).workspacePath;
     const remote = input.remote ?? DEFAULT_REMOTE;
+    // P1 (review #23): remote/bookmark were forwarded as bare positional
+    // args with no `--` separator - an option-like remote (e.g.
+    // `--upload-pack=/bin/sh`) parses as a git push OPTION (helper
+    // execution) instead of a repository name, and an arbitrary URL
+    // permits pushing to an unapproved destination. Reject anything
+    // option-shaped outright (fail closed, not just `--`-escaped, in case
+    // a future git version reintroduces an exception) and separate options
+    // from the repository/refspec with `--`.
+    assertNotOptionLike(remote, "push remote");
+    assertNotOptionLike(input.bookmark, "push bookmark");
     const pushedCommit = await this.#headOf(workspace);
-    const arguments_: string[] = ["push", remote, input.bookmark];
+    const arguments_: string[] = ["push"];
     if (input.force) arguments_.push("--force");
+    arguments_.push("--", remote, input.bookmark);
     await this.#runGit(workspace, arguments_);
     return Object.freeze({
       receipt: this.#receipt(
@@ -386,6 +397,12 @@ class NativeGitVcsBackend implements VcsBackend {
       attemptId,
       recordedAt,
     });
+  }
+}
+
+function assertNotOptionLike(value: string, field: string): void {
+  if (value.length === 0 || value.startsWith("-")) {
+    throw new VcsBackendError("invalid_input", `${field} must not look like a command-line option`);
   }
 }
 
