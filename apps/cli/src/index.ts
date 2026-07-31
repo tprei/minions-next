@@ -77,6 +77,7 @@ import {
 } from "@minions/contracts";
 import { hostId, timestampFromEpochMilliseconds, type HostId } from "@minions/core";
 import { main as runDaemon } from "@minions/daemon";
+import * as distribution from "./distribution.js";
 
 export async function main(argv: readonly string[]): Promise<number> {
   try {
@@ -148,6 +149,16 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await authStatus(invocation);
       case "auth-logout":
         return await authLogout(invocation);
+      case "install":
+        return await distribution.install(invocation);
+      case "upgrade":
+        return await distribution.upgrade(invocation);
+      case "rollback":
+        return await distribution.rollback(invocation);
+      case "uninstall":
+        return await distribution.uninstall(invocation);
+      case "version":
+        return await distribution.version();
     }
   } catch (error) {
     writeError(error);
@@ -243,7 +254,12 @@ type Invocation =
     }>
   | AuthLoginInvocation
   | AuthStatusInvocation
-  | AuthLogoutInvocation;
+  | AuthLogoutInvocation
+  | Readonly<{ command: "install"; archive: string; prefix: string; home: string }>
+  | Readonly<{ command: "upgrade"; archive: string; prefix: string; home: string }>
+  | Readonly<{ command: "rollback"; prefix: string; home: string }>
+  | Readonly<{ command: "uninstall"; prefix: string; home: string; purge: boolean }>
+  | Readonly<{ command: "version" }>;
 
 type AuthLoginInvocation = Readonly<{
   command: "auth-login";
@@ -316,6 +332,9 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let nodeSteerAnswer: string | undefined;
   let nodeSteerAttentionId: string | undefined;
   let nodeAttentionNodeId: string | undefined;
+  let archive: string | undefined;
+  let prefix: string | undefined;
+  let purge = false;
   const seenOptions = new Set<string>();
   for (let index = 0; index < optionArguments.length; index += 1) {
     const option = optionArguments[index];
@@ -467,6 +486,31 @@ function parseInvocation(argv: readonly string[]): Invocation {
         }
         vaultKeyMode = parseVaultKeyMode(requiredValue(option, value));
         index += 1;
+        break;
+      case "--archive":
+        if (command !== "install" && command !== "upgrade") {
+          throw new UsageError("--archive is only valid with install or upgrade");
+        }
+        archive = requiredValue(option, value);
+        index += 1;
+        break;
+      case "--prefix":
+        if (
+          command !== "install" &&
+          command !== "upgrade" &&
+          command !== "rollback" &&
+          command !== "uninstall"
+        ) {
+          throw new UsageError("--prefix is only valid with install/upgrade/rollback/uninstall");
+        }
+        prefix = requiredValue(option, value);
+        index += 1;
+        break;
+      case "--purge":
+        if (command !== "uninstall") {
+          throw new UsageError("--purge is only valid with uninstall");
+        }
+        purge = true;
         break;
       default:
         throw new UsageError(`unknown option: ${option}`);
@@ -692,6 +736,22 @@ function parseInvocation(argv: readonly string[]): Invocation {
       ...(vaultStoreDirectory !== undefined ? { vaultStoreDirectory } : {}),
       ...(vaultKeyMode !== undefined ? { vaultKeyMode } : {}),
     };
+  }
+  if (command === "version") {
+    return { command };
+  }
+  const resolvedPrefix = prefix ?? process.env["MINIONS_INSTALL_PREFIX"] ?? "/opt/minions";
+  if (command === "install" || command === "upgrade") {
+    if (archive === undefined) {
+      throw new UsageError(`${command} requires --archive <path>`);
+    }
+    return { command, archive, prefix: resolvedPrefix, home };
+  }
+  if (command === "rollback") {
+    return { command, prefix: resolvedPrefix, home };
+  }
+  if (command === "uninstall") {
+    return { command, prefix: resolvedPrefix, home, purge };
   }
   throw new UsageError(usageText());
 }
