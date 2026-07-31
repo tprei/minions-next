@@ -323,7 +323,10 @@ class FakeExecutionCoordinator implements ExecutionCoordinator {
     return Promise.reject(new Error("FakeExecutionCoordinator.interrupt not used"));
   }
 
-  recordDeferredOutcome(_request: NodeExecutionRequest, result: NodeExecutionResult): Promise<void> {
+  recordDeferredOutcome(
+    _request: NodeExecutionRequest,
+    result: NodeExecutionResult,
+  ): Promise<void> {
     this.recordedDeferredOutcomes.push(result);
     return Promise.resolve();
   }
