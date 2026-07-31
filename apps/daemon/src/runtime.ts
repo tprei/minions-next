@@ -151,19 +151,6 @@ export type DaemonRuntimeOptions = Readonly<{
    * later PR — for PR 21 this only reports health via the doctor.
    */
   jjCapability?: JjCapabilityRuntimeOptions;
-  /**
-   * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing). When
-   * enabled, the daemon constructs a process-lifetime {@link DeviceSessionStore},
-   * shares it between the pairing RPCs and the remote-access interceptor, and binds
-   * every interface instead of loopback only (see `server.ts`'s `remoteAccess` doc for
-   * the full security model). Only meaningful for "local"/"host" mode, which is where
-   * the mutation RPCs a phone session gates actually live; ignored for "supervisor"
-   * mode. Omitted, daemon behaviour is unchanged (REMOTE-01's loopback-only default).
-   */
-  remoteAccess?: RemoteAccessRuntimeOptions;
-}>;
-export type RemoteAccessRuntimeOptions = Readonly<{
-  enabled: true;
 }>;
 export type ProviderAdmissionRuntimeOptions = Readonly<{
   enabled: true;
@@ -477,6 +464,7 @@ export async function startDaemonRuntime(
         ? options.jjCapability.toolsDirectory
         : undefined,
     });
+
     if (options.mode === "local") {
       server = await startDaemonServer({
         mode: "local",
@@ -596,7 +584,6 @@ export function defaultRuntimeOptions(
     hostId?: HostId;
     signal?: AbortSignal;
     jjCapability?: JjCapabilityRuntimeOptions;
-    remoteAccess?: RemoteAccessRuntimeOptions;
   }>,
 ): DaemonRuntimeOptions {
   const clock: Clock = { now: () => timestampFromEpochMilliseconds(Date.now()) };
