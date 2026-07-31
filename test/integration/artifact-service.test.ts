@@ -27,6 +27,7 @@ import {
   createRepositoryRegistry,
   createSqliteArtifactRegistry,
   createSqliteCommandStore,
+  createSqliteRecoveryStore,
   createSqliteSteeringCommandStore,
   createSqliteVcsChangeBindingStore,
   type EventCommitWaiter,
@@ -49,6 +50,7 @@ import {
   type ArtifactRegistry,
   type ContentBlobStore,
   type DomainPorts,
+  type RecoveryGateProfile,
 } from "@minions/core";
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
@@ -84,6 +86,11 @@ const NO_CHANGE_COMMAND_ID = commandId("01900000-0000-7000-8000-000000000014");
 const NO_CHANGE_EVIDENCE_ID = "01900000-0000-7000-8000-000000000015";
 const CONTENT = new TextEncoder().encode("artifact content");
 const BASE_COMMIT = "0123456789abcdef0123456789abcdef01234567";
+const RECOVERY_TEST_GATE_PROFILE: RecoveryGateProfile = {
+  allowedKinds: ["restart"],
+  requiredApprovals: 1,
+  maxGrantDurationMs: 900_000,
+};
 
 type ArtifactClient = Client<typeof ArtifactService>;
 
@@ -475,6 +482,10 @@ async function createFixture(): Promise<Fixture> {
     steeringStore: createSqliteSteeringCommandStore({ database, commandStore, ports }),
     artifactRegistry,
     blobStore,
+    recoveryStore: createSqliteRecoveryStore({ database }),
+    recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+    recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f0"]),
+    recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
     system: {
       serverVersion: "0.0.0",
       health: createHealth(HOST_ID),

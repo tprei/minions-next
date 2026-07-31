@@ -177,3 +177,9 @@ if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).hr
 }
 export { registerWslHostService, type WslHostServiceOptions } from "./wsl-service.js";
 export { registerRecoveryService, type RecoveryServiceOptions } from "./recovery-service.js";
+export type {
+  RecoveryRestarter,
+  RecoveryRestartTarget,
+  CreateSystemRecoveryRestarterOptions,
+} from "./recovery-restart.js";
+export { createSystemRecoveryRestarter } from "./recovery-restart.js";
