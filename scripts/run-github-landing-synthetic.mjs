@@ -12,7 +12,12 @@ import {
   createStackParentageManager,
   resolveEngineBotIdentity,
 } from "@minions/adapters";
-import { actorSessionId, humanApproval, taskTreeId, timestampFromEpochMilliseconds } from "@minions/core";
+import {
+  actorSessionId,
+  humanApproval,
+  taskTreeId,
+  timestampFromEpochMilliseconds,
+} from "@minions/core";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 
 // PR 36 focused synthetic: exercise the real landing coordinator's preflight +

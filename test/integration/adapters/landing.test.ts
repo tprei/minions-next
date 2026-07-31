@@ -974,9 +974,7 @@ describe("landing", () => {
       expectedHeadSha: HEAD_SHA,
       requestedAt: timestampFromEpochMilliseconds(1_700_000_001_000),
     } as unknown as LandingIntent;
-    await expect(h.coordinator.land(forgedCapability)).rejects.toThrow(
-      /verified human principal/u,
-    );
+    await expect(h.coordinator.land(forgedCapability)).rejects.toThrow(/verified human principal/u);
     expect(h.mock.merges).toHaveLength(0);
   });
 
