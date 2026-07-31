@@ -5,20 +5,32 @@ import {
   EmptyNodeCommandSchema,
   GetTreeRequestSchema,
   NodeCommandPayloadSchema,
+  PlanNodeMode,
   QueueNodeCommandRequestSchema,
   ReplanNodeCommandSchema,
   ResolveApprovalNodeCommandSchema,
   TextNodeCommandSchema,
   type NodeCommandPayload,
   type NodeState,
+  type TaskNode,
 } from "@minions/contracts";
-import { Commentary, Fact, NavBar, StateView, StatusBadge } from "@minions/ui-kit";
+import {
+  Commentary,
+  Fact,
+  NavBar,
+  StateView,
+  StatusBadge,
+  Tabs,
+  type TabItem,
+} from "@minions/ui-kit";
 import {
   actorSessionId,
   createApiClients,
   generateUuidV7,
   type ApiClients,
 } from "../../data/index.js";
+import { EvidencePanel } from "./EvidencePanel.js";
+import { useEvidence } from "./use-evidence.js";
 import { useEventClient } from "../../data/use-event-client.js";
 import { describeConnectError, type TypedError } from "../home/connect-error.js";
 import { shortId } from "../home/labels.js";
@@ -53,6 +65,7 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
   const [error, setError] = useState<TypedError | undefined>(undefined);
   const [fetchedObjective, setFetchedObjective] = useState<string | undefined>();
   const [fetchedState, setFetchedState] = useState<NodeState | undefined>();
+  const [fetchedNode, setFetchedNode] = useState<TaskNode | undefined>();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,6 +77,7 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
         if (found !== undefined) {
           setFetchedObjective(found.objective);
           setFetchedState(found.state);
+          setFetchedNode(found);
         }
       } catch {
         // Projection store will eventually deliver the node via the event stream.
@@ -90,6 +104,12 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
     }
     return undefined;
   }, [projection.nodeAttention, nodeId]);
+  const evidenceSections = useEvidence({
+    node: fetchedNode,
+    commands,
+    openAttention: openAttention !== undefined ? [openAttention] : [],
+    connectionState,
+  });
 
   async function handleAction(action: SteeringAction): Promise<void> {
     setSubmitting(true);
@@ -179,18 +199,71 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
         </div>
       ) : null}
 
-      <h2 className="mn-node-console__section">Command receipts</h2>
-      <CommandTimeline commands={commands} />
-
-      <h2 className="mn-node-console__section">Steer</h2>
-      <Composer
-        openAttention={openAttention}
-        submitting={submitting}
-        error={error}
-        onAction={(action) => {
-          void handleAction(action);
-        }}
-      />
+      {(() => {
+        const tabItems: TabItem[] = [
+          {
+            value: "console",
+            label: "Console",
+            content: (
+              <>
+                <CommandTimeline commands={commands} />
+                <h2 className="mn-node-console__section">Steer</h2>
+                <Composer
+                  openAttention={openAttention}
+                  submitting={submitting}
+                  error={error}
+                  onAction={(action) => {
+                    void handleAction(action);
+                  }}
+                />
+              </>
+            ),
+          },
+          {
+            value: "context",
+            label: "Context",
+            content: (
+              <div className="mn-node-console__evidence" data-testid="context-panel">
+                {fetchedNode !== undefined ? (
+                  <>
+                    <Fact>
+                      mode: {fetchedNode.mode !== PlanNodeMode.UNSPECIFIED ? "set" : "unspecified"}
+                    </Fact>
+                    <Fact>check profile: {fetchedNode.checkProfile || "(unset)"}</Fact>
+                    <Fact>
+                      allowed paths: {fetchedNode.allowedRepositoryPaths.join(", ") || "(none)"}
+                    </Fact>
+                    {fetchedNode.acceptanceCriteria.length > 0 ? (
+                      <div>
+                        <strong>Acceptance criteria</strong>
+                        <ul>
+                          {fetchedNode.acceptanceCriteria.map((criterion, index) => (
+                            <li key={`${String(index)}-${criterion}`}>{criterion}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <Commentary>Node details not yet loaded from GetTree.</Commentary>
+                )}
+                <Commentary>Source: GetTree response. Freshness: {connectionState}.</Commentary>
+              </div>
+            ),
+          },
+          {
+            value: "evidence",
+            label: "Evidence",
+            content: (
+              <EvidencePanel
+                sections={evidenceSections}
+                emptyMessage="No evidence recorded for this node yet."
+              />
+            ),
+          },
+        ];
+        return <Tabs items={tabItems} defaultValue="console" />;
+      })()}
     </div>
   );
 }
