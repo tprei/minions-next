@@ -1,4 +1,4 @@
-export type { SchedulerStore } from "@minions/core";
+export type { SchedulerStore, SteeringCommandStore } from "@minions/core";
 
 export { inspectRepository, RepositoryInspectionError } from "./repository-inspector.js";
 export type {
@@ -36,6 +36,15 @@ export type {
   SqliteCommandStore,
   SqliteCommandTransaction,
 } from "./sqlite/command.js";
+export { createSteeringCommandDispatcher } from "./steering-command-dispatcher.js";
+export {
+  createSqliteSteeringCommandStore,
+  SqliteSteeringError,
+} from "./sqlite/steering-command-store.js";
+export type {
+  CreateSqliteSteeringCommandStoreOptions,
+  SqliteSteeringErrorCode,
+} from "./sqlite/steering-command-store.js";
 export { createSqliteEventStore } from "./sqlite/event-store.js";
 export type {
   OpenSqliteEventStoreOptions,

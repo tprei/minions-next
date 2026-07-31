@@ -17,12 +17,13 @@ import {
   type GetHealthResponse,
   type RunDoctorResponse,
 } from "@minions/contracts";
-import type { Clock } from "@minions/core";
+import type { Clock, SteeringCommandStore } from "@minions/core";
 
 import { createErrorDetailInterceptor } from "./error-detail-interceptor.js";
 import { registerEventService } from "./event-service.js";
 import { registerHostService } from "./host-service.js";
 import { registerRepositoryService } from "./repository-service.js";
+import { registerSteeringService } from "./steering-service.js";
 import { registerSystemService } from "./system-service.js";
 import { registerTreeService } from "./tree-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
@@ -53,6 +54,7 @@ export type DaemonServerOptions =
         eventPollIntervalMs: number;
         planRegistry: PlanRegistry;
         clock: Clock;
+        steeringStore: SteeringCommandStore;
         repository?: DaemonRepositoryOptions;
       }>)
   | (BaseDaemonServerOptions &
@@ -68,6 +70,7 @@ export type DaemonServerOptions =
         eventPollIntervalMs: number;
         planRegistry: PlanRegistry;
         clock: Clock;
+        steeringStore: SteeringCommandStore;
         repository?: DaemonRepositoryOptions;
         hostRegistry: SupervisorHostRegistry;
       }>);
@@ -95,6 +98,10 @@ export async function startDaemonServer(
         });
         registerTreeService(router, {
           planRegistry: options.planRegistry,
+          clock: options.clock,
+        });
+        registerSteeringService(router, {
+          store: options.steeringStore,
           clock: options.clock,
         });
         if (options.repository !== undefined) {
@@ -155,7 +162,11 @@ function capabilitiesForOptions(options: DaemonServerOptions): readonly ServerCa
     ServerCapability.HEALTH_DOCTOR,
   ];
   if (options.mode !== "supervisor") {
-    capabilities.push(ServerCapability.EVENT_STREAM, ServerCapability.TREE_PLANNING);
+    capabilities.push(
+      ServerCapability.EVENT_STREAM,
+      ServerCapability.TREE_PLANNING,
+      ServerCapability.STEERING,
+    );
     if (options.repository !== undefined) {
       capabilities.push(ServerCapability.REPOSITORY_REGISTRY);
     }

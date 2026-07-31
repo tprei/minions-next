@@ -4,6 +4,7 @@ package minions.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
+import "minions/v1/steering.proto";
 
 service EventService {
   rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse);
@@ -130,6 +131,8 @@ message ProjectionChange {
 
     AttentionRemoved attention_removed = 7;
     ProjectionBatch batch = 8;
+    NodeCommand node_command_upserted = 9;
+    NodeAttention node_attention_upserted = 10;
   }
 }
 

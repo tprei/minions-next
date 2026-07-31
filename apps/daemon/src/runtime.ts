@@ -10,6 +10,7 @@ import {
   createPlanRegistry,
   createRepositoryRegistry,
   createSqliteCommandStore,
+  createSqliteSteeringCommandStore,
   createSecureIdGenerator,
   createSupervisorHostRegistry,
   daemonLifecyclePath,
@@ -45,6 +46,7 @@ import {
   type Clock,
   type HostId,
   type IdGenerator,
+  type SteeringCommandStore,
   type Timestamp,
 } from "@minions/core";
 
@@ -95,6 +97,7 @@ export async function startDaemonRuntime(
   let eventWaiter: EventCommitWaiter | undefined;
   let repositoryRegistry: RepositoryRegistry | undefined;
   let planRegistry: PlanRegistry | undefined;
+  let steeringStore: SteeringCommandStore | undefined;
   let localHostId: HostId | undefined;
   let server: RunningDaemonServer | undefined;
 
@@ -141,6 +144,11 @@ export async function startDaemonRuntime(
         ports: { clock: options.clock, ids: options.ids },
         notifier: eventWaiter,
       });
+      steeringStore = createSqliteSteeringCommandStore({
+        database: hostDatabase,
+        commandStore,
+        ports: { clock: options.clock, ids: options.ids },
+      });
       repositoryRegistry = createRepositoryRegistry({
         database: hostDatabase,
         commandStore,
@@ -173,6 +181,7 @@ export async function startDaemonRuntime(
         eventPollIntervalMs: 1_000,
         planRegistry: requirePlanRegistry(planRegistry),
         clock: options.clock,
+        steeringStore: requireSteeringStore(steeringStore),
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -190,6 +199,7 @@ export async function startDaemonRuntime(
         eventPollIntervalMs: 1_000,
         planRegistry: requirePlanRegistry(planRegistry),
         clock: options.clock,
+        steeringStore: requireSteeringStore(steeringStore),
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -586,6 +596,13 @@ function requireHostId(value: HostId | undefined): HostId {
 function requireRepositoryRegistry(value: RepositoryRegistry | undefined): RepositoryRegistry {
   if (value === undefined) {
     throw new Error("repository registry is not initialized");
+  }
+  return value;
+}
+
+function requireSteeringStore(value: SteeringCommandStore | undefined): SteeringCommandStore {
+  if (value === undefined) {
+    throw new Error("steering command store is not initialized");
   }
   return value;
 }

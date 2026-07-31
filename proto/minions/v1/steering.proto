@@ -1,0 +1,168 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+service SteeringService {
+  rpc QueueNodeCommand(QueueNodeCommandRequest) returns (QueueNodeCommandResponse);
+  rpc GetNodeCommand(GetNodeCommandRequest) returns (GetNodeCommandResponse);
+  rpc ListNodeCommands(ListNodeCommandsRequest) returns (ListNodeCommandsResponse);
+  rpc ListNodeAttention(ListNodeAttentionRequest) returns (ListNodeAttentionResponse);
+}
+
+enum NodeCommandDeliveryState {
+  NODE_COMMAND_DELIVERY_STATE_UNSPECIFIED = 0;
+  NODE_COMMAND_DELIVERY_STATE_QUEUED = 1;
+  NODE_COMMAND_DELIVERY_STATE_SENT = 2;
+  NODE_COMMAND_DELIVERY_STATE_ACKNOWLEDGED = 3;
+  NODE_COMMAND_DELIVERY_STATE_APPLIED = 4;
+  NODE_COMMAND_DELIVERY_STATE_FAILED = 5;
+  NODE_COMMAND_DELIVERY_STATE_REVIEW_REQUIRED = 6;
+}
+
+enum NodeCommandRecoveryDisposition {
+  NODE_COMMAND_RECOVERY_DISPOSITION_UNSPECIFIED = 0;
+  NODE_COMMAND_RECOVERY_DISPOSITION_RESUME_SESSION = 1;
+  NODE_COMMAND_RECOVERY_DISPOSITION_FORK_SESSION = 2;
+  NODE_COMMAND_RECOVERY_DISPOSITION_RETRY_EXTERNAL_ACTION = 3;
+  NODE_COMMAND_RECOVERY_DISPOSITION_REQUIRES_REVIEW = 4;
+}
+
+enum NodeAttentionKind {
+  NODE_ATTENTION_KIND_UNSPECIFIED = 0;
+  NODE_ATTENTION_KIND_QUESTION = 1;
+  NODE_ATTENTION_KIND_APPROVAL = 2;
+}
+
+enum NodeAttentionState {
+  NODE_ATTENTION_STATE_UNSPECIFIED = 0;
+  NODE_ATTENTION_STATE_OPEN = 1;
+  NODE_ATTENTION_STATE_RESOLVED = 2;
+}
+
+message TextNodeCommand {
+  string text = 1 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message EmptyNodeCommand {}
+
+message AnswerNodeCommand {
+  string attention_id = 1 [(buf.validate.field).string.uuid = true];
+  string answer = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message ResolveApprovalNodeCommand {
+  string attention_id = 1 [(buf.validate.field).string.uuid = true];
+  optional string reason = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message ReplanNodeCommand {
+  string objective = 1 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message NodeCommandPayload {
+  oneof command {
+    option (buf.validate.oneof).required = true;
+
+    TextNodeCommand message = 1;
+    TextNodeCommand steer_after_current_tool = 2;
+    EmptyNodeCommand interrupt_now = 3;
+    TextNodeCommand follow_up_after_turn = 4;
+    EmptyNodeCommand pause = 5;
+    EmptyNodeCommand resume = 6;
+    AnswerNodeCommand answer = 7;
+    ResolveApprovalNodeCommand approve = 8;
+    ResolveApprovalNodeCommand reject = 9;
+    EmptyNodeCommand retry = 10;
+    EmptyNodeCommand cancel_node = 11;
+    EmptyNodeCommand cancel_subtree = 12;
+    ReplanNodeCommand replan_unstarted_subtree = 13;
+  }
+}
+
+message NodeCommand {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string node_id = 3 [(buf.validate.field).string.uuid = true];
+  uint64 ordinal = 4 [(buf.validate.field).uint64.gte = 1];
+  NodeCommandPayload payload = 5 [(buf.validate.field).required = true];
+  NodeCommandDeliveryState delivery_state = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  NodeCommandRecoveryDisposition recovery_disposition = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  uint32 delivery_attempts = 8;
+  google.protobuf.Timestamp created_at = 9 [(buf.validate.field).required = true];
+  optional google.protobuf.Timestamp sent_at = 10;
+  optional google.protobuf.Timestamp acknowledged_at = 11;
+  optional google.protobuf.Timestamp applied_at = 12;
+  optional google.protobuf.Timestamp failed_at = 13;
+  optional string failure = 14 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message NodeAttention {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string node_id = 2 [(buf.validate.field).string.uuid = true];
+  NodeAttentionKind kind = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string prompt = 4 [(buf.validate.field).string = {min_len: 1}];
+  repeated string choices = 5 [(buf.validate.field).repeated.items.string = {min_len: 1}];
+  NodeAttentionState state = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string resolution_command_id = 7 [(buf.validate.field).string.uuid = true];
+  optional string resolution = 8 [(buf.validate.field).string = {min_len: 1}];
+  google.protobuf.Timestamp created_at = 9 [(buf.validate.field).required = true];
+  optional google.protobuf.Timestamp resolved_at = 10;
+}
+
+message QueueNodeCommandRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string node_id = 3 [(buf.validate.field).string.uuid = true];
+  optional uint64 expected_node_version = 4;
+  NodeCommandPayload payload = 5 [(buf.validate.field).required = true];
+}
+
+message QueueNodeCommandResponse {
+  NodeCommand command = 1 [(buf.validate.field).required = true];
+}
+
+message GetNodeCommandRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetNodeCommandResponse {
+  NodeCommand command = 1 [(buf.validate.field).required = true];
+}
+
+message ListNodeCommandsRequest {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  optional uint64 after_ordinal = 2;
+  uint32 page_size = 3 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 200
+  }];
+}
+
+message ListNodeCommandsResponse {
+  repeated NodeCommand commands = 1;
+  optional uint64 next_ordinal = 2;
+}
+
+message ListNodeAttentionRequest {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  bool open_only = 2;
+}
+
+message ListNodeAttentionResponse {
+  repeated NodeAttention attention = 1;
+}
