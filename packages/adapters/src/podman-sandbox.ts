@@ -256,7 +256,7 @@ class PodmanSandboxLifecycle implements SandboxLifecycle {
     const flagSet = containerFlagSet(policy, this.#options, containerName);
     try {
       await this.#runChecked(
-        [this.#options.podmanPath, "create", ...flagSet.createArguments],
+        [this.#options.podmanPath, ...flagSet.globalArguments, "create", ...flagSet.createArguments],
         lifecycleStartTimeoutMs,
         lifecycleOutputLimit,
       );
@@ -763,11 +763,11 @@ function podmanHostEnvironment(storageRoot: string): NodeJS.ProcessEnv {
   });
 }
 
-function containerFlagSet(
+export function containerFlagSet(
   policy: SandboxPolicy,
   options: PodmanSandboxOptions,
   containerName: string,
-): Readonly<{ createArguments: readonly string[] }> {
+): Readonly<{ globalArguments: readonly string[]; createArguments: readonly string[] }> {
   const imageReference = options.template.imageReference;
   const seccompProfile = options.seccompProfilePath;
   const networkFlags =
@@ -778,8 +778,10 @@ function containerFlagSet(
   ]);
   const workspaceTarget =
     policy.mounts.find((candidate) => candidate.kind === "workspace")?.targetPath ?? guestHomePath;
+  // `--rootless` is a Podman global option; it must precede the `create` subcommand, or
+  // `podman create` rejects it as an unknown flag and the container cannot start.
+  const globalArguments = Object.freeze(["--rootless"]);
   const createArguments = Object.freeze([
-    "--rootless",
     `--name=${containerName}`,
     "--userns=auto",
     "--read-only",
@@ -808,7 +810,7 @@ function containerFlagSet(
     "minions",
     imageReference,
   ]);
-  return { createArguments };
+  return { globalArguments, createArguments };
 }
 
 async function assertHostMounts(
