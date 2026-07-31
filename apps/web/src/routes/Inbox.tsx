@@ -119,7 +119,7 @@ export function InboxRoute(): ReactNode {
         />
       </NavBar>
 
-      <div className="mn-inbox" data-testid="inbox">
+      <main className="mn-inbox" data-testid="inbox">
         <div className="mn-inbox__header">
           <h1>Attention inbox</h1>
           <Fact>{String(openItems.length)} open</Fact>
@@ -223,7 +223,7 @@ export function InboxRoute(): ReactNode {
             })}
           </ul>
         )}
-      </div>
+      </main>
     </>
   );
 }

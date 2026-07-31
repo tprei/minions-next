@@ -141,6 +141,7 @@ export function HomeRoute(): ReactNode {
         />
       </div>
       <main className="mn-home__content">
+        <h1 className="mn-visually-hidden">Minions command center</h1>
         {connectionState === "offline" ? (
           <StateView
             kind="offline"
