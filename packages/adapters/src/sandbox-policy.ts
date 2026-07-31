@@ -159,7 +159,30 @@ function validateMounts(value: unknown): readonly SandboxMount[] {
         `mount ${String(index)} target path is duplicated`,
       );
     }
+    // P1 (review #15): only an EXACT duplicate target was rejected before -
+    // a nested writable mount (e.g. target /workspace/.secrets under an
+    // existing read-only /workspace) could still modify a supposedly
+    // read-only subtree, since the two targets never collided exactly.
+    // Reject any pairwise ancestor/descendant overlap between targets.
+    for (const existingTarget of targets) {
+      if (isAncestorPosixPath(existingTarget, targetPath) || isAncestorPosixPath(targetPath, existingTarget)) {
+        throw new SandboxPolicyError(
+          "duplicate_mount_target",
+          `mount ${String(index)} target path overlaps an existing mount target`,
+        );
+      }
+    }
     targets.add(targetPath);
+    // P1 (review #15): the whole host root or another categorically-sensitive
+    // root (credentials, process info, device nodes) was accepted as a
+    // sourcePath - a legitimate per-attempt mount is always a specific
+    // subdirectory the engine provisioned, never one of these roots itself.
+    if (SENSITIVE_HOST_MOUNT_SOURCE_ROOTS.has(sourcePath)) {
+      throw new SandboxPolicyError(
+        "mount_path_invalid",
+        `mount ${String(index)} source path '${sourcePath}' is a sensitive host root`,
+      );
+    }
     if (kind === "workspace") workspaceCount += 1;
     mounts.push(Object.freeze({ kind, sourcePath, targetPath, access }));
   }
@@ -170,6 +193,38 @@ function validateMounts(value: unknown): readonly SandboxMount[] {
     );
   }
   return mounts;
+}
+
+/** Well-known host roots no legitimate per-attempt mount source is ever
+ * exactly equal to - a mount THIS shallow always exposes credentials,
+ * process info, device nodes, or the whole filesystem, never just the
+ * engine-provisioned subdirectory a real workspace/scratch/cache mount
+ * uses. Deliberately narrow (exact match only): a legitimate mount source
+ * living somewhere UNDER one of these (e.g. /home/attempt/.minions/wc-1)
+ * is unaffected. */
+const SENSITIVE_HOST_MOUNT_SOURCE_ROOTS = new Set([
+  "/",
+  "/etc",
+  "/home",
+  "/root",
+  "/run",
+  "/proc",
+  "/sys",
+  "/dev",
+  "/boot",
+  "/var",
+  "/usr",
+]);
+
+/** @returns `true` iff `candidate` is a strict ancestor of `target` (both
+ *   normalized POSIX absolute paths) - i.e. `target` is `candidate` itself
+ *   or lives under it. Used to reject overlapping mount targets: a nested
+ *   writable mount under an existing read-only one can otherwise modify a
+ *   supposedly read-only subtree. */
+function isAncestorPosixPath(candidate: string, target: string): boolean {
+  if (candidate === target) return true;
+  const prefix = candidate === "/" ? "/" : `${candidate}/`;
+  return target.startsWith(prefix);
 }
 
 function validateMountPath(value: unknown, field: string): string {

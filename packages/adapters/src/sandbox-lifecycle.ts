@@ -563,30 +563,52 @@ function validateExecuteRequest(request: ExecuteSandboxRequest, policy: SandboxP
   }
 }
 
+/**
+ * Returns the git subcommand token, or `undefined` if none is found OR a
+ * config/global option that can redefine command behavior is present.
+ *
+ * P1 (review #15): this previously SKIPPED `-c`/`--config-env`/`--git-dir`/
+ * `--work-tree`/`--namespace`/`--super-prefix` (and every other `-`-prefixed
+ * token) to find the first non-option token, then validated ONLY that
+ * token against the allow/block lists. `git -c alias.status='!sh -c id'
+ * status` was accepted by a policy allowing `status`: the `-c` VALUE
+ * redefines what `status` means (an alias executing an arbitrary host
+ * command) while `parseGitSubcommand` still reported the harmless-looking
+ * literal `status`. `--work-tree=/outside status` similarly escapes
+ * confinement while parsing as an allowed `status`. Fail closed instead:
+ * `-c`/`--config-env`/`--git-dir`/`--work-tree`/`--namespace`/
+ * `--super-prefix` make the whole request unrecognized (undefined), which
+ * the caller's `!allowed` check already rejects - these options are never
+ * needed by a sandboxed git invocation the tool policy is meant to confine.
+ */
 function parseGitSubcommand(arguments_: readonly string[]): string | undefined {
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === undefined) return undefined;
     if (
-      argument === "-C" ||
       argument === "-c" ||
+      argument === "-C" ||
       argument === "--git-dir" ||
       argument === "--work-tree" ||
       argument === "--namespace" ||
       argument === "--super-prefix" ||
-      argument === "--config-env"
-    ) {
-      index += 1;
-      continue;
-    }
-    if (
+      argument === "--config-env" ||
+      argument.startsWith("-c=") ||
+      argument.startsWith("-C=") ||
       argument.startsWith("--git-dir=") ||
       argument.startsWith("--work-tree=") ||
       argument.startsWith("--namespace=") ||
       argument.startsWith("--super-prefix=") ||
-      argument.startsWith("--config-env=") ||
-      argument.startsWith("-")
+      argument.startsWith("--config-env=")
     ) {
+      // -C redirects git's effective repo root the same way --work-tree
+      // does, away from the validated workingDirectory - no legitimate
+      // sandboxed invocation needs it (the harness already sets the
+      // process cwd correctly), so it is rejected here too rather than
+      // skipped.
+      return undefined;
+    }
+    if (argument.startsWith("-")) {
       continue;
     }
     return argument;

@@ -238,6 +238,28 @@ describe("sandbox policy adapters", () => {
       network: { ...valid.network, allowedHosts: ["github.com"] },
     };
     expect(() => fingerprinter.fingerprint(malformed)).toThrow(SandboxPolicyError);
+    // P1 (review #15): only an exact-duplicate target was rejected before -
+    // a nested writable mount under an existing mount's target could still
+    // modify a supposedly read-only subtree.
+    expect(() =>
+      fingerprinter.fingerprint({
+        ...valid,
+        mounts: [
+          { ...workspaceMount, targetPath: "/workspace" },
+          { kind: "cache", sourcePath: "/tmp/minions/nested", targetPath: "/workspace/.secrets", access: "read_write" as const },
+        ],
+      }),
+    ).toThrow(SandboxPolicyError);
+    // P1 (review #15): the whole host root (and other categorically-
+    // sensitive roots) were accepted as a mount sourcePath.
+    for (const sensitiveSource of ["/", "/home", "/etc", "/run"]) {
+      expect(() =>
+        fingerprinter.fingerprint({
+          ...valid,
+          mounts: [{ ...workspaceMount, sourcePath: sensitiveSource }, ...otherMounts],
+        }),
+      ).toThrow(SandboxPolicyError);
+    }
     expect(() =>
       fingerprinter.fingerprint({
         ...policy(),
@@ -390,6 +412,18 @@ describe("sandbox policy adapters", () => {
       { ...valid, arguments: ["-C", ".", "push"] },
       { ...valid, arguments: ["-c", "alias.ship=push", "ship", "origin", "HEAD"] },
       { ...valid, arguments: ["-c", "alias.shell=!sh -c id", "shell"] },
+      // The three above end in a token that's blocked/disallowed on its own
+      // merits, so they were already rejected before this fix - for the
+      // WRONG reason, and don't exercise the actual P1. These two end in
+      // "status", which the fixture's tools.allowedGitSubcommands DOES
+      // allow: pre-fix, parseGitSubcommand skipped past -c/--work-tree to
+      // report the harmless-looking "status" token and the request was
+      // WRONGLY ACCEPTED, even though the -c/--work-tree value redefines
+      // what "status" does (an alias running an arbitrary command) or
+      // redirects it to an unconfined directory.
+      { ...valid, arguments: ["-c", "alias.status=!sh -c id", "status"] },
+      { ...valid, arguments: ["--work-tree=/outside", "status"] },
+      { ...valid, arguments: ["-C", "/outside", "status"] },
     ] satisfies readonly ExecuteSandboxRequest[];
 
     for (const violation of violations) {
