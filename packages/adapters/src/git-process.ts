@@ -281,6 +281,7 @@ function deterministicEnvironment(): NodeJS.ProcessEnv {
     LANG: "C",
     LC_ALL: "C",
     GIT_ASKPASS: "",
+    GIT_ATTR_NOSYSTEM: "1",
     GIT_CONFIG_COUNT: "2",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_KEY_0: "credential.helper",

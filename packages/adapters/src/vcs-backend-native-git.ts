@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { lstat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";
+import { join } from "node:path";
 import {
   contentHash,
   gitSha,
@@ -116,6 +117,7 @@ class NativeGitVcsBackend implements VcsBackend {
 
   async commit(input: VcsCommitInput): Promise<VcsCommitReceipt> {
     const workspace = this.#workspaceOf(input.attemptId).workspacePath;
+    await this.#assertSafeRepoConfig(workspace);
     const parentCommit = await this.#headOf(workspace);
     const authorName = input.authorName ?? DEFAULT_IDENTITY_NAME;
     const authorEmail = input.authorEmail ?? DEFAULT_IDENTITY_EMAIL;
@@ -241,6 +243,37 @@ class NativeGitVcsBackend implements VcsBackend {
     return parseGitSha(await this.#gitText(workspace, ["rev-parse", "HEAD"]), "working copy HEAD");
   }
 
+  /**
+   * Reject repository-local Git config that could execute arbitrary commands
+   * when Git touches the working copy: clean/smudge/process filters fire during
+   * `add`/`checkout`, hooksPath and fsmonitor fire on most operations, textconv
+   * runs on `diff`, sshCommand and upload-pack/receive-pack helpers run on
+   * transport, and aliases can shadow any subcommand. The workspace author owns
+   * `.git/config`, so any of these is an RCE vector despite `shell:false`. Must
+   * run before any mutation that stages working-copy content.
+   */
+  async #assertSafeRepoConfig(workspace: string): Promise<void> {
+    const gitDir = await this.#gitText(workspace, ["rev-parse", "--absolute-git-dir"]);
+    let config: string;
+    try {
+      config = await readFile(join(gitDir, "config"), "utf8");
+    } catch (error: unknown) {
+      // A repository with no readable config carries none of these keys; an
+      // unreadable config is a failure rather than a silent pass-through.
+      if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw new VcsBackendError("git_failed", "workspace git config is unreadable", {
+        cause: error,
+      });
+    }
+    const offending = forbiddenGitConfigKey(config);
+    if (offending !== undefined) {
+      throw new VcsBackendError(
+        "git_failed",
+        `workspace git config contains a forbidden entry: ${offending}`,
+      );
+    }
+  }
+
   async #unmergedPaths(workspace: string): Promise<readonly string[]> {
     const text = await this.#gitText(workspace, ["ls-files", "--unmerged", "-z"]);
     const paths = new Set<string>();
@@ -361,4 +394,61 @@ function parseGitSha(value: string, field: string): GitSha {
     throw new VcsBackendError("git_failed", `${field} is not a valid Git SHA`);
   }
   return gitSha(value);
+}
+
+/**
+ * Repository-local Git config keys that execute an arbitrary command when Git
+ * touches the working copy, grouped by section. `"any"` rejects every key under
+ * that section. The workspace author controls `.git/config`, so these are RCE
+ * vectors despite `shell:false`; see {@link forbiddenGitConfigKey}.
+ */
+type ForbiddenGitConfigSectionRule = "any" | Readonly<Record<string, true>>;
+const FORBIDDEN_GIT_CONFIG_SECTIONS: Record<string, ForbiddenGitConfigSectionRule> = {
+  filter: { clean: true, smudge: true, process: true },
+  diff: { textconv: true },
+  remote: { uploadpack: true, receivepack: true },
+  core: { hookspath: true, fsmonitor: true },
+  alias: "any",
+};
+const FORBIDDEN_GIT_CONFIG_KEYS_ANY_SECTION: Readonly<Record<string, true>> = {
+  sshcommand: true,
+};
+
+/**
+ * Scan a repository's `.git/config` for any setting that could execute an
+ * arbitrary command. Returns the offending `section.key` (or `section.sub.key`)
+ * when one is found, otherwise `undefined`. Git config section names and keys are
+ * case-insensitive and may be written either as a quoted subsection
+ * (`[filter "evil"]` + `clean = ...`) or inline (`[filter]` + `evil.clean = ...`);
+ * both are handled. The scan is deliberately conservative — an unparseable line
+ * is skipped rather than treated as safe, but none of the listed keys can be
+ * honored by Git without matching one of the patterns below.
+ */
+function forbiddenGitConfigKey(config: string): string | undefined {
+  let section = "";
+  const sectionHeader = /^\[(?<name>[A-Za-z0-9.-]+)(?:\s+"(?<sub>[^"\\]*)")?\]\s*$/u;
+  const entry = /^(?<key>[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)(?:\s*=.*)?$/u;
+  for (const rawLine of config.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith("#") || line.startsWith(";")) continue;
+    const header = sectionHeader.exec(line);
+    if (header?.groups) {
+      // Legacy dotted form `[section.subsection]`: the leading segment is the section.
+      let name = header.groups.name!.toLowerCase();
+      const dot = name.indexOf(".");
+      if (dot >= 0) name = name.slice(0, dot);
+      section = name;
+      continue;
+    }
+    const match = entry.exec(line);
+    if (match?.groups) {
+      const segments = match.groups.key!.toLowerCase().split(".");
+      const key = segments[segments.length - 1] ?? "";
+      const qualified = `${section}.${segments.join(".")}`;
+      if (FORBIDDEN_GIT_CONFIG_KEYS_ANY_SECTION[key] === true) return qualified;
+      const rule = FORBIDDEN_GIT_CONFIG_SECTIONS[section];
+      if (rule !== undefined && (rule === "any" || rule[key] === true)) return qualified;
+    }
+  }
+  return undefined;
 }
