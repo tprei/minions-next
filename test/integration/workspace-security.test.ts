@@ -274,6 +274,42 @@ describe("workspace security regressions", () => {
     await expect(readFile(markerPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   }, 30_000);
 
+  it("does not execute a hostile clean filter while snapshotting the source", async () => {
+    const context = await createWorkspaceSecurityContext();
+    const externalRoot = join(context.fixture.directory, "external-source-clean-filter");
+    const markerPath = join(externalRoot, "marker");
+    const scriptPath = join(externalRoot, "clean.sh");
+    await mkdir(externalRoot);
+    await writeFile(scriptPath, `#!/bin/sh\nprintf executed > ${markerPath}\ncat\n`, {
+      mode: 0o755,
+    });
+    await chmod(scriptPath, 0o755);
+    await appendGitConfig(
+      join(context.fixture.root, ".git", "config"),
+      `[filter "hostile"]\n\tclean = ${scriptPath}\n`,
+    );
+    await writeFile(join(context.fixture.root, ".gitattributes"), "README.md filter=hostile\n");
+    await writeFile(join(context.fixture.root, "README.md"), "hostile source change\n");
+
+    // captureSourceSnapshot's status call is what previously ran the filter -
+    // create() invokes it while inspecting the source before cloning.
+    await context.manager.create(context.parentInput);
+    await expect(readFile(markerPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  }, 30_000);
+
+  it("rejects a source with objects/info/alternates instead of importing external objects", async () => {
+    const context = await createWorkspaceSecurityContext();
+    await mkdir(join(context.fixture.root, ".git", "objects", "info"), { recursive: true });
+    await writeFile(
+      join(context.fixture.root, ".git", "objects", "info", "alternates"),
+      "/tmp/some-external-object-database\n",
+    );
+
+    await expect(context.manager.create(context.parentInput)).rejects.toMatchObject({
+      code: "source_invalid",
+    });
+  }, 30_000);
+
   it("rejects a hostile core.worktree configuration without writing outside", async () => {
     const context = await createWorkspaceSecurityContext();
     const receipt = await context.manager.create(context.parentInput);

@@ -973,26 +973,7 @@ class DefaultWorkspaceManager implements WorkspaceManager {
     return { head, status, diff };
   }
   async #filterOverrides(workspace: string): Promise<readonly string[]> {
-    const keys = (
-      await this.#gitText(workspace, ["config", "--includes", "--name-only", "-z", "--list"])
-    ).split("\0");
-    const drivers = new Set<string>();
-    for (const key of keys) {
-      const match = /^filter\.(.+)\.(?:clean|process|required)$/i.exec(key);
-      if (match?.[1] !== undefined) {
-        drivers.add(match[1]);
-      }
-    }
-    return [...drivers]
-      .sort()
-      .flatMap((driver) => [
-        "-c",
-        `filter.${driver}.clean=`,
-        "-c",
-        `filter.${driver}.process=`,
-        "-c",
-        `filter.${driver}.required=false`,
-      ]);
+    return discoverFilterOverrides(this.#git, workspace, this.#timeoutMs, this.#maxOutputBytes);
   }
 
   async #gitRun(workingDirectory: string, arguments_: readonly string[]): Promise<void> {
@@ -1453,11 +1434,19 @@ async function captureSourceSnapshot(
     maxOutputBytes,
   );
   const objectFormat = await readGitObjectFormat(git, sourcePath, timeoutMs, maxOutputBytes);
+  // P1 (review #14 + Codex inline): source snapshots run `git status` without
+  // the same filter overrides #readCapture already applies to workspace
+  // captures. A registered source with a local filter.<name>.clean/process
+  // config + a tracked .gitattributes entry using it lets `status` execute
+  // that filter for modified files - arbitrary commands outside the
+  // workspace, bypassing process/path isolation. Discover and disable them
+  // here too, exactly like #readCapture does for the workspace side.
+  const sourceFilterOverrides = await discoverFilterOverrides(git, sourcePath, timeoutMs, maxOutputBytes);
   const status = (
     await runGit(
       git,
       sourcePath,
-      ["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
+      [...sourceFilterOverrides, "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
       timeoutMs,
       maxOutputBytes,
     )
@@ -1484,6 +1473,51 @@ async function captureSourceSnapshot(
     refs,
     count,
   });
+}
+
+/**
+ * Discover every `filter.<name>.{clean,process,required}` driver configured
+ * (repo-local or otherwise visible via `git config --includes`) at
+ * `workingDirectory`, and return `-c` overrides that neutralize each one
+ * (empty clean/process command, `required=false`) for the NEXT git
+ * invocation only. Shared by the class's `#filterOverrides` (workspace
+ * captures) and `captureSourceSnapshot` (source captures) so neither can
+ * drift out of sync and leave one snapshot path running attacker-controlled
+ * filter commands the other already disables.
+ */
+async function discoverFilterOverrides(
+  git: GitProcess,
+  workingDirectory: string,
+  timeoutMs: number,
+  maxOutputBytes: number,
+): Promise<readonly string[]> {
+  const keys = decodeGitOutput(
+    await runGit(
+      git,
+      workingDirectory,
+      ["config", "--includes", "--name-only", "-z", "--list"],
+      timeoutMs,
+      maxOutputBytes,
+    ),
+    ["config", "--includes", "--name-only", "-z", "--list"],
+  ).split("\0");
+  const drivers = new Set<string>();
+  for (const key of keys) {
+    const match = /^filter\.(.+)\.(?:clean|process|required)$/i.exec(key);
+    if (match?.[1] !== undefined) {
+      drivers.add(match[1]);
+    }
+  }
+  return [...drivers]
+    .sort()
+    .flatMap((driver) => [
+      "-c",
+      `filter.${driver}.clean=`,
+      "-c",
+      `filter.${driver}.process=`,
+      "-c",
+      `filter.${driver}.required=false`,
+    ]);
 }
 
 async function readGitObjectFormat(
@@ -1634,8 +1668,32 @@ async function assertGitMetadataSafe(
   await safeGitMetadataFile(join(gitPath, "index"), code);
   await safeGitMetadataFile(join(gitPath, "packed-refs"), code, true);
   await objectInodes(join(gitPath, "objects"), code);
+  // P1 (review #14): objectInodes only rejects a SYMLINKED objects/info/
+  // alternates; a regular (non-symlink) alternates file still passes it, but
+  // its CONTENTS name an external object database that a later `git fetch`/
+  // `git repack` (etc.) would consult, importing/hardlinking objects from
+  // outside the registered root - a confinement escape via git's own
+  // mechanism, not a filesystem trick. This confinement model has no
+  // supported use for alternates, so reject the file outright if present.
+  await assertNoGitAlternates(join(gitPath, "objects", "info", "alternates"), code);
   await objectInodes(join(gitPath, "refs"), code);
   await safeOptionalGitMetadataDirectory(join(gitPath, "reftable"), code);
+}
+
+async function assertNoGitAlternates(
+  path: string,
+  code: "source_invalid" | "workspace_invalid",
+): Promise<void> {
+  try {
+    await lstat(path);
+  } catch (error: unknown) {
+    if (isErrno(error, "ENOENT")) return;
+    throw error;
+  }
+  throw new WorkspaceManagerError(
+    code,
+    `Git metadata path ${path} configures alternate object databases, which are not confined`,
+  );
 }
 
 async function safeOptionalGitMetadataDirectory(
