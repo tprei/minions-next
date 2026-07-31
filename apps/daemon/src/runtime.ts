@@ -183,7 +183,6 @@ export async function startDaemonRuntime(
           home,
           clock: options.clock,
         },
-        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else {
       server = await startDaemonServer({
