@@ -1,4 +1,5 @@
 export * from "./admission.js";
+export * from "./recovery.js";
 export * from "./attempt.js";
 export * from "./artifact.js";
 export * from "./gate-runner.js";
