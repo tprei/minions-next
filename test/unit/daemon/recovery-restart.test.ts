@@ -31,8 +31,14 @@ const execFileMock =
     ) => EventEmitter
   >();
 
+type SpawnedProcess = EventEmitter & { unref: () => void };
+
+const spawnMock =
+  vi.fn<(command: string, args: readonly string[], options: unknown) => SpawnedProcess>();
+
 vi.mock("node:child_process", () => ({
   execFile: (...callArgs: Parameters<typeof execFileMock>) => execFileMock(...callArgs),
+  spawn: (...callArgs: Parameters<typeof spawnMock>) => spawnMock(...callArgs),
 }));
 
 function fakeLogger(): StructuredLogger & {
@@ -70,11 +76,34 @@ function answerTimeout(): void {
   });
 }
 
+function spawnSucceeds(): void {
+  spawnMock.mockImplementationOnce(() => {
+    const child = new EventEmitter() as SpawnedProcess;
+    child.unref = vi.fn();
+    queueMicrotask(() => {
+      child.emit("spawn");
+    });
+    return child;
+  });
+}
+
+function spawnFails(message: string): void {
+  spawnMock.mockImplementationOnce(() => {
+    const child = new EventEmitter() as SpawnedProcess;
+    child.unref = vi.fn();
+    queueMicrotask(() => {
+      child.emit("error", new Error(message));
+    });
+    return child;
+  });
+}
+
 let originalPlatform: PropertyDescriptor | undefined;
 let originalGetuid: typeof process.getuid;
 
 beforeEach(() => {
   execFileMock.mockReset();
+  spawnMock.mockReset();
   originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
   originalGetuid = process.getuid;
 });
@@ -103,8 +132,17 @@ describe("createSystemRecoveryRestarter", () => {
       expect(execFileMock).toHaveBeenCalledTimes(2);
       expect(execFileMock.mock.calls[0]?.[0]).toBe("systemctl");
       expect(execFileMock.mock.calls[0]?.[1]).toEqual(["--user", "is-active", "minions.service"]);
-      expect(execFileMock.mock.calls[1]?.[0]).toBe("systemctl");
-      expect(execFileMock.mock.calls[1]?.[1]).toEqual(["--user", "restart", "minions.service"]);
+      expect(execFileMock.mock.calls[1]?.[0]).toBe("systemd-run");
+      expect(execFileMock.mock.calls[1]?.[1]).toEqual([
+        "--user",
+        "--collect",
+        "--no-block",
+        "--",
+        "systemctl",
+        "--user",
+        "restart",
+        "minions.service",
+      ]);
       expect(logger.calls.some((c) => c.event === "recovery_restart_invoked")).toBe(true);
     } finally {
       restorePlatform();
@@ -116,21 +154,36 @@ describe("createSystemRecoveryRestarter", () => {
     process.getuid = () => 501;
     try {
       answer(0, "", "");
-      answer(0, "", "");
+      spawnSucceeds();
       const logger = fakeLogger();
       const restarter = createSystemRecoveryRestarter({ logger });
       await restarter.restart("primary-daemon");
 
-      expect(execFileMock).toHaveBeenCalledTimes(2);
+      expect(execFileMock).toHaveBeenCalledTimes(1);
       expect(execFileMock.mock.calls[0]?.[0]).toBe("launchctl");
       expect(execFileMock.mock.calls[0]?.[1]).toEqual(["print", "gui/501/dev.minions.daemon"]);
-      expect(execFileMock.mock.calls[1]?.[0]).toBe("launchctl");
-      expect(execFileMock.mock.calls[1]?.[1]).toEqual([
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(spawnMock.mock.calls[0]?.[0]).toBe("launchctl");
+      expect(spawnMock.mock.calls[0]?.[1]).toEqual([
         "kickstart",
         "-k",
         "gui/501/dev.minions.daemon",
       ]);
       expect(logger.calls.some((c) => c.event === "recovery_restart_invoked")).toBe(true);
+    } finally {
+      restorePlatform();
+    }
+  });
+
+  it("rejects when the detached launchctl kickstart process cannot be spawned", async () => {
+    setPlatform("darwin");
+    process.getuid = () => 501;
+    try {
+      answer(0, "", "");
+      spawnFails("spawn launchctl ENOENT");
+      const logger = fakeLogger();
+      const restarter = createSystemRecoveryRestarter({ logger });
+      await expect(restarter.restart("primary-daemon")).rejects.toThrow(/ENOENT/);
     } finally {
       restorePlatform();
     }

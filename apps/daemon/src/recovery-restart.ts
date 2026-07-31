@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 
 import type { StructuredLogger } from "./logger.js";
 
@@ -76,10 +76,28 @@ async function restartViaSystemd(
     supervisor: "systemd",
     unit: SYSTEMD_UNIT,
   });
-  const result = await runCommand("systemctl", ["--user", "restart", SYSTEMD_UNIT]);
+  // Never invoke `systemctl restart` on the daemon's own unit directly: the daemon
+  // process (and this execFile child) live inside that unit's cgroup, so systemd
+  // SIGTERMs this very command mid-flight as part of tearing the unit down before
+  // it can report success — observed empirically as a synchronous restart racing
+  // its own teardown and resolving with an unusable exit code. `systemd-run
+  // --no-block` submits the restart as a new, independent transient unit and
+  // returns as soon as it is queued (well before systemd starts stopping this
+  // unit), so this command completes cleanly before any SIGTERM arrives.
+  // `--collect` unloads the transient unit once it finishes so nothing leaks.
+  const result = await runCommand("systemd-run", [
+    "--user",
+    "--collect",
+    "--no-block",
+    "--",
+    "systemctl",
+    "--user",
+    "restart",
+    SYSTEMD_UNIT,
+  ]);
   if (result.exitCode !== 0) {
     throw new Error(
-      `systemctl --user restart ${SYSTEMD_UNIT} failed with exit code ${String(result.exitCode)}: ${result.stderr.trim()}`,
+      `systemd-run --user --collect --no-block -- systemctl --user restart ${SYSTEMD_UNIT} failed to queue with exit code ${String(result.exitCode)}: ${result.stderr.trim()}`,
     );
   }
   logger.log("info", "recovery_restart_invoked", {
@@ -117,12 +135,15 @@ async function restartViaLaunchd(
     supervisor: "launchd",
     label: LAUNCHD_LABEL,
   });
-  const result = await runCommand("launchctl", ["kickstart", "-k", service]);
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `launchctl kickstart -k ${service} failed with exit code ${String(result.exitCode)}: ${result.stderr.trim()}`,
-    );
-  }
+  // Same self-teardown race as the systemd path (see restartViaSystemd): this
+  // process is a child of the very job `kickstart -k` is about to kill, so a
+  // synchronous execFile that waits for `launchctl` to exit can be torn down
+  // before it reports success. macOS has no `systemd-run`-equivalent detached
+  // launcher, so spawn `launchctl` detached from this process group and don't
+  // wait for it to exit — best-effort mitigation of the same race, not
+  // empirically verified against a real launchd (no macOS host in this repo's
+  // CI or dev environment).
+  await runDetachedCommand("launchctl", ["kickstart", "-k", service]);
   logger.log("info", "recovery_restart_invoked", {
     target,
     supervisor: "launchd",
@@ -182,4 +203,29 @@ function runCommand(command: string, args: readonly string[]): Promise<CommandRe
     },
   );
   return promise;
+}
+
+/**
+ * Spawns `command` with `args` detached from this process (new session, ignored
+ * stdio) and does not wait for it to exit — for commands that may kill this very
+ * process's job/unit as a side effect, where waiting synchronously risks the wait
+ * itself being torn down before it observes success. Resolves once the process has
+ * been handed to the OS (or rejects if it could not be spawned at all, e.g. ENOENT);
+ * never reports the detached command's own exit code.
+ */
+function runDetachedCommand(command: string, args: readonly string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: "ignore",
+      detached: true,
+      windowsHide: true,
+    });
+    child.once("error", (error) => {
+      reject(error);
+    });
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
 }
