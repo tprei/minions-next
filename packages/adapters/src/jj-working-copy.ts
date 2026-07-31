@@ -27,7 +27,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmod, mkdir, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
 
 import type {
@@ -39,6 +40,7 @@ import type {
   Timestamp,
 } from "@minions/core";
 import { gitSha, nonEmptyText } from "@minions/core";
+import { createNodeGitProcess } from "./git-process.js";
 
 export const JJ_METADATA_DIR = ".jj";
 
@@ -55,7 +57,12 @@ export type JjWorkingCopyErrorCode =
   | "commit_failed"
   | "destroy_failed"
   | "output_limit"
-  | "filesystem_error";
+  | "filesystem_error"
+  | "new_change_failed"
+  | "squash_failed"
+  | "split_failed"
+  | "restore_failed"
+  | "apply_patch_failed";
 
 export class JjWorkingCopyError extends Error {
   readonly code: JjWorkingCopyErrorCode;
@@ -133,12 +140,95 @@ export type JjWorkingCopyManagerOptions = Readonly<{
   readonly maxOutputBytes?: number;
 }>;
 
+/** Receipt for {@link JjWorkingCopyManager.newChange}. */
+export type JjNewChangeReceipt = Readonly<{
+  readonly changeId: string;
+}>;
+
+/** Receipt for {@link JjWorkingCopyManager.squashInto}. */
+export type JjSquashReceipt = Readonly<{
+  readonly changeId: string;
+  readonly commit: GitSha;
+  readonly parentCount: number;
+  readonly conflicted: boolean;
+  readonly operationLogId: string;
+}>;
+
+/** Receipt for {@link JjWorkingCopyManager.split}. */
+export type JjSplitReceipt = Readonly<{
+  readonly changeId: string;
+  readonly commit: GitSha;
+  readonly parentCount: number;
+  readonly operationLogId: string;
+}>;
+
+/** Result of {@link JjWorkingCopyManager.describeRevision} / the internal state {@link JjWorkingCopyManager.squashInto} re-queries after a fold. */
+export type JjRevisionDescriptor = Readonly<{
+  readonly changeId: string;
+  readonly commit: GitSha;
+  readonly parentCount: number;
+  readonly conflicted: boolean;
+}>;
+
 export interface JjWorkingCopyManager {
   createWorkingCopy(nodeId: TaskNodeId, baseCommit: GitSha): Promise<JjWorkingCopy>;
   diff(workingCopyId: string): Promise<JjWorkingCopyDiff>;
   status(workingCopyId: string): Promise<JjWorkingCopyStatus>;
   commit(workingCopyId: string, message: NonEmptyText): Promise<JjCommitReceipt>;
   destroyWorkingCopy(workingCopyId: string): Promise<void>;
+  /**
+   * Create a new empty change on top of `parentChangeId` (a raw jj change id,
+   * commit SHA, or other revset jj resolves within this working copy) and move
+   * `@` onto it (`jj new <parentChangeId>`). Used to create a temporary fixup
+   * child a caller then writes fix content into (see {@link applyPatch}).
+   */
+  newChange(workingCopyId: string, parentChangeId: string): Promise<JjNewChangeReceipt>;
+  /**
+   * Fold `fromChangeId`'s full diff into `intoChangeId`
+   * (`jj squash --from <fromChangeId> --into <intoChangeId>`), keeping
+   * `intoChangeId`'s own description. Reports the resulting parent count and
+   * conflict state; does NOT throw on a conflicted fold — jj represents a
+   * conflict as durable commit state (conflict-as-commit), so the caller must
+   * inspect `conflicted` (and, if true, {@link diffRevision} the result) rather
+   * than relying on a non-zero exit code.
+   */
+  squashInto(
+    workingCopyId: string,
+    fromChangeId: string,
+    intoChangeId: string,
+  ): Promise<JjSquashReceipt>;
+  /**
+   * Split `fileset`'s changes out of `revision` into a new sibling change
+   * parented on `revision`'s OWN parent (`jj split -r <revision> -o <parent>
+   * <fileset...>`), non-interactive since a fileset is always supplied.
+   * `revision` itself keeps the remaining (non-selected) changes and its own
+   * jj change id; repeated calls against the same shrinking `revision` do not
+   * disturb previously-split siblings (they are not `revision`'s descendants,
+   * so jj's auto-rebase never touches them). `message` (default
+   * `"split segment"`) is the new sibling's description.
+   */
+  split(
+    workingCopyId: string,
+    revision: string,
+    fileset: readonly string[],
+    message?: string,
+  ): Promise<JjSplitReceipt>;
+  /** Git-format diff (`jj diff --git -r <revision>`) of an arbitrary revision, through the broker. */
+  diffRevision(workingCopyId: string, revision: string): Promise<Uint8Array>;
+  /** Read {changeId, commit, parentCount, conflicted} for an arbitrary revision, through the broker. */
+  describeRevision(workingCopyId: string, revision: string): Promise<JjRevisionDescriptor>;
+  /** Raw jj operation-log id of the working copy (a rollback anchor for {@link restoreOperation}), through the broker. */
+  currentOperationId(workingCopyId: string): Promise<string>;
+  /** Restore the working copy to a previously-captured operation id (`jj operation restore <operationId>`), through the broker. */
+  restoreOperation(workingCopyId: string, operationId: string): Promise<void>;
+  /**
+   * Apply a unified diff to the working copy's files (`git apply`, since jj
+   * commits are backed by the underlying colocated git store) without staging
+   * it in git's index. The next jj invocation through the broker auto-snapshots
+   * the result onto `@`, exactly like a direct file write picked up by
+   * {@link commit} / {@link diff} / {@link status}.
+   */
+  applyPatch(workingCopyId: string, patch: string): Promise<void>;
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -271,6 +361,13 @@ function firstNonEmptyLine(value: string): string {
   return "";
 }
 
+function nonEmptyLines(value: string): readonly string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
 // -------------------------------------------------------------------------------------------------
 // Factory.
 // -------------------------------------------------------------------------------------------------
@@ -331,6 +428,8 @@ export function createJjWorkingCopyManager(
   const signal = options.signal;
   const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
   const maxOutputBytes = options.maxOutputBytes ?? defaultMaxOutputBytes;
+  const ids = options.ids;
+  const gitProcess = createNodeGitProcess();
 
   const store = new Map<string, StoredWorkingCopy>();
   // Serialized broker: every jj invocation chains off the previous one so concurrent
@@ -394,6 +493,85 @@ export function createJjWorkingCopyManager(
       );
     }
     return stored;
+  }
+  async function captureParentCount(revset: string, cwd: string): Promise<number> {
+    const result = await run(
+      ["log", "--no-graph", "-r", revset, "-T", 'parents.len() ++ "\\n"'],
+      cwd,
+      "status_failed",
+      `jj log parent count for '${revset}' failed`,
+      "Inspect the working copy; destroy and recreate it if it is corrupt.",
+    );
+    const raw = firstNonEmptyLine(result.stdout);
+    const count = Number.parseInt(raw, 10);
+    if (!Number.isSafeInteger(count) || count < 0 || String(count) !== raw) {
+      throw wcError(
+        "status_failed",
+        `could not parse a parent count for '${revset}' (got '${raw}')`,
+        "Inspect the working copy; destroy and recreate it if it is corrupt.",
+      );
+    }
+    return count;
+  }
+
+  async function captureConflicted(revset: string, cwd: string): Promise<boolean> {
+    const result = await run(
+      ["log", "--no-graph", "-r", revset, "-T", 'conflict ++ "\\n"'],
+      cwd,
+      "status_failed",
+      `jj log conflict state for '${revset}' failed`,
+      "Inspect the working copy; destroy and recreate it if it is corrupt.",
+    );
+    const raw = firstNonEmptyLine(result.stdout);
+    if (raw !== "true" && raw !== "false") {
+      throw wcError(
+        "status_failed",
+        `could not parse a conflict state for '${revset}' (got '${raw}')`,
+        "Inspect the working copy; destroy and recreate it if it is corrupt.",
+      );
+    }
+    return raw === "true";
+  }
+
+  async function captureChangeIdList(revset: string, cwd: string): Promise<readonly string[]> {
+    const result = await run(
+      ["log", "--no-graph", "-r", revset, "-T", 'change_id ++ "\\n"'],
+      cwd,
+      "status_failed",
+      `jj log change_id list for '${revset}' failed`,
+      "Inspect the working copy; destroy and recreate it if it is corrupt.",
+    );
+    return nonEmptyLines(result.stdout).filter((line) => changeIdPattern.test(line));
+  }
+
+  async function captureRawOperationId(cwd: string): Promise<string> {
+    const result = await run(
+      ["op", "log", "--no-graph", "--limit", "1", "-T", 'id ++ "\\n"'],
+      cwd,
+      "status_failed",
+      `jj op log failed in '${cwd}'`,
+      "Inspect the working copy; destroy and recreate it if it is corrupt.",
+    );
+    const id = firstNonEmptyLine(result.stdout);
+    if (!/^[0-9a-f]{64,}$/u.test(id)) {
+      throw wcError(
+        "status_failed",
+        `could not parse an operation-log id in '${cwd}' (got '${id}')`,
+        "Inspect the working copy; destroy and recreate it if it is corrupt.",
+      );
+    }
+    return id;
+  }
+
+  async function describeRevisionInternal(
+    revset: string,
+    cwd: string,
+  ): Promise<JjRevisionDescriptor> {
+    const changeId = await captureChangeId(revset, cwd);
+    const commit = gitSha(await captureCommitId(changeId, cwd));
+    const parentCount = await captureParentCount(changeId, cwd);
+    const conflicted = await captureConflicted(changeId, cwd);
+    return Object.freeze({ changeId, commit, parentCount, conflicted });
   }
 
   async function captureChangeId(revset: string, cwd: string): Promise<string> {
@@ -683,6 +861,225 @@ export function createJjWorkingCopyManager(
           );
         }
         store.delete(workingCopyId);
+      });
+    },
+    newChange(workingCopyId: string, parentChangeId: string): Promise<JjNewChangeReceipt> {
+      return serialized(async (): Promise<JjNewChangeReceipt> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        if (typeof parentChangeId !== "string" || parentChangeId.trim().length === 0) {
+          throw wcError(
+            "invalid_options",
+            "parentChangeId must be a non-empty revset",
+            "Pass the raw jj change id, commit SHA, or revset of the change to build the new child on top of.",
+          );
+        }
+        await run(
+          ["new", parentChangeId],
+          stored.workingCopyPath,
+          "new_change_failed",
+          `jj new ${parentChangeId} failed in '${stored.workingCopyPath}'`,
+          "Inspect the working copy; ensure the parent revision exists.",
+        );
+        const changeId = await captureChangeId("@", stored.workingCopyPath);
+        const resolvedParentChangeId = await captureChangeId("@-", stored.workingCopyPath);
+        store.set(changeId, {
+          workingCopyId: changeId,
+          workingCopyPath: stored.workingCopyPath,
+          parentChangeId: resolvedParentChangeId,
+          baseCommit: stored.baseCommit,
+          createdAt: clock.now(),
+        });
+        return Object.freeze({ changeId });
+      });
+    },
+
+    squashInto(
+      workingCopyId: string,
+      fromChangeId: string,
+      intoChangeId: string,
+    ): Promise<JjSquashReceipt> {
+      return serialized(async (): Promise<JjSquashReceipt> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        if (typeof fromChangeId !== "string" || fromChangeId.trim().length === 0) {
+          throw wcError(
+            "invalid_options",
+            "fromChangeId must be a non-empty revset",
+            "Pass the change id to squash from (e.g. the fixup change).",
+          );
+        }
+        if (typeof intoChangeId !== "string" || intoChangeId.trim().length === 0) {
+          throw wcError(
+            "invalid_options",
+            "intoChangeId must be a non-empty revset",
+            "Pass the destination change id to squash into.",
+          );
+        }
+        await run(
+          ["squash", "--from", fromChangeId, "--into", intoChangeId, "--use-destination-message"],
+          stored.workingCopyPath,
+          "squash_failed",
+          `jj squash --from ${fromChangeId} --into ${intoChangeId} failed in '${stored.workingCopyPath}'`,
+          "Inspect the working copy via the broker; the source change is preserved for retry.",
+        );
+        const described = await describeRevisionInternal(intoChangeId, stored.workingCopyPath);
+        const operationLogId = await captureRawOperationId(stored.workingCopyPath);
+        return Object.freeze({ ...described, operationLogId });
+      });
+    },
+
+    split(
+      workingCopyId: string,
+      revision: string,
+      fileset: readonly string[],
+      message?: string,
+    ): Promise<JjSplitReceipt> {
+      return serialized(async (): Promise<JjSplitReceipt> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        if (typeof revision !== "string" || revision.trim().length === 0) {
+          throw wcError(
+            "invalid_options",
+            "revision must be a non-empty revset",
+            "Pass the change id to split.",
+          );
+        }
+        if (
+          fileset.length === 0 ||
+          fileset.some((path) => typeof path !== "string" || path.trim().length === 0)
+        ) {
+          throw wcError(
+            "invalid_options",
+            "fileset must be a non-empty array of non-empty path strings",
+            "Pass at least one file path for the segment.",
+          );
+        }
+        const cwd = stored.workingCopyPath;
+        const parent = await captureChangeId(`${revision}-`, cwd);
+        const before = new Set(await captureChangeIdList(`${parent}+`, cwd));
+        await run(
+          ["split", "-r", revision, "-o", parent, ...fileset, "-m", message ?? "split segment"],
+          cwd,
+          "split_failed",
+          `jj split -r ${revision} -o ${parent} failed in '${cwd}'`,
+          "Inspect the working copy via the broker; the original change is preserved for retry.",
+        );
+        const after = await captureChangeIdList(`${parent}+`, cwd);
+        const created = after.filter((id) => !before.has(id));
+        const changeId = created[0];
+        if (changeId === undefined || created.length !== 1) {
+          throw wcError(
+            "split_failed",
+            `expected exactly one new child of '${parent}' after splitting '${revision}', found ${String(created.length)}`,
+            "Inspect the working copy; destroy and recreate it if it is corrupt.",
+          );
+        }
+        const commit = gitSha(await captureCommitId(changeId, cwd));
+        const parentCount = await captureParentCount(changeId, cwd);
+        const operationLogId = await captureRawOperationId(cwd);
+        return Object.freeze({ changeId, commit, parentCount, operationLogId });
+      });
+    },
+
+    diffRevision(workingCopyId: string, revision: string): Promise<Uint8Array> {
+      return serialized(async (): Promise<Uint8Array> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        if (typeof revision !== "string" || revision.trim().length === 0) {
+          throw wcError(
+            "invalid_options",
+            "revision must be a non-empty revset",
+            "Pass the change id to diff.",
+          );
+        }
+        const result = await run(
+          ["diff", "--git", "-r", revision],
+          stored.workingCopyPath,
+          "diff_failed",
+          `jj diff --git -r ${revision} failed in '${stored.workingCopyPath}'`,
+          "Inspect the working copy; destroy and recreate it if it is corrupt.",
+        );
+        return new TextEncoder().encode(result.stdout);
+      });
+    },
+    describeRevision(workingCopyId: string, revision: string): Promise<JjRevisionDescriptor> {
+      return serialized(async (): Promise<JjRevisionDescriptor> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        if (typeof revision !== "string" || revision.trim().length === 0) {
+          throw wcError(
+            "invalid_options",
+            "revision must be a non-empty revset",
+            "Pass the change id to describe.",
+          );
+        }
+        return describeRevisionInternal(revision, stored.workingCopyPath);
+      });
+    },
+
+    currentOperationId(workingCopyId: string): Promise<string> {
+      return serialized(async (): Promise<string> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        return captureRawOperationId(stored.workingCopyPath);
+      });
+    },
+
+    restoreOperation(workingCopyId: string, operationId: string): Promise<void> {
+      return serialized(async (): Promise<void> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        if (typeof operationId !== "string" || operationId.trim().length === 0) {
+          throw wcError(
+            "invalid_options",
+            "operationId must be a non-empty operation id",
+            "Pass the operation id captured (via currentOperationId) before the mutation to roll back.",
+          );
+        }
+        await run(
+          ["operation", "restore", operationId],
+          stored.workingCopyPath,
+          "restore_failed",
+          `jj operation restore ${operationId} failed in '${stored.workingCopyPath}'`,
+          "Inspect the working copy; the operation log may not contain this id.",
+        );
+      });
+    },
+
+    applyPatch(workingCopyId: string, patch: string): Promise<void> {
+      return serialized(async (): Promise<void> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        if (typeof patch !== "string" || patch.trim().length === 0) {
+          throw wcError(
+            "invalid_options",
+            "patch must be a non-empty unified diff",
+            "Pass a non-empty unified diff to apply.",
+          );
+        }
+        const patchPath = join(tmpdir(), `jj-wc-patch-${ids.nextId()}.diff`);
+        try {
+          await writeFile(patchPath, patch, "utf8");
+          const metadata = await lstat(stored.workingCopyPath, { bigint: true });
+          if (metadata.isSymbolicLink()) {
+            throw wcError(
+              "apply_patch_failed",
+              `working copy directory '${stored.workingCopyPath}' is a symlink`,
+              "Inspect the working copy; destroy and recreate it if it is corrupt.",
+            );
+          }
+          await gitProcess.run({
+            workingDirectory: stored.workingCopyPath,
+            workingDirectoryDevice: metadata.dev,
+            workingDirectoryInode: metadata.ino,
+            arguments: ["apply", "--recount", patchPath],
+            timeoutMs,
+            maxOutputBytes,
+          });
+        } catch (error: unknown) {
+          if (error instanceof JjWorkingCopyError) throw error;
+          throw wcError(
+            "apply_patch_failed",
+            `applying patch failed in '${stored.workingCopyPath}': ${errorToString(error)}`,
+            "Inspect the patch content; it must be a unified diff that applies cleanly to the working copy.",
+            error,
+          );
+        } finally {
+          await rm(patchPath, { force: true });
+        }
       });
     },
   };

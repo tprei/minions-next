@@ -547,3 +547,384 @@ describe("createJjWorkingCopyManager — destroyWorkingCopy", () => {
     expect(probes.every((probe) => probe.clean)).toBe(true);
   }, 60_000);
 });
+
+// -------------------------------------------------------------------------------------------------
+// newChange — temporary fixup/child changes (PR 39/40 broker extensions).
+// -------------------------------------------------------------------------------------------------
+
+describe("createJjWorkingCopyManager — newChange", () => {
+  it("creates an empty child change on top of the given parent and moves @", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-newchange-");
+    const hostRoot = await makeDirectory("jj-wc-host-newchange-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b01"),
+      gitSha(central.baseCommit),
+    );
+
+    // Commit a real "descendant" change to build a temporary child on top of.
+    await writeFile(join(wc.workingCopyPath, "descendant.txt"), "d\n", "utf8");
+    const commitReceipt = await manager.commit(
+      wc.workingCopyId,
+      nonEmptyText("descendant commit", "message"),
+    );
+    const descendantChangeId = commitReceipt.workingCopyId;
+
+    const created = await manager.newChange(commitReceipt.newWorkingCopyId, descendantChangeId);
+    expect(created.changeId).toMatch(changeIdPattern);
+    expect(created.changeId).not.toBe(descendantChangeId);
+
+    // @ moved onto the new child; it is empty and parented on the descendant.
+    const status = await manager.status(created.changeId);
+    expect(status.clean).toBe(true);
+    expect(status.parentChangeId).toBe(descendantChangeId);
+
+    // Independent (bypassing the broker) confirmation via the real binary.
+    const rawParent = firstNonEmptyLine(
+      await runJj(wc.workingCopyPath, ["log", "--no-graph", "-r", "@-", "-T", 'change_id ++ "\n"']),
+    );
+    expect(rawParent).toBe(descendantChangeId);
+  }, 60_000);
+});
+
+// -------------------------------------------------------------------------------------------------
+// applyPatch — unified diffs applied through `git apply`, picked up by the next jj call.
+// -------------------------------------------------------------------------------------------------
+
+describe("createJjWorkingCopyManager — applyPatch", () => {
+  it("applies a unified diff to the working copy and the broker picks it up", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-applypatch-");
+    const hostRoot = await makeDirectory("jj-wc-host-applypatch-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b02"),
+      gitSha(central.baseCommit),
+    );
+
+    const patch = [
+      "diff --git a/src/lib.ts b/src/lib.ts",
+      "--- a/src/lib.ts",
+      "+++ b/src/lib.ts",
+      "@@ -1 +1,2 @@",
+      " export const v = 1;",
+      "+export const w = 2;",
+      "",
+    ].join("\n");
+
+    await manager.applyPatch(wc.workingCopyId, patch);
+
+    const status = await manager.status(wc.workingCopyId);
+    expect(status.clean).toBe(false);
+    expect(status.changedPaths).toContain("src/lib.ts");
+
+    const diff = await manager.diff(wc.workingCopyId);
+    const diffText = new TextDecoder().decode(diff.diff);
+    expect(diffText).toContain("w = 2");
+  }, 60_000);
+
+  it("rejects an empty patch without touching the working copy", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-applypatch-empty-");
+    const hostRoot = await makeDirectory("jj-wc-host-applypatch-empty-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b03"),
+      gitSha(central.baseCommit),
+    );
+
+    await expect(manager.applyPatch(wc.workingCopyId, "")).rejects.toMatchObject({
+      name: "JjWorkingCopyError",
+      code: "invalid_options",
+    });
+    const status = await manager.status(wc.workingCopyId);
+    expect(status.clean).toBe(true);
+  }, 60_000);
+});
+
+// -------------------------------------------------------------------------------------------------
+// squashInto — folding a fixup change into an ancestor (`jj squash --from/--into`).
+// -------------------------------------------------------------------------------------------------
+
+describe("createJjWorkingCopyManager — squashInto", () => {
+  it("folds a fixup change's diff into the target with a clean single-parent result", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-squash-clean-");
+    const hostRoot = await makeDirectory("jj-wc-host-squash-clean-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b04"),
+      gitSha(central.baseCommit),
+    );
+    const wcPath = wc.workingCopyPath;
+
+    // A: the originating change (rewrites README.md).
+    await writeFile(join(wcPath, "README.md"), "central workspace\nA\n", "utf8");
+    const aReceipt = await manager.commit(wc.workingCopyId, nonEmptyText("A: readme", "message"));
+    const aChangeId = aReceipt.workingCopyId;
+
+    // D: a descendant change touching an independent file.
+    await writeFile(join(wcPath, "src", "lib.ts"), "export const v = 2;\n", "utf8");
+    const dReceipt = await manager.commit(
+      aReceipt.newWorkingCopyId,
+      nonEmptyText("D: lib", "message"),
+    );
+    const dChangeId = dReceipt.workingCopyId;
+
+    // Temporary fixup child of D; the fix targets A's own file (README.md).
+    const fixup = await manager.newChange(dReceipt.newWorkingCopyId, dChangeId);
+    await manager.applyPatch(
+      fixup.changeId,
+      [
+        "diff --git a/README.md b/README.md",
+        "--- a/README.md",
+        "+++ b/README.md",
+        "@@ -1,2 +1,3 @@",
+        " central workspace",
+        " A",
+        "+fixup line",
+        "",
+      ].join("\n"),
+    );
+
+    const receipt = await manager.squashInto(fixup.changeId, fixup.changeId, aChangeId);
+    expect(receipt.changeId).toBe(aChangeId);
+    expect(receipt.parentCount).toBe(1);
+    expect(receipt.conflicted).toBe(false);
+    expect(receipt.commit).toMatch(commitIdPattern);
+    expect(receipt.operationLogId).toMatch(/^[0-9a-f]{64,}$/u);
+
+    // The originating change's new commit reflects the fix.
+    const diffText = new TextDecoder().decode(
+      await manager.diffRevision(fixup.changeId, aChangeId),
+    );
+    expect(diffText).toContain("fixup line");
+
+    // The fixup change itself is gone (absorbed) — independently verified via the real binary.
+    await expect(
+      runJj(wcPath, ["log", "--no-graph", "-r", fixup.changeId, "-T", 'change_id ++ "\n"']),
+    ).rejects.toThrow();
+  }, 90_000);
+
+  it("reports conflicted=true when the fold does not apply cleanly, without throwing", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-squash-conflict-");
+    const hostRoot = await makeDirectory("jj-wc-host-squash-conflict-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b05"),
+      gitSha(central.baseCommit),
+    );
+    const wcPath = wc.workingCopyPath;
+
+    // A: touches line 2 only.
+    await writeFile(join(wcPath, "README.md"), "one\nTWO-A\nthree\n", "utf8");
+    const aReceipt = await manager.commit(wc.workingCopyId, nonEmptyText("A: line2", "message"));
+    const aChangeId = aReceipt.workingCopyId;
+
+    // D: descendant, touches line 3.
+    await writeFile(join(wcPath, "README.md"), "one\nTWO-A\nTHREE-D\n", "utf8");
+    const dReceipt = await manager.commit(
+      aReceipt.newWorkingCopyId,
+      nonEmptyText("D: line3", "message"),
+    );
+    const dChangeId = dReceipt.workingCopyId;
+
+    // Fixup child of D ALSO touches line 3, differently — squashing into A (whose line 3 is
+    // still the untouched original) conflicts.
+    const fixup = await manager.newChange(dReceipt.newWorkingCopyId, dChangeId);
+    await writeFile(join(wcPath, "README.md"), "one\nTWO-A\nTHREE-FIXUP\n", "utf8");
+
+    const receipt = await manager.squashInto(fixup.changeId, fixup.changeId, aChangeId);
+    expect(receipt.parentCount).toBe(1);
+    expect(receipt.conflicted).toBe(true);
+
+    const diffText = new TextDecoder().decode(
+      await manager.diffRevision(fixup.changeId, aChangeId),
+    );
+    expect(diffText).toContain("<<<<<<<");
+  }, 90_000);
+});
+
+// -------------------------------------------------------------------------------------------------
+// split — fanning a fileset out of a change into a new sibling (`jj split -o <parent>`).
+// -------------------------------------------------------------------------------------------------
+
+describe("createJjWorkingCopyManager — split", () => {
+  it("splits a fileset into a new sibling child with parent count 1", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-split-basic-");
+    const hostRoot = await makeDirectory("jj-wc-host-split-basic-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b06"),
+      gitSha(central.baseCommit),
+    );
+    const wcPath = wc.workingCopyPath;
+
+    await writeFile(join(wcPath, "a.txt"), "a\n", "utf8");
+    await writeFile(join(wcPath, "b.txt"), "b\n", "utf8");
+    const nReceipt = await manager.commit(
+      wc.workingCopyId,
+      nonEmptyText("N: oversized", "message"),
+    );
+    const nChangeId = nReceipt.workingCopyId;
+    const routeId = nReceipt.newWorkingCopyId;
+
+    const segment = await manager.split(routeId, nChangeId, ["a.txt"], "segment: a.txt");
+    expect(segment.changeId).toMatch(changeIdPattern);
+    expect(segment.changeId).not.toBe(nChangeId);
+    expect(segment.parentCount).toBe(1);
+    expect(segment.commit).toMatch(commitIdPattern);
+    expect(segment.operationLogId).toMatch(/^[0-9a-f]{64,}$/u);
+
+    const segmentDiff = new TextDecoder().decode(
+      await manager.diffRevision(routeId, segment.changeId),
+    );
+    expect(segmentDiff).toContain("a.txt");
+    expect(segmentDiff).not.toContain("b.txt");
+
+    // N itself keeps the non-selected file and shares its own (unchanged) parent with the sibling.
+    const remainingDiff = new TextDecoder().decode(await manager.diffRevision(routeId, nChangeId));
+    expect(remainingDiff).toContain("b.txt");
+    expect(remainingDiff).not.toContain("a.txt");
+    const segmentParent = firstNonEmptyLine(
+      await runJj(wcPath, [
+        "log",
+        "--no-graph",
+        "-r",
+        `${segment.changeId}-`,
+        "-T",
+        'change_id ++ "\n"',
+      ]),
+    );
+    const remainingParent = firstNonEmptyLine(
+      await runJj(wcPath, ["log", "--no-graph", "-r", `${nChangeId}-`, "-T", 'change_id ++ "\n"']),
+    );
+    expect(segmentParent).toBe(remainingParent);
+  }, 90_000);
+
+  it("keeps a previously split sibling's commit stable across a later segment split", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-split-stable-");
+    const hostRoot = await makeDirectory("jj-wc-host-split-stable-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b07"),
+      gitSha(central.baseCommit),
+    );
+    const wcPath = wc.workingCopyPath;
+
+    await writeFile(join(wcPath, "a.txt"), "a\n", "utf8");
+    await writeFile(join(wcPath, "b.txt"), "b\n", "utf8");
+    await writeFile(join(wcPath, "c.txt"), "c\n", "utf8");
+    const nReceipt = await manager.commit(
+      wc.workingCopyId,
+      nonEmptyText("N: three files", "message"),
+    );
+    const nChangeId = nReceipt.workingCopyId;
+    const routeId = nReceipt.newWorkingCopyId;
+
+    const seg1 = await manager.split(routeId, nChangeId, ["a.txt"], "segment 1: a.txt");
+    const seg2 = await manager.split(routeId, nChangeId, ["b.txt"], "segment 2: b.txt");
+    const seg3 = await manager.split(routeId, nChangeId, ["c.txt"], "segment 3: c.txt");
+
+    expect(new Set([seg1.changeId, seg2.changeId, seg3.changeId]).size).toBe(3);
+    expect(seg1.parentCount).toBe(1);
+    expect(seg2.parentCount).toBe(1);
+    expect(seg3.parentCount).toBe(1);
+
+    // Segment 1's own commit is untouched by segments 2 and 3 — independently verified: it is
+    // a sibling of N, not N's descendant, so jj's auto-rebase never touches it.
+    const seg1CommitAfter = firstNonEmptyLine(
+      await runJj(wcPath, ["log", "--no-graph", "-r", seg1.changeId, "-T", 'commit_id ++ "\n"']),
+    );
+    expect(seg1CommitAfter).toBe(seg1.commit);
+    const seg1DiffAfter = new TextDecoder().decode(
+      await manager.diffRevision(routeId, seg1.changeId),
+    );
+    expect(seg1DiffAfter).toContain("a.txt");
+    expect(seg1DiffAfter).not.toContain("b.txt");
+    expect(seg1DiffAfter).not.toContain("c.txt");
+  }, 120_000);
+});
+
+// -------------------------------------------------------------------------------------------------
+// diffRevision / currentOperationId / restoreOperation — arbitrary-revision reads + rollback.
+// -------------------------------------------------------------------------------------------------
+
+describe("createJjWorkingCopyManager — diffRevision, currentOperationId, restoreOperation", () => {
+  it("reads an arbitrary revision's diff in git format", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-diffrev-");
+    const hostRoot = await makeDirectory("jj-wc-host-diffrev-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b08"),
+      gitSha(central.baseCommit),
+    );
+    await writeFile(join(wc.workingCopyPath, "x.txt"), "x\n", "utf8");
+    const receipt = await manager.commit(wc.workingCopyId, nonEmptyText("x commit", "message"));
+
+    const diffText = new TextDecoder().decode(
+      await manager.diffRevision(receipt.newWorkingCopyId, receipt.workingCopyId),
+    );
+    expect(diffText).toContain("diff --git a/x.txt b/x.txt");
+  }, 60_000);
+
+  it("rolls back a mutation via a captured operation id", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-rollback-");
+    const hostRoot = await makeDirectory("jj-wc-host-rollback-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b09"),
+      gitSha(central.baseCommit),
+    );
+    const countChanges = async (): Promise<number> => {
+      const out = await runJj(wc.workingCopyPath, ["log", "--no-graph", "-T", 'change_id ++ "\n"']);
+      return out
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0).length;
+    };
+
+    const before = await manager.currentOperationId(wc.workingCopyId);
+    expect(before).toMatch(/^[0-9a-f]{64,}$/u);
+    const countBefore = await countChanges();
+
+    await writeFile(join(wc.workingCopyPath, "rollback.txt"), "payload\n", "utf8");
+    const receipt = await manager.commit(
+      wc.workingCopyId,
+      nonEmptyText("to be rolled back", "message"),
+    );
+    expect(await countChanges()).toBeGreaterThan(countBefore);
+
+    await manager.restoreOperation(receipt.newWorkingCopyId, before);
+
+    // Independently (bypassing the broker's own id bookkeeping) confirm the repo is back to
+    // its pre-commit state.
+    expect(await countChanges()).toBe(countBefore);
+    const filesAtHead = await runJj(wc.workingCopyPath, ["file", "list"]);
+    expect(filesAtHead).not.toContain("rollback.txt");
+  }, 60_000);
+});
+
+// -------------------------------------------------------------------------------------------------
+// describeRevision — changeId/commit/parentCount/conflicted for an arbitrary revision.
+// -------------------------------------------------------------------------------------------------
+
+describe("createJjWorkingCopyManager — describeRevision", () => {
+  it("describes an arbitrary revision's change id, commit, parent count, and conflict state", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-describe-");
+    const hostRoot = await makeDirectory("jj-wc-host-describe-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000b10"),
+      gitSha(central.baseCommit),
+    );
+    await writeFile(join(wc.workingCopyPath, "described.txt"), "d\n", "utf8");
+    const receipt = await manager.commit(wc.workingCopyId, nonEmptyText("described", "message"));
+
+    const described = await manager.describeRevision(
+      receipt.newWorkingCopyId,
+      receipt.workingCopyId,
+    );
+    expect(described.changeId).toBe(receipt.workingCopyId);
+    expect(described.commit).toBe(receipt.commitSha);
+    expect(described.parentCount).toBe(1);
+    expect(described.conflicted).toBe(false);
+  }, 60_000);
+});
