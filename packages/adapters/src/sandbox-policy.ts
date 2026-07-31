@@ -471,6 +471,49 @@ function isolationProbeEnvironmentIsValid(value: unknown): boolean {
   });
 }
 
+export function commonAncestorPath(paths: readonly string[]): string | undefined {
+  const first = paths[0];
+  if (first === undefined) return undefined;
+  if (paths.length === 1) return first;
+  const firstSegments = first.split("/");
+  let commonLength = firstSegments.length;
+  for (const path of paths.slice(1)) {
+    const segments = path.split("/");
+    let index = 0;
+    while (
+      index < commonLength &&
+      index < segments.length &&
+      segments[index] === firstSegments[index]
+    ) {
+      index += 1;
+    }
+    commonLength = index;
+  }
+  const commonSegments = firstSegments.slice(0, commonLength);
+  const root = commonSegments.join("/");
+  return root.length === 0 ? "/" : root;
+}
+
+export function commonWorkspaceRoot(workspaceMounts: readonly SandboxMount[]): string | undefined {
+  return commonAncestorPath(workspaceMounts.map((mount) => mount.targetPath));
+}
+
+function isWithinAnyWorkspaceMount(
+  path: string,
+  workspaceMounts: readonly SandboxMount[],
+): boolean {
+  // A per-entry mount set has no mount literally targeting the shared
+  // conceptual root (e.g. "/workspace" when every mount targets
+  // "/workspace/<entry>") - so containment also accepts PATH being EXACTLY
+  // the tightest common ancestor of every workspace mount's target - never
+  // any coarser ancestor (that would accept "/" for any non-empty mount
+  // set, defeating this check entirely).
+  return (
+    workspaceMounts.some((mount) => pathIsWithin(path, mount.targetPath)) ||
+    path === commonWorkspaceRoot(workspaceMounts)
+  );
+}
+
 function isWorkspaceScriptPath(
   value: string,
   request: ExecuteSandboxRequest,
@@ -484,18 +527,18 @@ function isWorkspaceScriptPath(
   ) {
     return false;
   }
-  const workspace = policy.mounts.find((mount) => mount.kind === "workspace");
+  const workspaceMounts = policy.mounts.filter((mount) => mount.kind === "workspace");
   if (
-    workspace === undefined ||
+    workspaceMounts.length === 0 ||
     !posix.isAbsolute(request.workingDirectory) ||
     posix.normalize(request.workingDirectory) !== request.workingDirectory ||
-    !pathIsWithin(request.workingDirectory, workspace.targetPath)
+    !isWithinAnyWorkspaceMount(request.workingDirectory, workspaceMounts)
   ) {
     return false;
   }
   const scriptPath = posix.isAbsolute(value) ? value : posix.join(request.workingDirectory, value);
   if (posix.normalize(scriptPath) !== scriptPath) return false;
-  return pathIsWithin(scriptPath, workspace.targetPath);
+  return workspaceMounts.some((mount) => pathIsWithin(scriptPath, mount.targetPath));
 }
 
 function pathIsWithin(path: string, root: string): boolean {
@@ -966,10 +1009,10 @@ function validateMounts(value: unknown): readonly SandboxMount[] {
     if (kind === "workspace") workspaceCount += 1;
     mounts.push(Object.freeze({ kind, sourcePath, targetPath, access }));
   }
-  if (workspaceCount !== 1) {
+  if (workspaceCount < 1) {
     throw new SandboxPolicyError(
       "workspace_mount_required",
-      "sandbox policy must contain exactly one workspace mount",
+      "sandbox policy must contain at least one workspace mount",
     );
   }
   return mounts;
@@ -1014,6 +1057,15 @@ function validateMountPath(value: unknown, field: string): string {
   const segments = value.split("/");
   if (segments.some((segment) => segment === ".." || segment === ".")) {
     throw new SandboxPolicyError("mount_path_traversal", `${field} contains traversal segments`);
+  }
+  // GIT-15: jj metadata (`.jj`) must never be reachable inside any sandbox. Reject any
+  // mount whose source or target path touches a `.jj` segment — this is the production
+  // enforcement that pairs with the masked jj working copy (PR 28).
+  if (segments.some((segment) => segment === ".jj")) {
+    throw new SandboxPolicyError(
+      "mount_path_invalid",
+      `${field} traverses '.jj' metadata which is denied inside any sandbox (GIT-15)`,
+    );
   }
   const normalized = posix.normalize(value);
   if (normalized !== value) {

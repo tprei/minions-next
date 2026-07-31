@@ -287,6 +287,25 @@ export type {
   JjCentralRepoManagerOptions,
   JjPreSnapshotReport,
 } from "./jj-central-repo.js";
+export {
+  JJ_METADATA_DIR,
+  createJjWorkingCopyManager,
+  JjWorkingCopyError,
+  pathContainsDotJj,
+} from "./jj-working-copy.js";
+export type {
+  JjCommitReceipt,
+  JjNewChangeReceipt,
+  JjRevisionDescriptor,
+  JjSplitReceipt,
+  JjSquashReceipt,
+  JjWorkingCopy,
+  JjWorkingCopyDiff,
+  JjWorkingCopyErrorCode,
+  JjWorkingCopyManager,
+  JjWorkingCopyManagerOptions,
+  JjWorkingCopyStatus,
+} from "./jj-working-copy.js";
 export { checkJjCompatibility } from "./jj-capability-gates.js";
 export type {
   JjCompatibilityDenial,
