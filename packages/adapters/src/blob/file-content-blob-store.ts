@@ -33,7 +33,7 @@ const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const PREFIX_PATTERN = /^[0-9a-f]{2}$/u;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256_DIRECTORY = "sha256";
-const NO_FOLLOW_READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
+const NO_FOLLOW_READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const NO_FOLLOW_DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
 export type CreateFileContentBlobStoreOptions = Readonly<{
   rootPath: string;
@@ -411,7 +411,9 @@ function assertPosixBlobStoreSupport(): void {
     typeof constants.O_NOFOLLOW !== "number" ||
     constants.O_NOFOLLOW === 0 ||
     typeof constants.O_DIRECTORY !== "number" ||
-    constants.O_DIRECTORY === 0
+    constants.O_DIRECTORY === 0 ||
+    typeof constants.O_NONBLOCK !== "number" ||
+    constants.O_NONBLOCK === 0
   ) {
     throw new BlobStoreError("file content blob store requires POSIX no-follow filesystem flags");
   }

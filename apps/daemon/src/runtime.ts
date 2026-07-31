@@ -1,6 +1,6 @@
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
-import { mkdirSync, realpathSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -161,8 +161,7 @@ export async function startDaemonRuntime(
 
     if (options.mode !== "supervisor") {
       const activeHostId = requireHostId(localHostId);
-      const hostDirectory = join(home, "hosts", activeHostId);
-      mkdirSync(hostDirectory, { recursive: true, mode: 0o700 });
+      const hostDirectory = ensureHostDirectorySync(home, activeHostId);
       hostDatabase = await openHostDatabase({
         path: join(hostDirectory, "host.db"),
         backupPath: backupPath(home, lifecycle.instanceId, `host-${activeHostId}`),
@@ -590,6 +589,37 @@ function protobufTimestamp(milliseconds: Timestamp) {
     seconds: BigInt(Math.floor(milliseconds / 1_000)),
     nanos: (milliseconds % 1_000) * 1_000_000,
   });
+}
+
+/**
+ * Create `<home>/hosts/<hostId>` (the artifact blob store's rootPath parent),
+ * rejecting a symlinked ancestor at every segment instead of following it. P1
+ * (review #13): the previous `mkdirSync(hostDirectory, { recursive: true })`
+ * creates/traverses through a preexisting symlinked ancestor (e.g. a
+ * `hosts/<hostId>` symlink planted before this daemon start), so canonical
+ * blob writes/reads/deletes could escape the host artifact boundary. `home`
+ * is already realpath-resolved by `prepareHome`; this walks only the two new
+ * segments this call owns ("hosts" and the host id).
+ */
+function ensureHostDirectorySync(home: string, hostId: string): string {
+  let current = home;
+  for (const segment of ["hosts", hostId]) {
+    current = join(current, segment);
+    let metadata;
+    try {
+      metadata = lstatSync(current);
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") {
+        throw error;
+      }
+      mkdirSync(current, { mode: 0o700 });
+      metadata = lstatSync(current);
+    }
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new TypeError(`refusing to use non-directory or symlinked host path '${current}'`);
+    }
+  }
+  return current;
 }
 
 function prepareHome(path: string): string {

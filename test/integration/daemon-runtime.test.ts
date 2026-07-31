@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, symlinkSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import { createConnection, type Socket } from "node:net";
@@ -375,6 +375,61 @@ describe("daemon runtime integration", () => {
       await runtime?.close();
       await closeWritable(capture.stream);
       await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to start through a symlinked host directory ancestor", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-daemon-symlink-"));
+    const outside = await mkdtemp(join(tmpdir(), "minions-daemon-symlink-outside-"));
+    const port = await reserveLoopbackPort();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const capture = createLogCapture();
+    const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const currentHostId = runtime.hostId;
+      if (currentHostId === undefined) {
+        throw new Error("local runtime did not produce a host ID");
+      }
+      await runtime.close();
+      runtime = undefined;
+
+      // Replace the already-provisioned host directory with a symlink to an
+      // attacker/adversary-controlled directory outside `home`. A restart
+      // must refuse to create/traverse through it (P1, review #13: the
+      // previous `mkdirSync(hostDirectory, { recursive: true })` would
+      // follow it, letting canonical blob writes/reads/deletes escape the
+      // host artifact boundary).
+      await rm(join(home, "hosts", currentHostId), { recursive: true, force: true });
+      symlinkSync(outside, join(home, "hosts", currentHostId));
+
+      await expect(
+        startDaemonRuntime(
+          runtimeOptions(
+            home,
+            port,
+            clock,
+            new SequenceIdGenerator([RECONCILE_RESTART_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+            logger,
+          ),
+        ),
+      ).rejects.toThrow(/symlink/u);
+      expect(existsSync(join(outside, "host.db"))).toBe(false);
+      expect(existsSync(join(outside, "blobs"))).toBe(false);
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(home, { force: true, recursive: true });
+      await rm(outside, { force: true, recursive: true });
     }
   });
 
