@@ -5,15 +5,20 @@ import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { homedir } from "node:os";
+import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-
 import {
+  AuthBrokerError,
+  createAuthBrokerManager,
+  createCredentialVault,
   createSecureIdGenerator,
   daemonLifecyclePath,
   inspectLifecycleLock,
+  type AuthBrokerManager,
   type DaemonModeName,
+  type SystemdCredsKeyMode,
 } from "@minions/adapters";
 import {
   ApiVersionSchema,
@@ -105,6 +110,12 @@ export async function main(argv: readonly string[]): Promise<number> {
         );
       case "tree-approve":
         return await approvePlan(invocation.home, invocation.treeId, invocation.planRevisionId);
+      case "auth-login":
+        return await authLogin(invocation);
+      case "auth-status":
+        return await authStatus(invocation);
+      case "auth-logout":
+        return await authLogout(invocation);
     }
   } catch (error) {
     writeError(error);
@@ -179,13 +190,45 @@ type Invocation =
       home: string;
       treeId: string;
       planRevisionId: string;
-    }>;
+    }>
+  | AuthLoginInvocation
+  | AuthStatusInvocation
+  | AuthLogoutInvocation;
+
+type AuthLoginInvocation = Readonly<{
+  command: "auth-login";
+  home: string;
+  hostId: HostId;
+  provider: string;
+  via?: string;
+  vaultStoreDirectory?: string;
+  vaultKeyMode?: SystemdCredsKeyMode;
+}>;
+
+type AuthStatusInvocation = Readonly<{
+  command: "auth-status";
+  home: string;
+  hostId: HostId;
+  vaultStoreDirectory?: string;
+  vaultKeyMode?: SystemdCredsKeyMode;
+}>;
+
+type AuthLogoutInvocation = Readonly<{
+  command: "auth-logout";
+  home: string;
+  hostId: HostId;
+  provider: string;
+  vaultStoreDirectory?: string;
+  vaultKeyMode?: SystemdCredsKeyMode;
+}>;
 
 function parseInvocation(argv: readonly string[]): Invocation {
   const [first, second, ...rest] = argv;
   const command = normalizeCommand(first, second);
   const commandArguments =
-    first === "host" || first === "repository" || first === "tree" ? rest : argv.slice(1);
+    first === "host" || first === "repository" || first === "tree" || first === "auth"
+      ? rest
+      : argv.slice(1);
   const positionalCount = invocationPositionalCount(command);
   const positional = commandArguments.slice(0, positionalCount);
   const optionArguments = commandArguments.slice(positionalCount);
@@ -193,6 +236,11 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let mode: DaemonModeName = "local";
   let port = 4_817;
   let configuredHostId: HostId | undefined;
+  let authHostId: HostId | undefined;
+  let authProvider: string | undefined;
+  let authVia: string | undefined;
+  let vaultStoreDirectory: string | undefined;
+  let vaultKeyMode: SystemdCredsKeyMode | undefined;
   let maxDepth: number | undefined;
   let maxFanOut: number | undefined;
   let maxNodes: number | undefined;
@@ -231,10 +279,17 @@ function parseInvocation(argv: readonly string[]): Invocation {
         index += 1;
         break;
       case "--host-id":
-        if (command !== "start") {
-          throw new UsageError("--host-id is only valid with start");
+        if (command === "start") {
+          configuredHostId = parseConfiguredHostId(requiredValue(option, value));
+        } else if (
+          command === "auth-login" ||
+          command === "auth-status" ||
+          command === "auth-logout"
+        ) {
+          authHostId = parseConfiguredHostId(requiredValue(option, value));
+        } else {
+          throw new UsageError("--host-id is only valid with start or auth");
         }
-        configuredHostId = parseConfiguredHostId(requiredValue(option, value));
         index += 1;
         break;
       case "--max-depth":
@@ -287,6 +342,34 @@ function parseInvocation(argv: readonly string[]): Invocation {
           throw new UsageError("--root-check-profile is only valid with tree create");
         }
         rootCheckProfile = requiredText("root check profile", requiredValue(option, value));
+        index += 1;
+        break;
+      case "--provider":
+        if (command !== "auth-login" && command !== "auth-logout") {
+          throw new UsageError("--provider is only valid with auth login/logout");
+        }
+        authProvider = requiredText("provider", requiredValue(option, value));
+        index += 1;
+        break;
+      case "--via":
+        if (command !== "auth-login") {
+          throw new UsageError("--via is only valid with auth login");
+        }
+        authVia = requiredText("via", requiredValue(option, value));
+        index += 1;
+        break;
+      case "--vault-store-directory":
+        if (command !== "auth-login" && command !== "auth-status" && command !== "auth-logout") {
+          throw new UsageError("--vault-store-directory is only valid with auth");
+        }
+        vaultStoreDirectory = requiredValue(option, value);
+        index += 1;
+        break;
+      case "--vault-key-mode":
+        if (command !== "auth-login" && command !== "auth-status" && command !== "auth-logout") {
+          throw new UsageError("--vault-key-mode is only valid with auth");
+        }
+        vaultKeyMode = parseVaultKeyMode(requiredValue(option, value));
         index += 1;
         break;
       default:
@@ -406,7 +489,67 @@ function parseInvocation(argv: readonly string[]): Invocation {
       ),
     };
   }
+  if (command === "auth-login") {
+    if (authHostId === undefined) {
+      throw new UsageError("auth login requires --host-id");
+    }
+    if (authProvider === undefined) {
+      throw new UsageError("auth login requires --provider");
+    }
+    return {
+      command,
+      home,
+      hostId: authHostId,
+      provider: authProvider,
+      ...(authVia !== undefined ? { via: authVia } : {}),
+      ...(vaultStoreDirectory !== undefined ? { vaultStoreDirectory } : {}),
+      ...(vaultKeyMode !== undefined ? { vaultKeyMode } : {}),
+    };
+  }
+  if (command === "auth-status") {
+    if (authHostId === undefined) {
+      throw new UsageError("auth status requires --host-id");
+    }
+    return {
+      command,
+      home,
+      hostId: authHostId,
+      ...(vaultStoreDirectory !== undefined ? { vaultStoreDirectory } : {}),
+      ...(vaultKeyMode !== undefined ? { vaultKeyMode } : {}),
+    };
+  }
+  if (command === "auth-logout") {
+    if (authHostId === undefined) {
+      throw new UsageError("auth logout requires --host-id");
+    }
+    if (authProvider === undefined) {
+      throw new UsageError("auth logout requires --provider");
+    }
+    return {
+      command,
+      home,
+      hostId: authHostId,
+      provider: authProvider,
+      ...(vaultStoreDirectory !== undefined ? { vaultStoreDirectory } : {}),
+      ...(vaultKeyMode !== undefined ? { vaultKeyMode } : {}),
+    };
+  }
   throw new UsageError(usageText());
+}
+
+function parseVaultKeyMode(value: string): SystemdCredsKeyMode {
+  const allowed: readonly SystemdCredsKeyMode[] = [
+    "host",
+    "tpm2",
+    "host+tpm2",
+    "tpm2-absent",
+    "auto",
+    "auto-initrd",
+  ];
+  for (const candidate of allowed) {
+    if (candidate === value) return candidate;
+  }
+  throw new UsageError(`--vault-key-mode must be one of: ${allowed.join(", ")}`);
 }
 
 function normalizeCommand(
@@ -430,6 +573,9 @@ function normalizeCommand(
   ) {
     return `tree-${second}`;
   }
+  if (first === "auth" && (second === "login" || second === "status" || second === "logout")) {
+    return `auth-${second}`;
+  }
   return first;
 }
 
@@ -446,6 +592,10 @@ function invocationPositionalCount(command: string | undefined): number {
       return 4;
     case "tree-approve":
       return 2;
+    case "auth-login":
+    case "auth-status":
+    case "auth-logout":
+      return 0;
     case undefined:
     default:
       return 0;
@@ -527,7 +677,7 @@ function parseBudget(value: string, option: string): number {
 }
 
 function usageText(): string {
-  return "usage: minions <start|stop|status|doctor|host list|repository register|repository get|repository list|tree create|tree get|tree list|tree propose|tree repair|tree approve> [options]";
+  return "usage: minions <start|stop|status|doctor|host list|repository register|repository get|repository list|tree create|tree get|tree list|tree propose|tree repair|tree approve|auth login|auth status|auth logout> [options]";
 }
 
 async function start(invocation: StartInvocation): Promise<number> {
@@ -1365,6 +1515,99 @@ async function listHosts(home: string): Promise<number> {
       endpoint: host.endpoint,
       version: host.version.toString(),
     })),
+  });
+  return 0;
+}
+
+// -------------------------------------------------------------------------------------------------
+// PR 19: minions auth login / status / logout.
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Resolve the `omp` binary path. Honors `OMP_PATH` (test/diagnostic override);
+ * otherwise probes the standard install locations. Throws a UsageError when no
+ * usable binary is found — the CLI is fail-closed on a missing OMP runtime.
+ */
+function resolveOmpPath(): string {
+  const fromEnv = process.env["OMP_PATH"];
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  const candidates = ["/usr/local/bin/omp", "/usr/bin/omp", `${homedir()}/.local/bin/omp`];
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+    } catch {
+      // try the next candidate
+    }
+  }
+  throw new UsageError("omp binary not found; install the pinned OMP runtime or set OMP_PATH");
+}
+
+function vaultOptionsFor(
+  invocation: AuthLoginInvocation | AuthStatusInvocation | AuthLogoutInvocation,
+): { storeDirectory?: string; systemdCredsKeyMode?: SystemdCredsKeyMode } {
+  const options: { storeDirectory?: string; systemdCredsKeyMode?: SystemdCredsKeyMode } = {};
+  if (invocation.vaultStoreDirectory !== undefined) {
+    options.storeDirectory = invocation.vaultStoreDirectory;
+  }
+  if (invocation.vaultKeyMode !== undefined) {
+    options.systemdCredsKeyMode = invocation.vaultKeyMode;
+  }
+  return options;
+}
+
+/**
+ * Boot a per-host broker for the duration of an auth CLI command. The CLI is the
+ * only operator surface for the interactive `omp auth-broker login`; the daemon
+ * later recovers the persisted control bearer noninteractively.
+ */
+async function withAuthBroker<T>(
+  invocation: AuthLoginInvocation | AuthStatusInvocation | AuthLogoutInvocation,
+  action: (broker: AuthBrokerManager) => Promise<T>,
+): Promise<T> {
+  const ompPath = resolveOmpPath();
+  const vault = createCredentialVault(invocation.hostId, vaultOptionsFor(invocation));
+  const probe = vault.probe();
+  if (!probe.available) {
+    throw new AuthBrokerError(
+      "vault_unavailable",
+      `credential vault unavailable for host ${invocation.hostId}: ${probe.detail}`,
+    );
+  }
+  const broker = createAuthBrokerManager({ ompPath, hostId: invocation.hostId, vault });
+  await broker.start();
+  try {
+    return await action(broker);
+  } finally {
+    await broker.stop();
+  }
+}
+
+async function authLogin(invocation: AuthLoginInvocation): Promise<number> {
+  await withAuthBroker(invocation, async (broker) => {
+    const loginOptions: { via?: string } = {};
+    if (invocation.via !== undefined) {
+      loginOptions.via = invocation.via;
+    }
+    await broker.login(invocation.provider, loginOptions);
+  });
+  writeJson({ status: "logged_in", host_id: invocation.hostId, provider: invocation.provider });
+  return 0;
+}
+
+async function authStatus(invocation: AuthStatusInvocation): Promise<number> {
+  const status = await withAuthBroker(invocation, async (broker) => broker.health());
+  writeJson({ host_id: invocation.hostId, ...status });
+  return 0;
+}
+
+async function authLogout(invocation: AuthLogoutInvocation): Promise<number> {
+  await withAuthBroker(invocation, async (broker) => {
+    await broker.revoke(invocation.provider);
+  });
+  writeJson({
+    status: "logged_out",
+    host_id: invocation.hostId,
+    provider: invocation.provider,
   });
   return 0;
 }

@@ -25,7 +25,9 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import {
   contentHash,
@@ -73,6 +75,35 @@ export class OmpAcpAdapterError extends Error {
     this.remediation = remediation;
     this.cause = cause;
   }
+}
+
+/**
+ * Resolve the `omp` binary path. Honors `OMP_PATH` (test/diagnostic override); otherwise
+ * probes the standard install locations. Throws {@link OmpAcpAdapterError}
+ * (`invalid_configuration`) when no usable binary is found — callers are fail-closed on a
+ * missing OMP runtime (mirrors the CLI's `auth-login`/`auth-status` resolution in
+ * apps/cli/src/index.ts). Shared by the daemon's PR 19 host-mode auth-broker wiring
+ * (defaultRuntimeOptions in apps/daemon/src/runtime.ts): a host daemon with no OMP
+ * available cannot run any harness safely, so resolution failure must fail closed rather
+ * than silently skip the auth broker (acceptance 11: missing secure credential storage
+ * fails host registration).
+ */
+export function resolveOmpPath(): string {
+  const fromEnv = process.env["OMP_PATH"];
+  if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
+  const candidates = ["/usr/local/bin/omp", "/usr/bin/omp", `${homedir()}/.local/bin/omp`];
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+    } catch {
+      // try the next candidate
+    }
+  }
+  throw new OmpAcpAdapterError(
+    "invalid_configuration",
+    "omp binary not found; install the pinned OMP runtime or set OMP_PATH",
+    "Install the pinned OMP runtime and rerun host setup, or set OMP_PATH to its absolute path.",
+  );
 }
 
 export type OmpAcpAdapterOptions = Readonly<{

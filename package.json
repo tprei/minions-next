@@ -17,6 +17,7 @@
     "synthetic:podman": "pnpm build:integration && node scripts/run-podman-synthetic.mjs",
     "synthetic:wsl-sandbox": "pnpm build:integration && node scripts/run-podman-synthetic.mjs",
     "synthetic:omp-rpc": "pnpm build:integration && node scripts/run-omp-rpc-synthetic.mjs",
+    "synthetic:codex-auth": "pnpm build:integration && node scripts/run-codex-auth-synthetic.mjs",
     "deadcode": "knip",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
