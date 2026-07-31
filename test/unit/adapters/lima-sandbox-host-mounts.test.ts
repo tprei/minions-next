@@ -76,10 +76,7 @@ describe("lima sandbox host mount confinement", () => {
     const stateDirectory = await makeDirectory("minions-lima-state-");
     for (const sensitiveRoot of ["/etc", "/var", "/private", "/Library"]) {
       await expect(
-        assertHostMounts(
-          policyWithSource(sensitiveRoot),
-          await options(limaHome, stateDirectory),
-        ),
+        assertHostMounts(policyWithSource(sensitiveRoot), await options(limaHome, stateDirectory)),
       ).rejects.toMatchObject({ code: "invalid_configuration" });
     }
   });
