@@ -14,6 +14,8 @@
     "build:domain": "pnpm --filter @minions/core exec tsc -b --force && pnpm --filter @minions/testkit exec tsc -b --force",
     "build:integration": "pnpm build:contracts && pnpm --filter @minions/core exec tsc -b --force && pnpm --filter @minions/adapters exec tsc -b --force && pnpm --filter @minions/testkit exec tsc -b --force",
     "synthetic:lima": "pnpm build:integration && node scripts/run-lima-synthetic.mjs",
+    "synthetic:podman": "pnpm build:integration && node scripts/run-podman-synthetic.mjs",
+    "synthetic:wsl-sandbox": "pnpm build:integration && node scripts/run-podman-synthetic.mjs",
     "deadcode": "knip",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

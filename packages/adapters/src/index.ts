@@ -196,3 +196,16 @@ export type {
 } from "./lima-template.js";
 export { createMacOsLimaSandboxLifecycle, MacOsLimaSandboxError } from "./lima-sandbox.js";
 export type { MacOsLimaSandboxErrorCode, MacOsLimaSandboxOptions } from "./lima-sandbox.js";
+export { PodmanImageError, preparePodmanImage, verifyPodmanImage } from "./podman-image.js";
+export type {
+  PodmanImageBuildOptions,
+  PodmanImageErrorCode,
+  PodmanImageReceipt,
+  PodmanRuntimeArtifact,
+} from "./podman-image.js";
+export {
+  createLinuxPodmanSandboxLifecycle,
+  createWsl2PodmanSandboxLifecycle,
+  PodmanSandboxError,
+} from "./podman-sandbox.js";
+export type { PodmanSandboxErrorCode, PodmanSandboxOptions } from "./podman-sandbox.js";
