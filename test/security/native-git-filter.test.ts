@@ -52,13 +52,7 @@ afterEach(async () => {
 async function runGit(cwd: string, args: readonly string[]): Promise<string> {
   const result = await execFileAsync(
     "git",
-    [
-      "-c",
-      "user.name=Minions Test",
-      "-c",
-      "user.email=minions-test@example.invalid",
-      ...args,
-    ],
+    ["-c", "user.name=Minions Test", "-c", "user.email=minions-test@example.invalid", ...args],
     { cwd, maxBuffer: 16 * 1024 * 1024 },
   );
   return result.stdout.trim();
