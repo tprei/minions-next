@@ -40,7 +40,7 @@ function policyWithSource(sourcePath: string): SandboxPolicy {
   };
 }
 
-async function options(limaHome: string, stateDirectory: string) {
+function options(limaHome: string, stateDirectory: string) {
   return {
     limactlPath: "/usr/local/bin/limactl",
     limaHome,
@@ -67,7 +67,7 @@ describe("lima sandbox host mount confinement", () => {
     // homedir() at all, so this passing is the real regression check.
     const workspace = await makeDirectory("minions-lima-workspace-");
     await expect(
-      assertHostMounts(policyWithSource(workspace), await options(limaHome, stateDirectory)),
+      assertHostMounts(policyWithSource(workspace), options(limaHome, stateDirectory)),
     ).resolves.toBeUndefined();
   });
 
@@ -76,7 +76,7 @@ describe("lima sandbox host mount confinement", () => {
     const stateDirectory = await makeDirectory("minions-lima-state-");
     for (const sensitiveRoot of ["/etc", "/var", "/private", "/Library"]) {
       await expect(
-        assertHostMounts(policyWithSource(sensitiveRoot), await options(limaHome, stateDirectory)),
+        assertHostMounts(policyWithSource(sensitiveRoot), options(limaHome, stateDirectory)),
       ).rejects.toMatchObject({ code: "invalid_configuration" });
     }
   });
@@ -85,10 +85,10 @@ describe("lima sandbox host mount confinement", () => {
     const limaHome = await makeDirectory("minions-lima-home-");
     const stateDirectory = await makeDirectory("minions-lima-state-");
     await expect(
-      assertHostMounts(policyWithSource(limaHome), await options(limaHome, stateDirectory)),
+      assertHostMounts(policyWithSource(limaHome), options(limaHome, stateDirectory)),
     ).rejects.toMatchObject({ code: "invalid_configuration" });
     await expect(
-      assertHostMounts(policyWithSource(stateDirectory), await options(limaHome, stateDirectory)),
+      assertHostMounts(policyWithSource(stateDirectory), options(limaHome, stateDirectory)),
     ).rejects.toMatchObject({ code: "invalid_configuration" });
   });
 });
