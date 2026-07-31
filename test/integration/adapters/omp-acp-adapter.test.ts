@@ -546,3 +546,29 @@ describe("omp acp adapter — malformed notification resilience", () => {
     }
   }, 30_000);
 });
+
+describe("omp acp adapter — durable harness id path confinement", () => {
+  it("rejects a durable harness id that would traverse outside the session directory", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omp-acp-traversal-"));
+    temporaryDirectories.push(scratch);
+    const fakeOmp = writeFakeOmp(scratch);
+    const sessionDirectory = makeSessionDirectory();
+    const adapter = createOmpAcpHarnessAdapter({
+      ompPath: fakeOmp,
+      expectedVersion: "17.0.4",
+      cwd: tmpdir(),
+      sessionDirectory,
+      model: "zai/glm-4.6",
+      reasoningLevel: "default",
+      allowedTools: ["read"],
+      securityPolicyDigest: policyDigest,
+      requiredCapabilities: ["resume", "snapshot", "steer", "follow_up", "abort"],
+    });
+    await expectErrorCode(
+      () => adapter.start({ context: startContext, durableHarnessId: "../../etc/traversal" }),
+      "invalid_configuration",
+    );
+    // The traversal target must never have been written.
+    expect(existsSync(join(sessionDirectory, "..", "..", "etc", "traversal.json"))).toBe(false);
+  }, 30_000);
+});

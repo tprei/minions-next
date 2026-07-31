@@ -613,8 +613,30 @@ async function ensureProtectedSessionDirectory(sessionDirectory: string): Promis
   }
 }
 
+/**
+ * P1 (review #19): neither writeManifest nor readManifest validated
+ * durableHarnessId's shape before joining it into a filesystem path -
+ * `../../etc/passwd` (or any other traversal payload) escapes the
+ * protected session directory for both reads and writes. durableHarnessId
+ * is caller-supplied (it flows in from request.durableHarnessId with no
+ * upstream format check), so validate it here, at the sole place both
+ * manifest operations construct a path from it.
+ */
+const durableHarnessIdPattern = /^[A-Za-z0-9_-]{1,128}$/u;
+
+function manifestPath(sessionDirectory: string, durableHarnessId: string): string {
+  if (!durableHarnessIdPattern.test(durableHarnessId)) {
+    throw new OmpAcpAdapterError(
+      "invalid_configuration",
+      `durable harness id is not a safe filename: ${durableHarnessId}`,
+      "Use an alphanumeric durable harness id (letters, digits, '-', '_' only).",
+    );
+  }
+  return join(sessionDirectory, `${durableHarnessId}.json`);
+}
+
 async function writeManifest(sessionDirectory: string, manifest: SessionManifest): Promise<void> {
-  const path = join(sessionDirectory, `${manifest.durableHarnessId}.json`);
+  const path = manifestPath(sessionDirectory, manifest.durableHarnessId);
   try {
     await writeFile(path, JSON.stringify(manifest), { mode: manifestFileMode, encoding: "utf-8" });
     await chmod(path, manifestFileMode);
@@ -632,7 +654,7 @@ async function readManifest(
   sessionDirectory: string,
   durableHarnessId: string,
 ): Promise<SessionManifest> {
-  const path = join(sessionDirectory, `${durableHarnessId}.json`);
+  const path = manifestPath(sessionDirectory, durableHarnessId);
   let raw: string;
   try {
     raw = await readFile(path, { encoding: "utf-8" });
