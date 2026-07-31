@@ -44,7 +44,6 @@ import {
 } from "@minions/core";
 
 import type { StructuredLogger } from "./logger.js";
-import { createDeviceSessionStore } from "./device-session-store.js";
 import { startDaemonServer, type RunningDaemonServer } from "./server.js";
 
 export type DaemonRuntimeOptions = Readonly<{
@@ -142,11 +141,6 @@ export async function startDaemonRuntime(
       registry: hostRegistry,
       hostId: localHostId,
     });
-    const remoteAccess =
-      options.remoteAccess?.enabled === true
-        ? { sessionStore: createDeviceSessionStore() }
-        : undefined;
-
     if (options.mode === "local") {
       server = await startDaemonServer({
         mode: "local",
@@ -156,7 +150,6 @@ export async function startDaemonRuntime(
         eventWaiter: requireWaiter(eventWaiter),
         eventPollIntervalMs: 1_000,
         hostRegistry: requireRegistry(hostRegistry),
-        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else if (options.mode === "host") {
       server = await startDaemonServer({
@@ -166,7 +159,6 @@ export async function startDaemonRuntime(
         database: requireDatabase(hostDatabase),
         eventWaiter: requireWaiter(eventWaiter),
         eventPollIntervalMs: 1_000,
-        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else {
       server = await startDaemonServer({
@@ -240,7 +232,6 @@ export function defaultRuntimeOptions(
     logger: StructuredLogger;
     hostId?: HostId;
     signal?: AbortSignal;
-    remoteAccess?: RemoteAccessRuntimeOptions;
   }>,
 ): DaemonRuntimeOptions {
   const clock: Clock = { now: () => timestampFromEpochMilliseconds(Date.now()) };

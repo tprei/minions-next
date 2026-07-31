@@ -47,7 +47,6 @@ type StartInvocation = Readonly<{
   mode: DaemonModeName;
   port: number;
   hostId?: HostId;
-  allowRemote?: boolean;
 }>;
 
 type Invocation =
@@ -65,7 +64,6 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let mode: DaemonModeName = "local";
   let port = 4_817;
   let configuredHostId: HostId | undefined;
-  let allowRemote = false;
   for (let index = 0; index < optionArguments.length; index += 1) {
     const option = optionArguments[index];
     const value = optionArguments[index + 1];
@@ -100,17 +98,10 @@ function parseInvocation(argv: readonly string[]): Invocation {
     if (mode !== "host" && configuredHostId !== undefined) {
       throw new UsageError("--host-id is only valid in host mode");
     }
-    if (allowRemote && mode === "supervisor") {
-      throw new UsageError("--allow-remote is not valid in supervisor mode");
+    if (configuredHostId === undefined) {
+      return { command, home, mode, port };
     }
-    return {
-      command,
-      home,
-      mode,
-      port,
-      ...(configuredHostId === undefined ? {} : { hostId: configuredHostId }),
-      ...(allowRemote ? { allowRemote } : {}),
-    };
+    return { command, home, mode, port, hostId: configuredHostId };
   }
   if (
     command === "stop" ||
@@ -137,9 +128,6 @@ async function start(invocation: StartInvocation): Promise<number> {
   ];
   if (invocation.hostId !== undefined) {
     arguments_.push("--host-id", invocation.hostId);
-  }
-  if (invocation.allowRemote === true) {
-    arguments_.push("--allow-remote");
   }
   return await runDaemon(arguments_);
 }

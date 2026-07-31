@@ -31,26 +31,6 @@ type DaemonSystemOptions = Readonly<{
 type BaseDaemonServerOptions = Readonly<{
   port: number;
   system: DaemonSystemOptions;
-  /**
-   * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing,
-   * REMOTE-01/REMOTE-02). When set, the daemon binds every interface (not loopback
-   * only) so a phone reachable over Tailscale can connect through the same RPC surface
-   * the desktop UI already uses, and every RPC in `remote-access-interceptor.ts`'s
-   * `PHONE_REMOTE_ACCESS_POLICY` requires a valid device session from a non-loopback
-   * caller; every other RPC is unreachable from one. Binding every interface, rather
-   * than replacing the loopback bind with one specific address, keeps the desktop UI's
-   * own `127.0.0.1` connections working unchanged; the private-network reachability
-   * half of REMOTE-01/REMOTE-02 comes from the operator's own Tailscale configuration
-   * (e.g. `tailscale serve`), not from this daemon managing a second listener. Omitted,
-   * the daemon binds loopback only (REMOTE-01's default) and no session check runs —
-   * desktop-UI behaviour is unchanged either way, since loopback callers always skip
-   * the check.
-   */
-  remoteAccess?: RemoteAccessServerOptions;
-}>;
-
-export type RemoteAccessServerOptions = Readonly<{
-  sessionStore: DeviceSessionStore;
 }>;
 
 export type DaemonServerOptions =
