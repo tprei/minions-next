@@ -1,0 +1,85 @@
+# Minions gate profile for this repository (PR 42 — repository self-registration /
+# dogfood-alpha bootstrap threshold).
+#
+# Maps each of the 5 GateCategory values (lint, typecheck, tests, build,
+# security_review — see packages/adapters/src/gate-profile.ts) to a real verification
+# command. Categories that require more than one existing pnpm script are backed by a
+# small composite `gate:*` script in package.json that chains the individual scripts
+# also used by `verify:pr`, so there is one source of truth for what each category runs.
+required_categories:
+  - lint
+  - typecheck
+  - tests
+  - build
+  - security_review
+gates:
+  # format:check, lint, deadcode, generate:check, proto:lint, proto:breaking.
+  lint:
+    executable: pnpm
+    args:
+      - run
+      - gate:lint
+    env_allowlist:
+      - CI
+      - PATH
+  typecheck:
+    executable: pnpm
+    args:
+      - run
+      - typecheck
+    env_allowlist:
+      - CI
+      - PATH
+  # test:unit, test:integration.
+  tests:
+    executable: pnpm
+    args:
+      - run
+      - gate:tests
+    env_allowlist:
+      - CI
+      - PATH
+  build:
+    executable: pnpm
+    args:
+      - run
+      - build
+    env_allowlist:
+      - CI
+      - PATH
+  security_review:
+    executable: pnpm
+    args:
+      - run
+      - test:security
+    env_allowlist:
+      - CI
+      - PATH
+path_policy:
+  allowed_paths:
+    - "**"
+  blocked_paths:
+    - "**/.env"
+    - "**/.env.*"
+    - "**/*.pem"
+    - "**/*.key"
+    - "**/id_rsa*"
+    - "**/.git/**"
+    - "**/.minions/**"
+env_policy:
+  allowed_keys:
+    - CI
+    - HOME
+    - NODE_ENV
+    - PATH
+    - PNPM_HOME
+  denied_keys:
+    - AWS_SECRET_ACCESS_KEY
+    - GH_TOKEN
+    - GITHUB_TOKEN
+    - OMP_GITHUB_PRIVATE_KEY_NAME
+# Deny-by-default: gate commands run offline against the local checkout only.
+network_policy:
+  allowed_hosts: []
+worktree_policy:
+  weakening_permitted: false
