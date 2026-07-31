@@ -37,6 +37,7 @@ import {
   createJjWorkingCopyManager,
   pathContainsDotJj,
   workspaceSandboxMounts,
+  type AuthorIdentity,
   type JjWorkingCopyManager,
 } from "../../packages/adapters/src/jj-working-copy.js";
 
@@ -595,6 +596,68 @@ describe("host broker — diff, status, commit through the manager", () => {
     });
     const status = await manager.status(receipt.newWorkingCopyId);
     expect(status.clean).toBe(true);
+  }, 60_000);
+
+  it("commits under the supplied engine author identity, not the caller's", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-author-");
+    const hostRoot = await makeDirectory("jj-wc-host-author-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000a04"),
+      gitSha(central.baseCommit),
+    );
+    await writeFile(join(wc.workingCopyPath, "authored.txt"), "payload\n", "utf8");
+
+    const engine: AuthorIdentity = Object.freeze({
+      name: nonEmptyText("Minions Engine", "engine author name"),
+      email: nonEmptyText("engine@minions.local", "engine author email"),
+    });
+    const receipt = await manager.commit(
+      wc.workingCopyId,
+      nonEmptyText("engine-authored commit", "message"),
+      engine,
+    );
+
+    // The committed change is attributed to the engine identity, not whoever
+    // called the broker (GIT-02/GIT-09).
+    const author = await runJj(wc.workingCopyPath, [
+      "log",
+      "--no-graph",
+      "-r",
+      receipt.workingCopyId,
+      "-T",
+      'author.name() ++ "|" ++ author.email() ++ "\n"',
+    ]);
+    expect(firstNonEmptyLine(author)).toBe("Minions Engine|engine@minions.local");
+  }, 60_000);
+
+  it("head reads the live working-copy change id and parent commit", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-head-");
+    const hostRoot = await makeDirectory("jj-wc-host-head-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000a05"),
+      gitSha(central.baseCommit),
+    );
+
+    const head = await manager.head(wc.workingCopyId);
+    expect(head.workingCopyId).toBe(wc.workingCopyId);
+    expect(head.workingCopyChangeId).toBe(wc.workingCopyId);
+    expect(head.parentChangeId).toBe(central.baseChangeId);
+    expect(head.parentCommit).toBe(central.baseCommit);
+  }, 60_000);
+
+  it("currentOperationLogId reads a durable 64-hex operation-log id", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-oplog-");
+    const hostRoot = await makeDirectory("jj-wc-host-oplog-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000a06"),
+      gitSha(central.baseCommit),
+    );
+
+    const opId = await manager.currentOperationLogId(wc.workingCopyId);
+    expect(opId).toMatch(/^[0-9a-f]{64}$/u);
   }, 60_000);
 });
 

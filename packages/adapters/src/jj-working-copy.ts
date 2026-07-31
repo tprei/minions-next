@@ -26,6 +26,7 @@
  * attempt-bound `VcsDiff` / `WorkspaceStatus` / `VcsCommitReceipt` types.
  */
 
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmod, lstat, mkdir, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -33,6 +34,7 @@ import { isAbsolute, join, sep } from "node:path";
 
 import type {
   Clock,
+  ContentHash,
   GitSha,
   IdGenerator,
   NonEmptyText,
@@ -41,7 +43,7 @@ import type {
   TaskNodeId,
   Timestamp,
 } from "@minions/core";
-import { gitSha, nonEmptyText, SandboxDeniedError } from "@minions/core";
+import { contentHash, gitSha, nonEmptyText, SandboxDeniedError } from "@minions/core";
 import { createNodeGitProcess } from "./git-process.js";
 
 export const JJ_METADATA_DIR = ".jj";
@@ -124,6 +126,31 @@ export type JjCommitReceipt = Readonly<{
   readonly committedAt: Timestamp;
 }>;
 
+/**
+ * Author identity applied to engine-owned commits. Always the deterministic
+ * engine identity — never the agent's (GIT-02/GIT-09). The broker sets this on
+ * the working-copy repo config before committing so every captured commit is
+ * attributable to the engine, not whoever happened to call the broker.
+ */
+export type AuthorIdentity = Readonly<{
+  readonly name: NonEmptyText;
+  readonly email: NonEmptyText;
+}>;
+
+/**
+ * Live working-copy head, read through the broker. `workingCopyChangeId` is the
+ * current `@` change; `parentChangeId` / `parentCommit` are `@-`. Used by the
+ * PR-30 commit-capture manager to detect agent-side commits (the registered
+ * working-copy id drifting off `@`) and to verify the expected workspace head.
+ */
+export type JjWorkingCopyHead = Readonly<{
+  readonly workingCopyId: string;
+  readonly workingCopyChangeId: string;
+  readonly parentChangeId: string;
+  readonly parentCommit: GitSha;
+  readonly capturedAt: Timestamp;
+}>;
+
 export type JjWorkingCopyManagerOptions = Readonly<{
   /** Absolute path to the pinned, digest-verified jj binary (from `ensureJjCapability`). */
   readonly jjBinaryPath: string;
@@ -174,9 +201,22 @@ export type JjRevisionDescriptor = Readonly<{
 
 export interface JjWorkingCopyManager {
   createWorkingCopy(nodeId: TaskNodeId, baseCommit: GitSha): Promise<JjWorkingCopy>;
+  /** Live `@` change id + `@-` parent change id / commit, read through the broker. */
+  head(workingCopyId: string): Promise<JjWorkingCopyHead>;
   diff(workingCopyId: string): Promise<JjWorkingCopyDiff>;
   status(workingCopyId: string): Promise<JjWorkingCopyStatus>;
-  commit(workingCopyId: string, message: NonEmptyText): Promise<JjCommitReceipt>;
+  /**
+   * Describe `@` with `message` and commit it through the broker. When `author`
+   * is supplied the engine identity is written to the working-copy repo config
+   * first, so the new commit is attributable to the engine, not the caller.
+   */
+  commit(
+    workingCopyId: string,
+    message: NonEmptyText,
+    author?: AuthorIdentity,
+  ): Promise<JjCommitReceipt>;
+  /** Current jj operation-log id of the working copy, read through the broker. */
+  currentOperationLogId(workingCopyId: string): Promise<ContentHash>;
   destroyWorkingCopy(workingCopyId: string): Promise<void>;
   /**
    * Create a new empty change on top of `parentChangeId` (a raw jj change id,
@@ -243,6 +283,7 @@ const workingCopyMode = 0o700;
 const dotJjMode = 0o700;
 const changeIdPattern = /^[0-9a-z]{32}$/u;
 const commitIdPattern = /^[0-9a-f]{40}$/u;
+const opIdPattern = /^[0-9a-f]{64,}$/u;
 const shaPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
 interface JjRunResult {
@@ -614,6 +655,28 @@ export function createJjWorkingCopyManager(
     return id;
   }
 
+  async function captureOperationLogId(cwd: string): Promise<ContentHash> {
+    const result = await run(
+      ["op", "log", "--no-graph", "--limit", "1", "-T", 'id ++ "\n"'],
+      cwd,
+      "status_failed",
+      `jj op log failed in '${cwd}'`,
+      "Inspect the working copy; destroy and recreate it if it is corrupt.",
+    );
+    const id = firstNonEmptyLine(result.stdout);
+    if (!opIdPattern.test(id)) {
+      throw wcError(
+        "status_failed",
+        `could not parse an operation-log id in '${cwd}' (got '${id}')`,
+        "Inspect the working copy; destroy and recreate it if it is corrupt.",
+      );
+    }
+    // jj operation-log ids are longer than the binding's 64-hex ContentHash space
+    // (jj 0.43 emits ~160-hex composite op ids), so fingerprint them via SHA-256
+    // into the stable, content-addressed id the binding stores.
+    return contentHash(createHash("sha256").update(id).digest("hex"));
+  }
+
   return {
     async createWorkingCopy(nodeId: TaskNodeId, baseCommit: GitSha): Promise<JjWorkingCopy> {
       return serialized(async (): Promise<JjWorkingCopy> => {
@@ -739,6 +802,22 @@ export function createJjWorkingCopyManager(
       });
     },
 
+    head(workingCopyId: string): Promise<JjWorkingCopyHead> {
+      return serialized(async (): Promise<JjWorkingCopyHead> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        const workingCopyChangeId = await captureChangeId("@", stored.workingCopyPath);
+        const parentChangeId = await captureChangeId("@-", stored.workingCopyPath);
+        const parentCommit = gitSha(await captureCommitId("@-", stored.workingCopyPath));
+        return Object.freeze({
+          workingCopyId,
+          workingCopyChangeId,
+          parentChangeId,
+          parentCommit,
+          capturedAt: clock.now(),
+        });
+      });
+    },
+
     diff(workingCopyId: string): Promise<JjWorkingCopyDiff> {
       return serialized(async (): Promise<JjWorkingCopyDiff> => {
         const stored = requireWorkingCopy(workingCopyId);
@@ -784,7 +863,11 @@ export function createJjWorkingCopyManager(
       });
     },
 
-    commit(workingCopyId: string, message: NonEmptyText): Promise<JjCommitReceipt> {
+    commit(
+      workingCopyId: string,
+      message: NonEmptyText,
+      author?: AuthorIdentity,
+    ): Promise<JjCommitReceipt> {
       return serialized(async (): Promise<JjCommitReceipt> => {
         const stored = requireWorkingCopy(workingCopyId);
         if (typeof message !== "string" || message.trim().length === 0) {
@@ -805,15 +888,54 @@ export function createJjWorkingCopyManager(
             "Re-fetch the working-copy id from the broker before committing.",
           );
         }
-        // `jj commit -m <msg>` describes @ with the message, commits it, and creates a
-        // new empty working-copy change on top — all atomically, through the broker.
-        await run(
-          ["commit", "-m", message],
-          stored.workingCopyPath,
-          "commit_failed",
-          `jj commit failed in '${stored.workingCopyPath}'`,
-          "Inspect the working copy; destroy and recreate it if it is corrupt.",
-        );
+        // When an author identity is supplied, pin it on the working-copy repo config so
+        // the captured commit is attributable to the engine, not whoever called the
+        // broker (GIT-02/GIT-09). `jj describe -m <message>` then `jj commit` keeps the
+        // describe + commit steps explicit and the new working-copy change empty on top.
+        if (author !== undefined) {
+          await run(
+            ["config", "set", "--repo", "user.name", author.name],
+            stored.workingCopyPath,
+            "commit_failed",
+            `jj config set user.name failed in '${stored.workingCopyPath}'`,
+            "Inspect the working copy; destroy and recreate it if it is corrupt.",
+          );
+          await run(
+            ["config", "set", "--repo", "user.email", author.email],
+            stored.workingCopyPath,
+            "commit_failed",
+            `jj config set user.email failed in '${stored.workingCopyPath}'`,
+            "Inspect the working copy; destroy and recreate it if it is corrupt.",
+          );
+          await run(
+            ["describe", "-m", message],
+            stored.workingCopyPath,
+            "commit_failed",
+            `jj describe failed in '${stored.workingCopyPath}'`,
+            "Inspect the working copy; destroy and recreate it if it is corrupt.",
+          );
+          // `jj commit` (bare) is equivalent to an interactive `jj describe` followed by
+          // `jj new` — it opens an editor for @'s description regardless of the prior
+          // `describe -m` above, and the broker never has a TTY to satisfy it. Passing
+          // `-m` here re-asserts the same message non-interactively instead.
+          await run(
+            ["commit", "-m", message],
+            stored.workingCopyPath,
+            "commit_failed",
+            `jj commit failed in '${stored.workingCopyPath}'`,
+            "Inspect the working copy; destroy and recreate it if it is corrupt.",
+          );
+        } else {
+          // `jj commit -m <msg>` describes @ with the message, commits it, and creates a
+          // new empty working-copy change on top — all atomically, through the broker.
+          await run(
+            ["commit", "-m", message],
+            stored.workingCopyPath,
+            "commit_failed",
+            `jj commit failed in '${stored.workingCopyPath}'`,
+            "Inspect the working copy; destroy and recreate it if it is corrupt.",
+          );
+        }
         // Capture the committed change's git commit SHA and the new working-copy change id.
         const commitSha = gitSha(await captureCommitId(workingCopyId, stored.workingCopyPath));
         const newWorkingCopyId = await captureChangeId("@", stored.workingCopyPath);
@@ -835,6 +957,13 @@ export function createJjWorkingCopyManager(
           message: committed,
           committedAt: clock.now(),
         });
+      });
+    },
+
+    currentOperationLogId(workingCopyId: string): Promise<ContentHash> {
+      return serialized(async (): Promise<ContentHash> => {
+        const stored = requireWorkingCopy(workingCopyId);
+        return captureOperationLogId(stored.workingCopyPath);
       });
     },
 
