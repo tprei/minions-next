@@ -736,7 +736,7 @@ describe("SQLite scheduler leases", () => {
     // stayed active forever (capacity permanently blocked, no retry
     // scheduled).
     const fixture = await createFixture();
-    const plan = await fixture.addPlan(planSpec(0x7100, [{ offset: 10 }]));
+    await fixture.addPlan(planSpec(0x7100, [{ offset: 10 }]));
     const store = scheduler(fixture, 0x361000);
     const lease = requireLease(await store.claimNext(claimRequest(OWNER_A, START + 90, 100)));
 
@@ -805,7 +805,7 @@ describe("SQLite scheduler leases", () => {
 
   it("cancelNode releases an active harness process lease instead of rolling back", async () => {
     const fixture = await createFixture();
-    const plan = await fixture.addPlan(planSpec(0x7200, [{ offset: 10 }]));
+    await fixture.addPlan(planSpec(0x7200, [{ offset: 10 }]));
     const store = scheduler(fixture, 0x362000);
     const lease = requireLease(await store.claimNext(claimRequest(OWNER_A, START + 90, 100)));
 
