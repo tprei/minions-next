@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+service EventService {
+  rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse);
+  rpc WatchEvents(WatchEventsRequest) returns (stream WatchEventsResponse);
+}
+
+enum AggregateKind {
+  AGGREGATE_KIND_UNSPECIFIED = 0;
+  AGGREGATE_KIND_REPOSITORY = 1;
+  AGGREGATE_KIND_TREE = 2;
+  AGGREGATE_KIND_NODE = 3;
+  AGGREGATE_KIND_ATTEMPT = 4;
+}
+
+enum TreeState {
+  TREE_STATE_UNSPECIFIED = 0;
+  TREE_STATE_DRAFT = 1;
+  TREE_STATE_APPROVED = 2;
+  TREE_STATE_ACTIVE = 3;
+  TREE_STATE_SUCCEEDED = 4;
+  TREE_STATE_FAILED = 5;
+  TREE_STATE_CANCELLED = 6;
+}
+
+enum NodeState {
+  NODE_STATE_UNSPECIFIED = 0;
+  NODE_STATE_PLANNED = 1;
+  NODE_STATE_READY = 2;
+  NODE_STATE_ACTIVE = 3;
+  NODE_STATE_BLOCKED = 4;
+  NODE_STATE_SUCCEEDED = 5;
+  NODE_STATE_FAILED = 6;
+  NODE_STATE_CANCELLED = 7;
+  NODE_STATE_SUPERSEDED = 8;
+}
+
+enum AttentionKind {
+  ATTENTION_KIND_UNSPECIFIED = 0;
+  ATTENTION_KIND_AUTHENTICATION = 1;
+  ATTENTION_KIND_CI_FAILURE = 2;
+  ATTENTION_KIND_CONFLICT = 3;
+  ATTENTION_KIND_GATE_FAILURE = 4;
+  ATTENTION_KIND_HUMAN_INPUT = 5;
+  ATTENTION_KIND_PARENT = 6;
+  ATTENTION_KIND_QUOTA = 7;
+  ATTENTION_KIND_UNAVAILABLE_HOST = 8;
+  ATTENTION_KIND_NODE_FAILED = 9;
+}
+
+message HostSummary {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  optional string display_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  bool online = 3;
+  uint64 version = 4;
+}
+
+message RepositorySummary {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string host_id = 2 [(buf.validate.field).string.uuid = true];
+  uint64 version = 3;
+  bool archived = 4;
+}
+
+message TreeSummary {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string repository_id = 2 [(buf.validate.field).string.uuid = true];
+  string host_id = 3 [(buf.validate.field).string.uuid = true];
+  string root_node_id = 4 [(buf.validate.field).string.uuid = true];
+  string active_plan_revision_id = 5 [(buf.validate.field).string.uuid = true];
+  TreeState state = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  uint64 version = 7;
+}
+
+message NodeSummary {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string tree_id = 2 [(buf.validate.field).string.uuid = true];
+  optional string parent_node_id = 3 [(buf.validate.field).string.uuid = true];
+  uint64 ordinal = 4;
+  string objective = 5 [(buf.validate.field).string = {min_len: 1}];
+  NodeState state = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  uint64 version = 7;
+}
+
+message AttentionSummary {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  AttentionKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  optional string evidence_id = 3 [(buf.validate.field).string.uuid = true];
+}
+
+message ProjectionRemoved {
+  AggregateKind aggregate_kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string aggregate_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message ProjectionChange {
+  oneof change {
+    option (buf.validate.oneof).required = true;
+
+    HostSummary host_upserted = 1;
+    RepositorySummary repository_upserted = 2;
+    TreeSummary tree_upserted = 3;
+    NodeSummary node_upserted = 4;
+    AttentionSummary attention_upserted = 5;
+    ProjectionRemoved removed = 6;
+  }
+}
+
+message EventEnvelope {
+  uint64 sequence = 1 [(buf.validate.field).uint64.gte = 1];
+  string event_id = 2 [(buf.validate.field).string.uuid = true];
+  AggregateKind aggregate_kind = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string aggregate_id = 4 [(buf.validate.field).string.uuid = true];
+  uint64 aggregate_version = 5 [(buf.validate.field).uint64.gte = 1];
+  google.protobuf.Timestamp occurred_at = 6 [(buf.validate.field).required = true];
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    ProjectionChange projection_change = 10;
+  }
+}
+
+message GetSnapshotRequest {}
+
+message GetSnapshotResponse {
+  repeated HostSummary hosts = 1;
+  repeated RepositorySummary repositories = 2;
+  repeated TreeSummary trees = 3;
+  repeated NodeSummary nodes = 4;
+  repeated AttentionSummary attention = 5;
+  uint64 last_sequence = 6;
+  uint64 minimum_available_sequence = 7 [(buf.validate.field).uint64.gte = 1];
+}
+
+message WatchEventsRequest {
+  uint64 after_sequence = 1;
+}
+
+message WatchEventsResponse {
+  EventEnvelope event = 1 [(buf.validate.field).required = true];
+}

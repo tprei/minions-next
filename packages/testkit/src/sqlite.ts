@@ -34,8 +34,16 @@ class TestSqliteDatabaseAlias implements TestManagedSqliteDatabase {
     registerTestSqliteWriterAlias(this, inner, (transaction) => transaction);
   }
 
+  checkIntegrity(): void {
+    this.#inner.checkIntegrity();
+  }
+
   read<T>(operation: (reader: SqliteReader) => T): T {
     return this.#inner.read(operation);
+  }
+
+  snapshot<T>(operation: (reader: SqliteReader) => T): T {
+    return this.#inner.snapshot(operation);
   }
 
   write<T>(operation: (transaction: SqliteTransaction) => T): Promise<T> {
@@ -150,8 +158,16 @@ export class FaultInjectingSqliteDatabase implements TestManagedSqliteDatabase {
     return this.#observedWriteCount;
   }
 
+  checkIntegrity(): void {
+    this.#inner.checkIntegrity();
+  }
+
   read<T>(operation: (reader: SqliteReader) => T): T {
     return this.#inner.read(operation);
+  }
+
+  snapshot<T>(operation: (reader: SqliteReader) => T): T {
+    return this.#inner.snapshot(operation);
   }
 
   write<T>(operation: (transaction: SqliteTransaction) => T): Promise<T> {

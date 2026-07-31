@@ -1,5 +1,7 @@
 import { createHash, type Hash } from "node:crypto";
 
+import { decodeProjectionChange, ProjectionChangeSchema } from "@minions/contracts";
+
 import {
   actorSessionId,
   attemptId,
@@ -154,6 +156,7 @@ class DefaultSqliteCommandStore implements SqliteCommandStore {
       );
     }
     const effect = snapshotAppliedCommand(rawEffect);
+    assertProjectionEvent(effect.event);
     const resultingVersion = readResultingAggregateVersion(transaction, request, previousVersion);
     const aggregateVersion = resultingVersion + 1;
     if (!Number.isSafeInteger(aggregateVersion)) {
@@ -443,6 +446,24 @@ function digestRequest(request: CommandRequest): string {
   updateDigestText(hash, request.command.typeName);
   updateDigestBytes(hash, request.command.bytes);
   return hash.digest("hex");
+}
+
+function assertProjectionEvent(event: EncodedMessage): void {
+  if (event.typeName !== ProjectionChangeSchema.typeName) {
+    throw new SqliteCommandError(
+      "invalid_command",
+      "command events must use minions.v1.ProjectionChange",
+    );
+  }
+  try {
+    decodeProjectionChange(event.bytes);
+  } catch (error) {
+    throw new SqliteCommandError(
+      "invalid_command",
+      "command projection event violates its Protobuf contract",
+      { cause: error },
+    );
+  }
 }
 
 function updateDigestText(hash: Hash, value: string): void {

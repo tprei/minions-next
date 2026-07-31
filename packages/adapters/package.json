@@ -18,6 +18,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@minions/contracts": "workspace:*",
     "@minions/core": "workspace:*"
   },
   "devDependencies": {

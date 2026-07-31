@@ -14,6 +14,8 @@ import { SqliteDatabaseError } from "./error.js";
 import { hostMigrations, supervisorMigrations } from "./generated-migrations.js";
 import {
   applyReaderPolicy,
+  assertDatabaseIntegrity,
+  authorizeReaderAction,
   type DatabaseKind,
   type MigrationReceipt,
   migrateSqliteDatabase,
@@ -61,7 +63,9 @@ export type OpenSqliteDatabaseOptions = Readonly<{
 export interface ManagedSqliteDatabase {
   readonly path: string;
   readonly migration: MigrationReceipt;
+  checkIntegrity(): void;
   read<T>(operation: (reader: SqliteReader) => T): T;
+  snapshot<T>(operation: (reader: SqliteReader) => T): T;
   close(): Promise<void>;
 }
 
@@ -72,10 +76,12 @@ class ManagedSqliteDatabaseInstance {
   readonly #writerDatabase: DatabaseSync;
   readonly #readerDatabase: DatabaseSync;
   readonly #reader: SqliteReader;
+  readonly #readerAuthorization: ReaderAuthorization;
   readonly #writerAuthorization: WriterAuthorization;
   readonly #releaseWriter: () => void;
   #writeTail: Promise<void> = Promise.resolve();
   #writing = false;
+  #snapshotting = false;
   #closed = false;
   #closePromise: Promise<void> | undefined;
 
@@ -91,15 +97,70 @@ class ManagedSqliteDatabaseInstance {
     this.#writerDatabase = writerDatabase;
     this.#readerDatabase = readerDatabase;
     this.#releaseWriter = releaseWriter;
+    this.#readerAuthorization = new ReaderAuthorization(readerDatabase);
     this.#reader = new ReaderConnection(readerDatabase, () => {
       this.#assertOpen();
     });
     this.#writerAuthorization = new WriterAuthorization(writerDatabase);
   }
 
+  checkIntegrity(): void {
+    this.#assertOpen();
+    const database = new DatabaseSync(this.path, databaseOptions(true));
+    try {
+      assertDatabaseIntegrity(database);
+    } finally {
+      database.close();
+    }
+  }
+
   read<T>(operation: (reader: SqliteReader) => T): T {
     this.#assertOpen();
     return operation(this.#reader);
+  }
+
+  snapshot<T>(operation: (reader: SqliteReader) => T): T {
+    this.#assertOpen();
+    if (this.#snapshotting) {
+      throw new SqliteDatabaseError(
+        "transaction_reentrant",
+        "a SQLite snapshot transaction cannot be nested",
+      );
+    }
+    this.#snapshotting = true;
+    try {
+      this.#readerAuthorization.executeTransactionControl("BEGIN");
+      const result = operation(this.#reader);
+      if (isThenable(result)) {
+        observeThenable(result);
+        throw new SqliteDatabaseError(
+          "transaction_async",
+          "SQLite snapshot callbacks must complete synchronously",
+        );
+      }
+      this.#readerAuthorization.executeTransactionControl("COMMIT");
+      return result;
+    } catch (error) {
+      if (this.#readerDatabase.isTransaction) {
+        try {
+          this.#readerAuthorization.executeTransactionControl("ROLLBACK");
+        } catch (rollbackError) {
+          throw new SqliteDatabaseError(
+            "transaction_failed",
+            "SQLite snapshot transaction and rollback failed",
+            { cause: rollbackError },
+          );
+        }
+      }
+      if (isNativeSqliteError(error)) {
+        throw new SqliteDatabaseError("read_failed", "SQLite snapshot transaction failed", {
+          cause: error,
+        });
+      }
+      throw error;
+    } finally {
+      this.#snapshotting = false;
+    }
   }
 
   write<T>(operation: (transaction: SqliteTransaction) => T): Promise<T> {
@@ -208,8 +269,16 @@ class ManagedSqliteDatabaseFacade implements ManagedSqliteDatabase {
     managedSqliteWriters.set(this, (operation) => instance.write(operation));
   }
 
+  checkIntegrity(): void {
+    this.#instance.checkIntegrity();
+  }
+
   read<T>(operation: (reader: SqliteReader) => T): T {
     return this.#instance.read(operation);
+  }
+
+  snapshot<T>(operation: (reader: SqliteReader) => T): T {
+    return this.#instance.snapshot(operation);
   }
 
   close(): Promise<void> {
@@ -500,6 +569,30 @@ function deactivateTransaction(transaction: TransactionConnection): void {
   activeTransactions.delete(transaction);
 }
 
+class ReaderAuthorization {
+  readonly #database: DatabaseSync;
+  #transactionControlAllowed = false;
+
+  constructor(database: DatabaseSync) {
+    this.#database = database;
+    database.setAuthorizer((actionCode, firstArgument, secondArgument) => {
+      if (actionCode === constants.SQLITE_TRANSACTION && this.#transactionControlAllowed) {
+        return constants.SQLITE_OK;
+      }
+      return authorizeReaderAction(actionCode, firstArgument, secondArgument);
+    });
+  }
+
+  executeTransactionControl(sql: string): void {
+    this.#transactionControlAllowed = true;
+    try {
+      this.#database.exec(sql);
+    } finally {
+      this.#transactionControlAllowed = false;
+    }
+  }
+}
+
 class WriterAuthorization {
   readonly #database: DatabaseSync;
   #transactionControlAllowed = false;
@@ -593,6 +686,13 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
     return false;
   }
   return typeof Reflect.get(value, "then") === "function";
+}
+
+function observeThenable(result: PromiseLike<unknown>): void {
+  void Promise.resolve(result).then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 function isNativeSqliteError(error: unknown): error is Error & { code: string } {

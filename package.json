@@ -36,6 +36,7 @@
     "@minions/adapters": "workspace:*",
     "@minions/contracts": "workspace:*",
     "@minions/core": "workspace:*",
+    "@minions/daemon": "workspace:*",
     "@minions/testkit": "workspace:*",
     "@types/node": "24.13.3",
     "eslint": "10.7.0",

@@ -1,23 +1,51 @@
 import { createServer, type Server } from "node:http";
 
 import { create } from "@bufbuild/protobuf";
+import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { WireType } from "@bufbuild/protobuf/wire";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
+import { createEventCommitWaiter } from "@minions/adapters";
 import {
   ApiVersionSchema,
+  DaemonMode,
+  DoctorCheckKind,
+  DoctorCheckSchema,
+  DoctorCheckStatus,
+  DoctorStatus,
   ErrorDetailSchema,
   GetServerInfoRequestSchema,
+  GetHealthResponseSchema,
   ServerCapability,
   SystemService,
+  RunDoctorResponseSchema,
   type ValidationError,
 } from "@minions/contracts";
+import { timestampFromEpochMilliseconds } from "@minions/core";
+import { FixedClock } from "@minions/testkit";
+import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { startSystemServer, type RunningSystemServer } from "../../apps/daemon/src/server.js";
+import { startDaemonServer, type RunningDaemonServer } from "@minions/daemon";
 
-let systemServer: RunningSystemServer | undefined;
+let systemServer: RunningDaemonServer | undefined;
 let systemClient: Client<typeof SystemService> | undefined;
+let temporaryDatabase: TemporarySqliteDatabase | undefined;
+const health = create(GetHealthResponseSchema, {
+  instanceId: "01900000-0000-7000-8000-000000000001",
+  mode: DaemonMode.HOST,
+  hostId: "01900000-0000-7000-8000-000000000002",
+  startedAt: create(TimestampSchema, { seconds: 1_700_000_000n }),
+});
+const doctor = create(RunDoctorResponseSchema, {
+  status: DoctorStatus.HEALTHY,
+  checks: [
+    create(DoctorCheckSchema, {
+      kind: DoctorCheckKind.LIFECYCLE_LOCK,
+      status: DoctorCheckStatus.PASSED,
+    }),
+  ],
+});
 
 function getSystemClient(): Client<typeof SystemService> {
   if (systemClient === undefined) {
@@ -50,35 +78,43 @@ function getValidationError(error: ConnectError): ValidationError {
   return detail.value;
 }
 async function listenOnLoopback(server: Server, port: number): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const rejectOnError = (error: Error): void => {
-      reject(error);
-    };
-    server.once("error", rejectOnError);
-    server.listen(port, "127.0.0.1", () => {
-      server.off("error", rejectOnError);
-      resolve();
-    });
+  const { promise, resolve, reject } = Promise.withResolvers<undefined>();
+  const rejectOnError = (error: Error): void => {
+    reject(error);
+  };
+  server.once("error", rejectOnError);
+  server.listen(port, "127.0.0.1", () => {
+    server.off("error", rejectOnError);
+    resolve(undefined);
   });
+  await promise;
 }
 
 async function closeServer(server: Server): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error === undefined) {
-        resolve();
-        return;
-      }
-      reject(error);
-    });
+  const { promise, resolve, reject } = Promise.withResolvers<undefined>();
+  server.close((error) => {
+    if (error === undefined) {
+      resolve(undefined);
+      return;
+    }
+    reject(error);
   });
+  await promise;
 }
 
 describe("SystemService integration", () => {
   beforeAll(async () => {
-    systemServer = await startSystemServer({
+    temporaryDatabase = await TemporarySqliteDatabase.create(
+      "host",
+      new FixedClock(timestampFromEpochMilliseconds(1_700_000_000_000)),
+    );
+    systemServer = await startDaemonServer({
+      mode: "host",
       port: 0,
-      serverVersion: "0.0.0",
+      database: temporaryDatabase.database,
+      eventWaiter: createEventCommitWaiter(),
+      eventPollIntervalMs: 10,
+      system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
     });
     systemClient = createClient(
       SystemService,
@@ -93,6 +129,9 @@ describe("SystemService integration", () => {
   afterAll(async () => {
     if (systemServer !== undefined) {
       await systemServer.close();
+    }
+    if (temporaryDatabase !== undefined) {
+      await temporaryDatabase.dispose();
     }
   });
 
@@ -116,7 +155,22 @@ describe("SystemService integration", () => {
         patch: 0,
       }),
     );
-    expect(response.capabilities).toEqual([ServerCapability.SYSTEM_INFO]);
+    expect(response.capabilities).toEqual([
+      ServerCapability.SYSTEM_INFO,
+      ServerCapability.HEALTH_DOCTOR,
+      ServerCapability.EVENT_STREAM,
+    ]);
+  });
+  it("returns typed daemon health identity", async () => {
+    const response = await getSystemClient().getHealth({});
+
+    expect(response).toEqual(health);
+  });
+
+  it("returns blocking typed doctor checks", async () => {
+    const response = await getSystemClient().runDoctor({});
+
+    expect(response).toEqual(doctor);
   });
 
   it("rejects an empty client name with validation violations", async () => {
@@ -229,13 +283,23 @@ describe("SystemService integration", () => {
     const port = address.port;
     await closeServer(portProbe);
 
-    const startup = await startSystemServer({
+    const eventWaiter = createEventCommitWaiter();
+    const startup = await startDaemonServer({
+      mode: "host",
       port,
-      serverVersion: "not-a-semantic-version",
+      database: getTemporaryDatabase().database,
+      eventWaiter,
+      eventPollIntervalMs: 10,
+      system: {
+        serverVersion: "not-a-semantic-version",
+        health,
+        runDoctor: () => Promise.resolve(doctor),
+      },
     }).then(
       (server) => ({ case: "started", server }) as const,
       (error: unknown) => ({ case: "rejected", error }) as const,
     );
+    eventWaiter.close();
     if (startup.case === "started") {
       await startup.server.close();
       throw new Error("invalid server version started a listener");
@@ -247,4 +311,11 @@ describe("SystemService integration", () => {
     await listenOnLoopback(rebound, port);
     await closeServer(rebound);
   });
+
+  function getTemporaryDatabase(): TemporarySqliteDatabase {
+    if (temporaryDatabase === undefined) {
+      throw new Error("temporary database is not initialized");
+    }
+    return temporaryDatabase;
+  }
 });

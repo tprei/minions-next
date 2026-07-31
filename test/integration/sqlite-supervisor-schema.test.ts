@@ -246,7 +246,14 @@ describe("supervisor SQLite schema integration", () => {
   it("keeps raw SQLite connections out of public runtime objects", async () => {
     await withTemporarySupervisorDatabase(async (database) => {
       expect(runtimeOwnKeys(database)).toEqual(["migration", "path"]);
-      expect(runtimePrototypeKeys(database)).toEqual(["close", "constructor", "read", "write"]);
+      expect(runtimePrototypeKeys(database)).toEqual([
+        "checkIntegrity",
+        "close",
+        "constructor",
+        "read",
+        "snapshot",
+        "write",
+      ]);
 
       database.read((reader) => {
         expect(runtimeOwnKeys(reader)).toEqual([]);

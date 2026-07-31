@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file minions/v1/error.proto.
  */
 export const file_minions_v1_error: GenFile = /*@__PURE__*/
-  fileDesc("ChZtaW5pb25zL3YxL2Vycm9yLnByb3RvEgptaW5pb25zLnYxIpcBCgtFcnJvckRldGFpbBIxCgp2YWxpZGF0aW9uGAEgASgLMhsubWluaW9ucy52MS5WYWxpZGF0aW9uRXJyb3JIABJEChd1bnN1cHBvcnRlZF9hcGlfdmVyc2lvbhgCIAEoCzIhLm1pbmlvbnMudjEuVW5zdXBwb3J0ZWRBcGlWZXJzaW9uSABCDwoGZGV0YWlsEgW6SAIIASJICg9WYWxpZGF0aW9uRXJyb3ISNQoKdmlvbGF0aW9ucxgBIAMoCzIXLmJ1Zi52YWxpZGF0ZS5WaW9sYXRpb25CCLpIBZIBAggBIn0KFVVuc3VwcG9ydGVkQXBpVmVyc2lvbhIxCglyZXF1ZXN0ZWQYASABKAsyFi5taW5pb25zLnYxLkFwaVZlcnNpb25CBrpIA8gBARIxCglzdXBwb3J0ZWQYAiABKAsyFi5taW5pb25zLnYxLkFwaVZlcnNpb25CBrpIA8gBAWIGcHJvdG8z", [file_buf_validate_validate, file_minions_v1_common]);
+  fileDesc("ChZtaW5pb25zL3YxL2Vycm9yLnByb3RvEgptaW5pb25zLnYxItcBCgtFcnJvckRldGFpbBIxCgp2YWxpZGF0aW9uGAEgASgLMhsubWluaW9ucy52MS5WYWxpZGF0aW9uRXJyb3JIABJEChd1bnN1cHBvcnRlZF9hcGlfdmVyc2lvbhgCIAEoCzIhLm1pbmlvbnMudjEuVW5zdXBwb3J0ZWRBcGlWZXJzaW9uSAASPgoUZXZlbnRfY3Vyc29yX2V4cGlyZWQYAyABKAsyHi5taW5pb25zLnYxLkV2ZW50Q3Vyc29yRXhwaXJlZEgAQg8KBmRldGFpbBIFukgCCAEiSAoPVmFsaWRhdGlvbkVycm9yEjUKCnZpb2xhdGlvbnMYASADKAsyFy5idWYudmFsaWRhdGUuVmlvbGF0aW9uQgi6SAWSAQIIASJ9ChVVbnN1cHBvcnRlZEFwaVZlcnNpb24SMQoJcmVxdWVzdGVkGAEgASgLMhYubWluaW9ucy52MS5BcGlWZXJzaW9uQga6SAPIAQESMQoJc3VwcG9ydGVkGAIgASgLMhYubWluaW9ucy52MS5BcGlWZXJzaW9uQga6SAPIAQEiWAoSRXZlbnRDdXJzb3JFeHBpcmVkEisKGm1pbmltdW1fYXZhaWxhYmxlX3NlcXVlbmNlGAEgASgEQge6SAQyAigBEhUKDWxhc3Rfc2VxdWVuY2UYAiABKARiBnByb3RvMw", [file_buf_validate_validate, file_minions_v1_common]);
 
 /**
  * @generated from message minions.v1.ErrorDetail
@@ -35,6 +35,12 @@ export type ErrorDetail = Message<"minions.v1.ErrorDetail"> & {
      */
     value: UnsupportedApiVersion;
     case: "unsupportedApiVersion";
+  } | {
+    /**
+     * @generated from field: minions.v1.EventCursorExpired event_cursor_expired = 3;
+     */
+    value: EventCursorExpired;
+    case: "eventCursorExpired";
   } | { case: undefined; value?: undefined };
 };
 
@@ -83,4 +89,26 @@ export type UnsupportedApiVersion = Message<"minions.v1.UnsupportedApiVersion"> 
  */
 export const UnsupportedApiVersionSchema: GenMessage<UnsupportedApiVersion> = /*@__PURE__*/
   messageDesc(file_minions_v1_error, 2);
+
+/**
+ * @generated from message minions.v1.EventCursorExpired
+ */
+export type EventCursorExpired = Message<"minions.v1.EventCursorExpired"> & {
+  /**
+   * @generated from field: uint64 minimum_available_sequence = 1;
+   */
+  minimumAvailableSequence: bigint;
+
+  /**
+   * @generated from field: uint64 last_sequence = 2;
+   */
+  lastSequence: bigint;
+};
+
+/**
+ * Describes the message minions.v1.EventCursorExpired.
+ * Use `create(EventCursorExpiredSchema)` to create a new message.
+ */
+export const EventCursorExpiredSchema: GenMessage<EventCursorExpired> = /*@__PURE__*/
+  messageDesc(file_minions_v1_error, 3);
 

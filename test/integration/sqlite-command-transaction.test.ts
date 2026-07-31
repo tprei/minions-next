@@ -1,3 +1,4 @@
+import { create, toBinary } from "@bufbuild/protobuf";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -8,6 +9,7 @@ import {
   type SqliteCommandStore,
   type SqliteCommandTransaction,
 } from "@minions/adapters";
+import { AggregateKind, ProjectionChangeSchema, ProjectionRemovedSchema } from "@minions/contracts";
 import {
   actorSessionId,
   commandId,
@@ -36,6 +38,18 @@ const EVENT_ID = "01900000-0000-7000-8000-000000000010";
 const OPERATION_ID = "01900000-0000-7000-8000-000000000011";
 const OUTBOX_ID = "01900000-0000-7000-8000-000000000012";
 const SECOND_EVENT_ID = "01900000-0000-7000-8000-000000000013";
+const PROJECTION_EVENT = create(ProjectionChangeSchema, {
+  change: {
+    case: "removed",
+    value: create(ProjectionRemovedSchema, {
+      aggregateKind: AggregateKind.REPOSITORY,
+      aggregateId: REPOSITORY_ID,
+    }),
+  },
+});
+const PROJECTION_EVENT_BYTES = toBinary(ProjectionChangeSchema, PROJECTION_EVENT);
+const PROJECTION_EVENT_HEX = Buffer.from(PROJECTION_EVENT_BYTES).toString("hex").toUpperCase();
+const PROJECTION_EVENT_TYPE = nonEmptyText(ProjectionChangeSchema.typeName, "event type");
 const temporaries: TemporarySqliteDatabase[] = [];
 
 class RecordingNotifier implements CommandCommitNotifier {
@@ -133,8 +147,8 @@ function appliedCommand(
 ): AppliedCommand {
   return Object.freeze({
     event: Object.freeze({
-      typeName: nonEmptyText("minions.v1.RepositoryArchived", "event type"),
-      bytes: Uint8Array.of(7, 8),
+      typeName: PROJECTION_EVENT_TYPE,
+      bytes: new Uint8Array(PROJECTION_EVENT_BYTES),
     }),
     result: Object.freeze({
       typeName: nonEmptyText("minions.v1.ArchiveRepositoryResponse", "result type"),
@@ -212,8 +226,8 @@ describe("SQLite command transaction", () => {
       aggregate_kind: "repository",
       aggregate_id: REPOSITORY_ID,
       aggregate_version: 2n,
-      event_type: "minions.v1.RepositoryArchived",
-      payload: "0708",
+      event_type: ProjectionChangeSchema.typeName,
+      payload: PROJECTION_EVENT_HEX,
     });
     expect(
       row(
@@ -255,6 +269,31 @@ describe("SQLite command transaction", () => {
       committed_sequence: 1n,
     });
     expect(fixture.notifier.receipts).toEqual([receipt]);
+  });
+
+  it("rejects non-projection events and rolls back their state transition", async () => {
+    const fixture = await createFixture();
+
+    await expect(
+      fixture.store.execute(request(), (transaction) => {
+        transaction.run("UPDATE repositories SET version = version + 1 WHERE id = ?", [
+          REPOSITORY_ID,
+        ]);
+        return {
+          ...appliedCommand(),
+          event: {
+            typeName: nonEmptyText("minions.v1.RepositoryArchived", "event type"),
+            bytes: Uint8Array.of(7, 8),
+          },
+        };
+      }),
+    ).rejects.toMatchObject({ code: "invalid_command" });
+
+    expect(
+      row(fixture.database, "SELECT version FROM repositories WHERE id = ?", [REPOSITORY_ID]),
+    ).toEqual({ version: 0n });
+    expect(count(fixture.database, "events")).toBe(0n);
+    expect(count(fixture.database, "idempotency_records")).toBe(0n);
   });
 
   it("creates an absent aggregate at version zero with event version one", async () => {
