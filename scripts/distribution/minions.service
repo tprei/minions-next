@@ -5,7 +5,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=__PREFIX__/bin/minions daemon --home %h/.local/share/minions
+ExecStart=__PREFIX__/bin/minions start --home %h/.local/share/minions
 Restart=on-failure
 RestartSec=3
 
