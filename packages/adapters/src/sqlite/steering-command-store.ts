@@ -1616,7 +1616,7 @@ function validateQueueAttention(
   const pendingRows = transaction.all(
     `SELECT payload
        FROM node_command_deliveries
-      WHERE node_id = ? AND state_kind IN ('queued', 'sent', 'acknowledged')
+      WHERE node_id = ? AND state_kind IN ('queued', 'sent', 'acknowledged', 'review_required')
         AND command_kind IN ('answer', 'approve', 'reject')`,
     [nodeId],
   );
@@ -1757,6 +1757,12 @@ function appendNodeCommandEvent(
   attention?: NodeAttentionRecord,
 ): void {
   const node = requireNode(transaction, record.nodeId);
+  // P1 (review #12): the sole caller (line ~1747) always runs advanceNodeVersion
+  // FIRST, which already bumps nodes.version from oldVersion to oldVersion+1.
+  // Reading it here (nodeVersion) therefore already IS the correct target
+  // aggregate_version for this event - adding another +1 skips a version and
+  // collides with the next queued command's UNIQUE(aggregate_kind,
+  // aggregate_id, aggregate_version) on its own advanceNodeVersion+event pair.
   const nodeVersion = safeNumber(node["version"], "node version");
   const event =
     attention === undefined
@@ -1777,7 +1783,7 @@ function appendNodeCommandEvent(
       eventIdValue,
       record.commandId,
       record.nodeId,
-      nodeVersion + 1,
+      nodeVersion,
       ProjectionChangeSchema.typeName,
       toBinary(ProjectionChangeSchema, event),
       at,

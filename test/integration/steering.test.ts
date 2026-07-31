@@ -1014,6 +1014,44 @@ describe("durable steering command store", () => {
     ).rejects.toMatchObject({ code: "invalid_command" });
   });
 
+  it("a review_required resolver still blocks a second resolution command", async () => {
+    // The pending-resolver query previously only blocked 'queued'/'sent'/
+    // 'acknowledged' deliveries, not 'review_required'. A stale/unsafe
+    // redelivery of an answer/approve/reject command (unsafe to redeliver,
+    // like the retry case above) moves it to 'review_required' - open but no
+    // longer in the blocked-state list - so a second resolver for the SAME
+    // attention was wrongly accepted while the first might still be applied
+    // externally, risking conflicting/double resolution.
+    const fixture = await createFixture();
+    await createQuestionAndApproval(fixture.steering, fixture.firstNode);
+    const first = await fixture.steering.queue(
+      request(fixture, 140, { kind: "answer", attentionId: questionAttention, answer: "yes" }),
+    );
+    await fixture.steering.claimNext({
+      nodeId: fixture.firstNode,
+      afterOrdinal: 0n,
+      at: afterQueue,
+      acknowledgementTimeoutMs: 10,
+      deliveryToken: deliveryToken(140),
+    });
+    // Reclaiming after the short ack timeout expires moves the unsafe-to-
+    // redeliver answer to review_required (same mechanism as the existing
+    // "moves an unsafe stale delivery to review" test above).
+    await fixture.steering.claimNext({
+      nodeId: fixture.firstNode,
+      afterOrdinal: 0n,
+      at: afterReplay,
+      acknowledgementTimeoutMs: 10,
+      deliveryToken: deliveryToken(141),
+    });
+    expect(fixture.steering.get(first.commandId)?.state).toBe("review_required");
+    await expect(
+      fixture.steering.queue(
+        request(fixture, 142, { kind: "answer", attentionId: questionAttention, answer: "no" }),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_command" });
+  });
+
   it("validates typed attentions and resolves them transactionally on apply", async () => {
     const fixture = await createFixture();
     const [question, approval] = await createQuestionAndApproval(
