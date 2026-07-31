@@ -9,7 +9,7 @@ import {
   type AdmissionPolicy,
 } from "@minions/core";
 import { FixedClock } from "@minions/testkit";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const NOW_MS = 1_700_000_000_000;
 const CREDENTIAL = credentialId("anthropic:codex");
@@ -258,6 +258,36 @@ describe("ProviderAdmissionProxy", () => {
     expect(proxy.pausedCredentials).not.toContain(CREDENTIAL);
     proxy.release(permit);
     expect(proxy.outstandingPermitCount).toBe(0);
+  });
+
+  it("clamps an oversized retry-after to setTimeout's max delay instead of firing near-instantly", async () => {
+    // Node clamps a setTimeout delay above 2^31-1 ms (~24.8 days) to
+    // effectively immediate. An advertised Retry-After of 3,000,000
+    // seconds (~34.7 days, a value a provider could genuinely send) must
+    // not silently resume the pause almost instantly - that would defeat
+    // the pause entirely (over-admission).
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    try {
+      const proxy = createProxy(defaultAdmissionPolicy());
+      await proxy.execute({ credentialId: CREDENTIAL, attemptId: "g-huge" }, () =>
+        Promise.resolve({
+          result: { statusCode: 429, headers: {}, retryAfterMs: 3_000_000_000 },
+          value: 1,
+        }),
+      );
+      expect(proxy.pausedCredentials).toContain(CREDENTIAL);
+      const pauseDelays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+      // Every scheduled delay must be within setTimeout's actual usable
+      // range - none may be the unclamped 3,000,000,000ms value, which
+      // Node would treat as ~1ms.
+      for (const delay of pauseDelays) {
+        expect(delay).toBeLessThanOrEqual(2_147_483_647);
+      }
+      expect(pauseDelays).toContain(2_147_483_647);
+      proxy.resumeCredential(CREDENTIAL);
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   it("raises the per-credential limit only via an audited override", async () => {

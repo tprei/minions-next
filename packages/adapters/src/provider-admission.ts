@@ -130,6 +130,10 @@ const permitPruneThreshold = 1024;
  * via {@link ProviderAdmissionProxyOptions.defaultPauseBackoffMs}.
  */
 const DEFAULT_PAUSE_BACKOFF_MS = 60_000;
+/** Node's `setTimeout` treats any delay above this (2^31-1 ms, ~24.8 days)
+ * as effectively 1ms instead of honoring it - clamp pause durations to this
+ * before scheduling (review #21). */
+const MAX_SET_TIMEOUT_DELAY_MS = 2_147_483_647;
 
 export function createProviderAdmissionProxy(
   options: ProviderAdmissionProxyOptions,
@@ -658,7 +662,17 @@ class ProviderAdmissionProxyImpl implements ProviderAdmissionProxy {
       this.emitPaused(slot.credentialId, attemptId, nodeId, reason, retryAfterMs);
       return;
     }
-    const effectiveRetryAfterMs = validatedRetryAfter ?? this.defaultPauseBackoffMs;
+    // P1 (review #21): Node clamps a setTimeout delay larger than 2^31-1 ms
+    // (~24.8 days) to effectively immediate (~1ms) instead of throwing or
+    // waiting - an advertised Retry-After of e.g. 3,000,000 seconds
+    // (~34.7 days, well within a "finite decimal" a provider could send)
+    // overflows this and the pause resumes almost immediately instead of
+    // honoring the requested delay, causing over-admission. Clamp instead
+    // of passing an unbounded value to setTimeout.
+    const effectiveRetryAfterMs = Math.min(
+      validatedRetryAfter ?? this.defaultPauseBackoffMs,
+      MAX_SET_TIMEOUT_DELAY_MS,
+    );
     const target = slot;
     slot.pauseTimer = setTimeout(() => {
       this.resumeSlot(target, "retry_after_elapsed");
