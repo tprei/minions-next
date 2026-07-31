@@ -211,6 +211,7 @@ class DefaultSqliteSchedulerStore implements SchedulerStore {
           "UPDATE scheduler_leases SET state_kind = 'cancelled', released_at_ms = ? WHERE id = ?",
           [at, requiredText(activeLease, "id")],
         );
+        releaseHarnessProcessLease(transaction, requiredText(activeLease, "attempt_id"), at);
         finishActiveAttempt(
           transaction,
           requiredText(activeLease, "attempt_id"),
@@ -475,6 +476,7 @@ function recoverOneExpired(
     "UPDATE scheduler_leases SET state_kind = 'expired', released_at_ms = ? WHERE id = ?",
     [at, leaseId],
   );
+  releaseHarnessProcessLease(transaction, requiredText(lease, "attempt_id"), at);
   const attemptChanged = finishActiveAttempt(
     transaction,
     requiredText(lease, "attempt_id"),
@@ -496,6 +498,31 @@ function recoverOneExpired(
     failureEvidence,
   );
   return { recovered: true, retryScheduled, error: undefined };
+}
+
+/**
+ * Release an ACTIVE `harness_process_leases` row for `attempt` before the caller
+ * terminalizes the attempt. Review #11 (P1): `attempt_terminal_state_requires_
+ * released_harness_lease` (0005_harness_contract.sql) rejects any UPDATE that
+ * moves `attempts.state_kind` off `active` while an active harness process
+ * lease still references it — every running attempt owns one, so without this
+ * release, `finishActiveAttempt` throws and the whole recovery/cancel
+ * transaction rolls back, leaving the scheduler lease/attempt/node active
+ * forever (capacity permanently blocked, no retry scheduled). A no-op when no
+ * active row exists (the harness never claimed a process lease, or a prior
+ * caller already released it) — `changes()` is intentionally unchecked here.
+ */
+function releaseHarnessProcessLease(
+  transaction: SqliteTransaction,
+  attempt: string,
+  at: number,
+): void {
+  transaction.run(
+    `UPDATE harness_process_leases
+        SET state_kind = 'released', released_at_ms = ?
+      WHERE attempt_id = ? AND state_kind = 'active'`,
+    [at, attempt],
+  );
 }
 
 function finishActiveAttempt(

@@ -727,6 +727,128 @@ describe("SQLite scheduler leases", () => {
     ]);
   });
 
+  it("recoverExpired releases an active harness process lease instead of rolling back", async () => {
+    // The 0005 trigger attempt_terminal_state_requires_released_harness_lease
+    // rejects any UPDATE that moves attempts.state_kind off 'active' while an
+    // active harness_process_leases row still references it. Every running
+    // attempt owns one; without releasing it first, finishActiveAttempt threw,
+    // the whole recovery transaction rolled back, and the lease/attempt/node
+    // stayed active forever (capacity permanently blocked, no retry
+    // scheduled).
+    const fixture = await createFixture();
+    const plan = await fixture.addPlan(planSpec(0x7100, [{ offset: 10 }]));
+    const store = scheduler(fixture, 0x361000);
+    const lease = requireLease(await store.claimNext(claimRequest(OWNER_A, START + 90, 100)));
+
+    const harnessKind = "codex";
+    const providerKind = "openai";
+    const model = "gpt-5";
+    const policyDigest = "a".repeat(64);
+    const durableHarnessId = "dh-0000000000000000000000000000000001";
+    const sessionId = "sess-0000000000000000000000000000000001";
+    const harnessLeaseId = "01900000-0000-7000-8000-0000000f0001";
+    await fixture.writable.write((transaction) => {
+      transaction.run(
+        `INSERT INTO harness_bindings
+           (attempt_id, harness_kind, provider_kind, model, session_id, policy_digest, established_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [lease.attemptId, harnessKind, providerKind, model, sessionId, policyDigest, START],
+      );
+      transaction.run(
+        `INSERT INTO node_harness_bindings
+           (node_id, harness_kind, provider_kind, durable_harness_id, created_at_ms)
+         VALUES (?, ?, ?, ?, ?)`,
+        [lease.nodeId, harnessKind, providerKind, durableHarnessId, START],
+      );
+      transaction.run(
+        `INSERT INTO harness_attempt_snapshots
+           (attempt_id, node_id, durable_harness_id, harness_version, model, reasoning_level,
+            capabilities_json, tools_json, security_policy_digest, created_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?)`,
+        [lease.attemptId, lease.nodeId, durableHarnessId, "1.0.0", model, "high", policyDigest, START],
+      );
+      transaction.run(
+        `INSERT INTO harness_process_leases
+           (id, attempt_id, node_id, session_id, process_id, state_kind, acquired_at_ms)
+         VALUES (?, ?, ?, ?, ?, 'active', ?)`,
+        [harnessLeaseId, lease.attemptId, lease.nodeId, sessionId, "proc-1", START],
+      );
+    });
+
+    // Without the fix, this call throws (the transaction aborts on the
+    // 'harness process lease identity is immutable'-adjacent terminal-state
+    // trigger) instead of returning a recovered result.
+    const recovered = await store.recoverExpired(timestampFromEpochMilliseconds(START + 220));
+    expect(recovered).toEqual([
+      expect.objectContaining({ leaseId: lease.id, recovered: true, retryScheduled: true }),
+    ]);
+    expect(
+      row(fixture.database, "SELECT state_kind, released_at_ms FROM harness_process_leases WHERE id = ?", [
+        harnessLeaseId,
+      ]),
+    ).toEqual({ state_kind: "released", released_at_ms: BigInt(START + 220) });
+    expect(
+      row(fixture.database, "SELECT state_kind FROM attempts WHERE id = ?", [lease.attemptId]),
+    ).toEqual({ state_kind: "failed" });
+  });
+
+  it("cancelNode releases an active harness process lease instead of rolling back", async () => {
+    const fixture = await createFixture();
+    const plan = await fixture.addPlan(planSpec(0x7200, [{ offset: 10 }]));
+    const store = scheduler(fixture, 0x362000);
+    const lease = requireLease(await store.claimNext(claimRequest(OWNER_A, START + 90, 100)));
+
+    const harnessKind = "codex";
+    const providerKind = "openai";
+    const model = "gpt-5";
+    const policyDigest = "b".repeat(64);
+    const durableHarnessId = "dh-0000000000000000000000000000000002";
+    const sessionId = "sess-0000000000000000000000000000000002";
+    const harnessLeaseId = "01900000-0000-7000-8000-0000000f0002";
+    await fixture.writable.write((transaction) => {
+      transaction.run(
+        `INSERT INTO harness_bindings
+           (attempt_id, harness_kind, provider_kind, model, session_id, policy_digest, established_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [lease.attemptId, harnessKind, providerKind, model, sessionId, policyDigest, START],
+      );
+      transaction.run(
+        `INSERT INTO node_harness_bindings
+           (node_id, harness_kind, provider_kind, durable_harness_id, created_at_ms)
+         VALUES (?, ?, ?, ?, ?)`,
+        [lease.nodeId, harnessKind, providerKind, durableHarnessId, START],
+      );
+      transaction.run(
+        `INSERT INTO harness_attempt_snapshots
+           (attempt_id, node_id, durable_harness_id, harness_version, model, reasoning_level,
+            capabilities_json, tools_json, security_policy_digest, created_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?)`,
+        [lease.attemptId, lease.nodeId, durableHarnessId, "1.0.0", model, "high", policyDigest, START],
+      );
+      transaction.run(
+        `INSERT INTO harness_process_leases
+           (id, attempt_id, node_id, session_id, process_id, state_kind, acquired_at_ms)
+         VALUES (?, ?, ?, ?, ?, 'active', ?)`,
+        [harnessLeaseId, lease.attemptId, lease.nodeId, sessionId, "proc-2", START],
+      );
+    });
+
+    // Without the fix, this throws instead of cancelling.
+    await store.cancelNode({
+      nodeId: lease.nodeId,
+      at: timestampFromEpochMilliseconds(START + 150),
+      evidenceId: evidenceId(uuid(0xc020)),
+    });
+    expect(
+      row(fixture.database, "SELECT state_kind, released_at_ms FROM harness_process_leases WHERE id = ?", [
+        harnessLeaseId,
+      ]),
+    ).toEqual({ state_kind: "released", released_at_ms: BigInt(START + 150) });
+    expect(
+      row(fixture.database, "SELECT state_kind FROM nodes WHERE id = ?", [lease.nodeId]),
+    ).toEqual({ state_kind: "cancelled" });
+  });
+
   it("rejects stale owner and fencing references for heartbeat and release", async () => {
     const fixture = await createFixture();
     await fixture.addPlan(planSpec(0x8000, [{ offset: 10 }]));
