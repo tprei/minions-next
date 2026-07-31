@@ -16,7 +16,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
@@ -413,46 +413,50 @@ function runBounded(
   args: readonly string[],
   cwd: string,
   signal: AbortSignal | undefined,
+  expectedIdentity: FileIdentity,
 ): Promise<BoundedRunResult> {
-  return new Promise<BoundedRunResult>((resolve, reject) => {
-    const child = spawn(binaryPath, args, {
-      cwd,
-      signal,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    let stdoutLength = 0;
-    let stderrLength = 0;
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (stdoutLength < maxProbeOutputBytes) {
-        stdoutChunks.push(chunk);
-        stdoutLength += chunk.length;
-      }
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (stderrLength < maxProbeOutputBytes) {
-        stderrChunks.push(chunk);
-        stderrLength += chunk.length;
-      }
-    });
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-    }, probeTimeoutMs);
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      resolve({
-        exitCode: code,
-        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
-        stderr: Buffer.concat(stderrChunks).toString("utf8"),
-      });
-    });
-  });
+  return assertUnchangedIdentity(binaryPath, expectedIdentity).then(
+    () =>
+      new Promise<BoundedRunResult>((resolve, reject) => {
+        const child = spawn(binaryPath, args, {
+          cwd,
+          signal,
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
+        const stdoutChunks: Buffer[] = [];
+        const stderrChunks: Buffer[] = [];
+        let stdoutLength = 0;
+        let stderrLength = 0;
+        child.stdout.on("data", (chunk: Buffer) => {
+          if (stdoutLength < maxProbeOutputBytes) {
+            stdoutChunks.push(chunk);
+            stdoutLength += chunk.length;
+          }
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+          if (stderrLength < maxProbeOutputBytes) {
+            stderrChunks.push(chunk);
+            stderrLength += chunk.length;
+          }
+        });
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+        }, probeTimeoutMs);
+        child.once("error", (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        child.once("close", (code) => {
+          clearTimeout(timer);
+          resolve({
+            exitCode: code,
+            stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+            stderr: Buffer.concat(stderrChunks).toString("utf8"),
+          });
+        });
+      }),
+  );
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -495,10 +499,11 @@ async function probeVersion(
   cwd: string,
   expectedVersion: string,
   signal: AbortSignal | undefined,
+  expectedIdentity: FileIdentity,
 ): Promise<string> {
   let result: BoundedRunResult;
   try {
-    result = await runBounded(binaryPath, ["--version"], cwd, signal);
+    result = await runBounded(binaryPath, ["--version"], cwd, signal, expectedIdentity);
   } catch (error) {
     throw jjError(
       "probe_failed",
@@ -520,6 +525,7 @@ async function probeVersion(
 async function probeCapabilities(
   binaryPath: string,
   signal: AbortSignal | undefined,
+  expectedIdentity: FileIdentity,
 ): Promise<JjCapabilities> {
   let workingCopy: boolean;
   let oplog = false;
@@ -528,7 +534,13 @@ async function probeCapabilities(
   try {
     let init: BoundedRunResult;
     try {
-      init = await runBounded(binaryPath, ["git", "init", "--colocate"], scratch, signal);
+      init = await runBounded(
+        binaryPath,
+        ["git", "init", "--colocate"],
+        scratch,
+        signal,
+        expectedIdentity,
+      );
     } catch {
       init = { exitCode: null, stdout: "", stderr: "" };
     }
@@ -536,7 +548,7 @@ async function probeCapabilities(
     if (workingCopy) {
       let op: BoundedRunResult;
       try {
-        op = await runBounded(binaryPath, ["op", "log"], scratch, signal);
+        op = await runBounded(binaryPath, ["op", "log"], scratch, signal, expectedIdentity);
       } catch {
         op = { exitCode: null, stdout: "", stderr: "" };
       }
@@ -544,7 +556,13 @@ async function probeCapabilities(
     }
     let absorbHelp: BoundedRunResult;
     try {
-      absorbHelp = await runBounded(binaryPath, ["absorb", "--help"], scratch, signal);
+      absorbHelp = await runBounded(
+        binaryPath,
+        ["absorb", "--help"],
+        scratch,
+        signal,
+        expectedIdentity,
+      );
     } catch {
       absorbHelp = { exitCode: null, stdout: "", stderr: "" };
     }
@@ -573,6 +591,46 @@ async function hashFile(path: string): Promise<string> {
     stream.once("error", reject);
   });
 }
+
+/**
+ * P1 (review #22): hashFile() completes well before probeVersion/
+ * probeCapabilities spawn(binaryPath) - a replace or symlink-swap in that
+ * window executes an unverified binary despite the digest check having
+ * passed. Capture the verified file's (device, inode) right after hashing,
+ * then re-check it immediately before every subsequent spawn of the same
+ * path (see runBounded's expectedIdentity parameter) - this narrows the
+ * TOCTOU window from "download + extract + version probe + capability
+ * probes" down to "one lstat to one spawn" and rejects a symlink outright.
+ * (Not airtight - execve is not atomic with the preceding lstat on any
+ * POSIX platform without opening the file and executing that exact fd,
+ * which /proc/self/fd/<n> would give on Linux but not on the macOS hosts
+ * this module also targets; this is the meaningful, portable mitigation.)
+ */
+type FileIdentity = Readonly<{ device: number; inode: number }>;
+
+async function fileIdentity(path: string): Promise<FileIdentity> {
+  const metadata = await lstat(path, { bigint: false });
+  if (metadata.isSymbolicLink()) {
+    throw jjError(
+      "corrupt_binary",
+      `jj binary at ${path} is a symbolic link`,
+      "Reinstall the pinned jj runtime into the host tools directory.",
+    );
+  }
+  return { device: metadata.dev, inode: metadata.ino };
+}
+
+async function assertUnchangedIdentity(path: string, expected: FileIdentity): Promise<void> {
+  const current = await fileIdentity(path);
+  if (current.device !== expected.device || current.inode !== expected.inode) {
+    throw jjError(
+      "corrupt_binary",
+      `jj binary at ${path} was replaced after its digest was verified`,
+      "Reinstall the pinned jj runtime into the host tools directory.",
+    );
+  }
+}
+
 
 async function fileExists(path: string): Promise<boolean> {
   try {
@@ -666,14 +724,18 @@ async function runEnsure(validated: ValidatedOptions): Promise<JjCapabilityProbe
       "The installed jj binary was modified or is corrupt; remove it and rerun host setup.",
     );
   }
+  // Pin the verified file's identity immediately after the digest check passes; every
+  // subsequent spawn of binaryPath re-verifies against THIS identity right before exec.
+  const verifiedIdentity = await fileIdentity(binaryPath);
 
   const version = await probeVersion(
     binaryPath,
     validated.toolsDirectory,
     validated.version,
     validated.signal,
+    verifiedIdentity,
   );
-  const capabilities = await probeCapabilities(binaryPath, validated.signal);
+  const capabilities = await probeCapabilities(binaryPath, validated.signal, verifiedIdentity);
   if (
     !capabilities.workingCopy ||
     !capabilities.oplog ||

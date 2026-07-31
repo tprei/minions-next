@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import { appendFile, chmod, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { appendFile, chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -113,6 +113,28 @@ describe("ensureJjCapability — jj v0.43.0 release", () => {
       // appended bytes are still on disk.
       const after = await readFile(installed.binaryPath);
       expect(after.subarray(-suffix.length).toString("utf8")).toBe(suffix.toString("utf8"));
+    },
+  );
+
+  it(
+    "fails closed with corrupt_binary when the installed binary is replaced with a symlink",
+    { timeout: downloadTimeoutMs },
+    async () => {
+      // Simulates a swap in the window between digest verification and exec: the on-disk
+      // path now resolves through a symlink to a byte-identical copy (so a hash-only check
+      // would still pass) - fileIdentity's symlink rejection must still fail closed rather
+      // than following it into a spawn.
+      const toolsDirectory = await makeToolsDirectory();
+      const installed = requireAvailable(await ensureJjCapability({ toolsDirectory }));
+
+      const original = await readFile(installed.binaryPath);
+      const copyPath = `${installed.binaryPath}.copy`;
+      await writeFile(copyPath, original, { mode: 0o700 });
+      await rm(installed.binaryPath);
+      await symlink(copyPath, installed.binaryPath);
+
+      const probe = requireUnavailable(await ensureJjCapability({ toolsDirectory }));
+      expect(probe.failureCode).toBe("corrupt_binary");
     },
   );
 
