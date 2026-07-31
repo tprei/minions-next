@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+autoInstallPeers: false
+engineStrict: true
+preferWorkspacePackages: true
+saveExact: true
+strictDepBuilds: true
+strictPeerDependencies: true

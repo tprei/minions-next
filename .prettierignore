@@ -1,0 +1,7 @@
+**/coverage
+**/dist
+docs
+**/node_modules
+packages/contracts/src/gen
+pnpm-lock.yaml
+agent-guidance
