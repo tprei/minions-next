@@ -19,6 +19,7 @@
     "synthetic:omp-rpc": "pnpm build:integration && node scripts/run-omp-rpc-synthetic.mjs",
     "synthetic:codex-auth": "pnpm build:integration && node scripts/run-codex-auth-synthetic.mjs",
     "synthetic:codex-concurrency": "pnpm build:integration && node scripts/run-codex-concurrency-synthetic.mjs",
+    "synthetic:github-onboarding": "pnpm build:integration && node scripts/run-github-onboarding-synthetic.mjs",
     "deadcode": "knip",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
