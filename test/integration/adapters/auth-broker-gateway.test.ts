@@ -94,7 +94,7 @@ describe.skipIf(!live)("auth-broker + auth-gateway lifecycle (real omp subproces
     const brokerHealth = await broker.health();
     expect(brokerHealth.ok).toBe(true);
     expect(brokerHealth.url).toBe(broker.endpoint);
-    expect(brokerHealth.version).toBe("17.0.4");
+    expect(brokerHealth.version).toBe("17.1.3");
 
     expect(controlBearer.length).toBeGreaterThan(0);
 

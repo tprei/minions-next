@@ -12,13 +12,16 @@ import {
   createAuthGatewayManager,
   createCredentialVault,
   createEventCommitWaiter,
+  createExecutionCoordinator,
   createFileContentBlobStore,
   createPlanRegistry,
   createProviderAdmissionProxy,
   createRepositoryRegistry,
   createSqliteArtifactRegistry,
+  createSqliteCheckpointStore,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
+  createSqliteTranscriptStore,
   createSecureIdGenerator,
   createSupervisorHostRegistry,
   daemonLifecyclePath,
@@ -66,10 +69,15 @@ import {
   type Clock,
   type ContentBlobStore,
   type ContentHash,
+  type ExecutionCoordinator,
+  type HarnessAdapter,
   type HostId,
   type IdGenerator,
+  type SandboxLifecycle,
+  type SchedulerStore,
   type SteeringCommandStore,
   type Timestamp,
+  type VcsBackend,
 } from "@minions/core";
 
 import type { StructuredLogger } from "./logger.js";
@@ -151,6 +159,15 @@ export type DaemonRuntimeOptions = Readonly<{
    * later PR — for PR 21 this only reports health via the doctor.
    */
   jjCapability?: JjCapabilityRuntimeOptions;
+  /**
+   * OPTIONAL opt-in node-execution coordinator (PR 23). When enabled, the daemon
+   * composes an {@link ExecutionCoordinator} from its host database (transcript +
+   * checkpoint stores), its artifact registry, and its clock/ids/logger over the
+   * host-injected scheduler, harness, sandbox, and VCS ports, then exposes it on
+   * the running runtime. Omitted, daemon behaviour is unchanged. Full RPC service
+   * exposure is deferred — callers drive {@link ExecutionCoordinator.runNode}.
+   */
+  nodeExecution?: NodeExecutionRuntimeOptions;
 }>;
 export type ProviderAdmissionRuntimeOptions = Readonly<{
   enabled: true;
@@ -184,6 +201,26 @@ export type JjCapabilityRuntimeOptions = Readonly<{
   toolsDirectory: string;
 }>;
 
+/**
+ * Host-injected ports for the opt-in node-execution coordinator (PR 23). The
+ * daemon owns its host database + artifact registry + clock/ids/logger; the
+ * scheduler, harness, sandbox, and VCS backend are injected because the daemon
+ * does not manage their lifecycles in PR 23.
+ */
+export type NodeExecutionRuntimeOptions = Readonly<{
+  enabled: true;
+  /** Host-injected scheduler store (the daemon does not own its lifecycle). */
+  scheduler: SchedulerStore;
+  /** Host-injected harness adapter (the OMP adapter or a test double). */
+  harness: HarnessAdapter;
+  /** Host-injected sandbox lifecycle. */
+  sandbox: SandboxLifecycle;
+  /** Host-injected VCS backend. */
+  vcs: VcsBackend;
+  /** Optional bounded-output capture limit override in bytes (HAR-08). */
+  outputCaptureLimitBytes?: number;
+}>;
+
 /** Auth subsystem handles held by {@link startDaemonRuntime} for graceful close. */
 export type RunningAuthRuntime = Readonly<{
   broker: AuthBrokerManager;
@@ -198,6 +235,8 @@ export type RunningDaemonRuntime = Readonly<{
   server: RunningDaemonServer;
   /** The admission proxy when enabled; `undefined` when admission is disabled. */
   providerAdmission: ProviderAdmissionProxy | undefined;
+  /** The node-execution coordinator when enabled; `undefined` when disabled. */
+  executionCoordinator: ExecutionCoordinator | undefined;
   close: () => Promise<void>;
 }>;
 
@@ -234,6 +273,7 @@ export async function startDaemonRuntime(
   let authBrokerHealth: (() => Promise<unknown>) | undefined;
   let authGatewayHealth: (() => Promise<unknown>) | undefined;
   let providerAdmission: ProviderAdmissionProxy | undefined;
+  let executionCoordinator: ExecutionCoordinator | undefined;
   let admissionEventLoop: Promise<void> | undefined;
 
   try {
@@ -303,6 +343,24 @@ export async function startDaemonRuntime(
         commandStore,
         hostId: activeHostId,
       });
+      if (options.nodeExecution?.enabled) {
+        const nodeExecution = options.nodeExecution;
+        executionCoordinator = createExecutionCoordinator({
+          scheduler: nodeExecution.scheduler,
+          sandbox: nodeExecution.sandbox,
+          harness: nodeExecution.harness,
+          vcs: nodeExecution.vcs,
+          artifacts: requireArtifactRegistry(artifactRegistry),
+          transcripts: createSqliteTranscriptStore({ database: requireDatabase(hostDatabase) }),
+          checkpoints: createSqliteCheckpointStore({ database: requireDatabase(hostDatabase) }),
+          clock: options.clock,
+          ids: options.ids,
+          logger: options.logger,
+          ...(nodeExecution.outputCaptureLimitBytes === undefined
+            ? {}
+            : { outputCaptureLimitBytes: nodeExecution.outputCaptureLimitBytes }),
+        });
+      }
     }
     options.signal?.throwIfAborted();
     if (options.mode !== "supervisor") {
@@ -528,6 +586,7 @@ export async function startDaemonRuntime(
       lifecycle,
       server,
       providerAdmission,
+      executionCoordinator,
       close: () => {
         closePromise ??= closeRuntime({
           server: requireServer(server),

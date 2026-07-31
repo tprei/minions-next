@@ -25,7 +25,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 /**
  * Integration tests for the OMP ACP harness adapter. Live cases exercise the installed
- * `omp acp` 17.0.4 `initialize` / `authenticate` / `session/new` / `session/load` /
+ * `omp acp` 17.1.3 `initialize` / `authenticate` / `session/new` / `session/load` /
  * `session/close` lifecycle WITHOUT a provider model prompt (auth is deferred to the
  * `synthetic:omp-rpc` runner). Pure cases cover strict frame decoding and ACP→HarnessEvent
  * normalization with hand-crafted JSON-RPC lines.
@@ -80,7 +80,7 @@ function baseOptions(overrides: Partial<OmpAcpAdapterOptions> = {}): OmpAcpAdapt
   const resolvedOmpPath = ompPath ?? "/usr/local/bin/omp";
   return {
     ompPath: resolvedOmpPath,
-    expectedVersion: "17.0.4",
+    expectedVersion: "17.1.3",
     cwd: tmpdir(),
     sessionDirectory: makeSessionDirectory(),
     model: "zai/glm-4.6",
@@ -130,7 +130,7 @@ describe("omp acp adapter — version probe fail-closed", () => {
       try {
         const handshake = await adapter.handshake();
         expect(handshake.harnessKind).toBe("omp-acp");
-        expect(handshake.harnessVersion).toBe("17.0.4");
+        expect(handshake.harnessVersion).toBe("17.1.3");
         expect(handshake.securityPolicyDigest).toBe(policyDigest);
         expect(handshake.tools).toEqual(["read", "bash", "edit", "write", "grep", "glob"]);
       } finally {
@@ -479,7 +479,7 @@ function handle(line) {
   let message;
   try { message = JSON.parse(text); } catch { return; }
   if (message.method === "initialize") {
-    send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentInfo: { name: "fake-omp", title: "Fake OMP", version: "17.0.4" }, authMethods: [{ id: "agent", name: "local" }], agentCapabilities: { loadSession: true, promptCapabilities: { embeddedContext: true }, sessionCapabilities: { close: {} } } } });
+    send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentInfo: { name: "fake-omp", title: "Fake OMP", version: "17.1.3" }, authMethods: [{ id: "agent", name: "local" }], agentCapabilities: { loadSession: true, promptCapabilities: { embeddedContext: true }, sessionCapabilities: { close: {} } } } });
     return;
   }
   if (message.method === "notifications/initialized") return;
@@ -509,7 +509,7 @@ describe("omp acp adapter — malformed notification resilience", () => {
     const fakeOmp = writeFakeOmp(scratch);
     const adapter = createOmpAcpHarnessAdapter({
       ompPath: fakeOmp,
-      expectedVersion: "17.0.4",
+      expectedVersion: "17.1.3",
       cwd: tmpdir(),
       sessionDirectory: makeSessionDirectory(),
       model: "zai/glm-4.6",

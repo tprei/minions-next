@@ -22,7 +22,7 @@ import {
 // capability gate for PR 18; run it on the maintained authenticated runner:
 //   OMP_PATH=/usr/bin/omp OMP_MODEL=<model> pnpm synthetic:omp-rpc
 
-const EXPECTED_VERSION = "17.0.4";
+const EXPECTED_VERSION = "17.1.3";
 const SECURITY_POLICY_DIGEST = contentHash("7".repeat(64));
 const REQUIRED_CAPABILITIES = ["resume", "snapshot", "steer", "follow_up", "abort"];
 const FORBIDDEN_TOOLS = ["task", "subagent", "spawn", "spawn_agent", "delegate", "dispatch"];
