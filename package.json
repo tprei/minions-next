@@ -25,6 +25,7 @@
     "synthetic:github-landing": "pnpm build:integration && node scripts/run-github-landing-synthetic.mjs",
     "synthetic:ssh-host": "pnpm build:integration && node scripts/run-ssh-host-synthetic.mjs",
     "synthetic:wsl-host": "pnpm build:integration && node scripts/run-wsl-host-synthetic.mjs",
+    "synthetic:maintenance": "pnpm build && node scripts/run-maintenance-synthetic.mjs",
     "dogfood:register": "pnpm build:integration && node scripts/dogfood-register.mjs",
     "build:storybook": "storybook build -c .storybook -o storybook-static",
     "dev:web": "pnpm --filter @minions/web exec vite",
