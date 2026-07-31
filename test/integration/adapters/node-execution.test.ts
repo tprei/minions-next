@@ -364,6 +364,7 @@ class FakeSchedulerStore implements SchedulerStore {
 class FakeArtifactRegistry implements ArtifactRegistry {
   readonly outcomes = new Map<TaskNodeId, NodeOutcomeRecord>();
   readonly creates: CreateArtifactRequest[] = [];
+  readonly calls: string[] = [];
 
   create(request: CreateArtifactRequest): Promise<ArtifactRecord> {
     this.creates.push(request);
@@ -385,6 +386,7 @@ class FakeArtifactRegistry implements ArtifactRegistry {
   }
 
   recordOutcome(request: RecordNodeOutcomeRequest): Promise<NodeOutcomeRecord> {
+    this.calls.push("recordOutcome");
     const record = Object.freeze({
       nodeId: request.nodeId,
       outcome: request.outcome,
@@ -608,7 +610,14 @@ async function createFixture(probe?: SandboxCapabilityProbe): Promise<NodeExecut
   const vcs = new FakeVcsBackend();
   const artifacts = new FakeArtifactRegistry();
   const transcripts = createSqliteTranscriptStore({ database: temporary.database });
-  const checkpoints = createSqliteCheckpointStore({ database: temporary.database });
+  const realCheckpoints = createSqliteCheckpointStore({ database: temporary.database });
+  const checkpoints: CheckpointStore = {
+    record: (checkpoint) => {
+      artifacts.calls.push(`checkpoint:${checkpoint.phase}`);
+      return realCheckpoints.record(checkpoint);
+    },
+    latest: (attemptIdValue) => realCheckpoints.latest(attemptIdValue),
+  };
   const policy = sandboxPolicy();
   const policyFingerprint = fingerprinter.fingerprint(policy);
   const sharedPorts = { scheduler, sandbox, vcs, artifacts, transcripts, checkpoints, clock, ids };
@@ -804,6 +813,31 @@ describe("execution coordinator (node-execution pipeline)", () => {
     expect(outcome.contextDigest).toBe(
       computeContextPackDigest(buildContextPackInput(request, handshake()), sha256Digest),
     );
+  });
+
+  it("writes the final checkpoint before recording the node outcome", async () => {
+    // A crash between recording the outcome and writing the final
+    // checkpoint previously left the node durably 'succeeded' with no
+    // final checkpoint - unrecoverable. The final checkpoint must be
+    // durable BEFORE the outcome is recorded, so a crash instead leaves
+    // the node without a durable outcome (still retry/resume-eligible).
+    const fixture = await createFixture();
+    const attempt = freshAttempt();
+    const node = freshNode();
+    stageLease(fixture, attempt, node);
+    const harness = new ScriptedHarnessAdapter({
+      handshake: handshake(),
+      sessionId: "session-order",
+      payloads: [message("nothing to do"), result("succeeded", "no changes needed")],
+    });
+
+    await fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node));
+
+    const checkpointIndex = fixture.artifacts.calls.indexOf("checkpoint:finalizing");
+    const outcomeIndex = fixture.artifacts.calls.indexOf("recordOutcome");
+    expect(checkpointIndex).toBeGreaterThanOrEqual(0);
+    expect(outcomeIndex).toBeGreaterThanOrEqual(0);
+    expect(checkpointIndex).toBeLessThan(outcomeIndex);
   });
 
   it("runs a no-change node (succeeded, no artifacts, no commit)", async () => {

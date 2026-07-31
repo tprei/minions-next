@@ -563,7 +563,14 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
   ): Promise<NodeExecutionResult> {
     const attemptIdValue = request.context.attemptId;
     const resolved = await this.#resolveOutcome(request, stream);
-    await this.#recordOutcome(request, resolved);
+    // P1 (review #24): the outcome was previously recorded FIRST, then the
+    // final checkpoint written and the lease/sandbox released/destroyed. A
+    // crash in that gap left the node durably 'succeeded' with no final
+    // checkpoint - an unrecoverable coordinator state (the durable outcome
+    // says done, but there is nothing to resume/reconcile from). Write the
+    // final checkpoint FIRST, so any later failure leaves the node without
+    // a durable outcome (still retry/resume-eligible) rather than
+    // succeeded-but-uncheckpointed.
     const finalCheckpoint = this.#checkpoint(
       request,
       setup.session.identity,
@@ -573,6 +580,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       "finalizing",
     );
     await this.#checkpoints.record(finalCheckpoint);
+    await this.#recordOutcome(request, resolved);
     await this.#releaseLease(setup.lease);
     await this.#destroySandbox(setup.sandbox);
     const transcript = await this.#transcriptSummary(attemptIdValue);
