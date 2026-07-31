@@ -24,6 +24,7 @@ export type {
   DaemonStartupErrorCode,
   NodeExecutionRuntimeOptions,
   ProviderAdmissionRuntimeOptions,
+  RunningAuthRuntime,
 } from "./runtime.js";
 export type { ExecutionCoordinator } from "@minions/core";
 
