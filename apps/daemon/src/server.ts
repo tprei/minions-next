@@ -9,7 +9,7 @@ import {
   type SupervisorHostRegistry,
   type RepositoryRegistry,
 } from "@minions/adapters";
-import { createContextValues, type Interceptor } from "@connectrpc/connect";
+import type { Interceptor } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { createValidateInterceptor } from "@connectrpc/validate";
 import {
@@ -101,11 +101,6 @@ export async function startDaemonServer(
     writeMaxBytes: DAEMON_MESSAGE_MAX_BYTES,
     jsonOptions: { ignoreUnknownFields: false },
     shutdownSignal: shutdownController.signal,
-    contextValues: (request) =>
-      createContextValues().set(
-        isLoopbackContextKey,
-        isLoopbackAddress(request.socket.remoteAddress),
-      ),
     routes: (router) => {
       registerSystemService(router, {
         ...options.system,
