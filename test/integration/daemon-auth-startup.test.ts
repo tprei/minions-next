@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
 
 import { Writable } from "node:stream";
-import { createSecureIdGenerator } from "@minions/adapters";
+import { createSecureIdGenerator, OmpAcpAdapterError } from "@minions/adapters";
 import { timestampFromEpochMilliseconds, hostId, type HostId } from "@minions/core";
 import { FixedClock } from "@minions/testkit";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   AuthRuntimeStartupError,
   createStructuredLogger,
+  defaultRuntimeOptions,
   startDaemonRuntime,
   type StructuredLogger,
 } from "@minions/daemon";
@@ -22,6 +23,11 @@ import {
  *    fails closed with `AuthRuntimeStartupError(vault_unavailable)` BEFORE
  *    accepting any harness session (acceptance 11).
  * 2. With `authBroker` omitted, behaviour is unchanged (existing tests pass).
+ * 3. `defaultRuntimeOptions` (the sole builder the real CLI/daemon entrypoints use) wires
+ *    `authBroker` automatically for `mode: "host"` with a supplied `hostId` — the bounded
+ *    case where the host ID is known before `startDaemonRuntime` runs — and leaves it
+ *    unset for `local`/`supervisor` modes and for `host` mode with no `hostId`, exactly
+ *    preserving prior behaviour for every existing caller.
  *
  * Booting real broker/gateway subprocesses from the daemon test would couple this
  * test to OMP availability; the broker/gateway subprocess lifecycle is already
@@ -34,6 +40,15 @@ const FIRST_INSTANCE_ID = "01900000-0000-7000-8000-000000000091";
 const FIRST_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000092";
 const AUTH_HOST_ID_TEXT = "01900000-0000-7000-8000-000000000093";
 const AUTH_HOST_ID: HostId = hostId(AUTH_HOST_ID_TEXT);
+const HOST_MODE_HOST_ID_TEXT = "01900000-0000-7000-8000-000000000094";
+const HOST_MODE_HOST_ID: HostId = hostId(HOST_MODE_HOST_ID_TEXT);
+
+// Two of resolveOmpPath's three fallback candidates are system-wide paths; the third
+// (`${homedir()}/.local/bin/omp`) is what this dev box uses. The "OMP unresolvable" test
+// below only holds when neither system-wide fallback exists, so it self-skips otherwise.
+const systemOmpCandidateExists = ["/usr/local/bin/omp", "/usr/bin/omp"].some((candidate) =>
+  existsSync(candidate),
+);
 
 const temporaryDirectories: string[] = [];
 
@@ -147,6 +162,99 @@ describe("daemon auth-startup (PR 19)", () => {
       cleanup(home);
     }
   }, 30_000);
+});
+
+describe("defaultRuntimeOptions auth-broker wiring (PR 19)", () => {
+  it("populates authBroker for mode: host when hostId is supplied", () => {
+    const home = makeHome();
+    const previousOmpPath = process.env["OMP_PATH"];
+    // Deterministic across every environment (including CI, where no `omp` binary is
+    // installed): resolveOmpPath() returns OMP_PATH verbatim without checking the file
+    // exists, so this test never depends on ambient system state.
+    process.env["OMP_PATH"] = "/opt/test-fixture/omp";
+    try {
+      const options = defaultRuntimeOptions({
+        home,
+        mode: "host",
+        port: 4_820,
+        serverVersion: "0.0.0",
+        logger: captureLogger(),
+        hostId: HOST_MODE_HOST_ID,
+      });
+      expect(options.authBroker).toEqual({
+        enabled: true,
+        hostId: HOST_MODE_HOST_ID,
+        ompPath: "/opt/test-fixture/omp",
+      });
+    } finally {
+      if (previousOmpPath === undefined) delete process.env["OMP_PATH"];
+      else process.env["OMP_PATH"] = previousOmpPath;
+      cleanup(home);
+    }
+  });
+
+  it("leaves authBroker undefined for mode: local (unchanged behaviour)", () => {
+    const home = makeHome();
+    try {
+      const options = defaultRuntimeOptions({
+        home,
+        mode: "local",
+        port: 4_821,
+        serverVersion: "0.0.0",
+        logger: captureLogger(),
+      });
+      expect(options.authBroker).toBeUndefined();
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  it("leaves authBroker undefined for mode: host with no hostId (startDaemonRuntime throws separately)", () => {
+    const home = makeHome();
+    try {
+      const options = defaultRuntimeOptions({
+        home,
+        mode: "host",
+        port: 4_822,
+        serverVersion: "0.0.0",
+        logger: captureLogger(),
+      });
+      expect(options.authBroker).toBeUndefined();
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  it.skipIf(systemOmpCandidateExists)(
+    "throws a typed OmpAcpAdapterError for mode: host when no OMP binary can be resolved",
+    () => {
+      const home = makeHome();
+      const previousHome = process.env["HOME"];
+      const previousOmpPath = process.env["OMP_PATH"];
+      const emptyHome = mkdtempSync(join(tmpdir(), "mauth-no-omp-home-"));
+      delete process.env["OMP_PATH"];
+      process.env["HOME"] = emptyHome;
+      try {
+        expect(() =>
+          defaultRuntimeOptions({
+            home,
+            mode: "host",
+            port: 4_823,
+            serverVersion: "0.0.0",
+            logger: captureLogger(),
+            hostId: HOST_MODE_HOST_ID,
+          }),
+        ).toThrow(OmpAcpAdapterError);
+      } finally {
+        if (previousHome === undefined) delete process.env["HOME"];
+        else process.env["HOME"] = previousHome;
+        if (previousOmpPath === undefined) delete process.env["OMP_PATH"];
+        else process.env["OMP_PATH"] = previousOmpPath;
+        cleanup(home);
+        cleanup(emptyHome);
+      }
+    },
+  );
 });
 
 // Reference the symbols used above so type-only imports survive bundling.

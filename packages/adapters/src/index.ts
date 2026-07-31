@@ -213,6 +213,7 @@ export {
   createOmpAcpHarnessAdapter,
   OmpAcpAdapterError,
   buildSessionNewParams,
+  resolveOmpPath,
 } from "./omp-acp-adapter.js";
 export type {
   AcpFrame,

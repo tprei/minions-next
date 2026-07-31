@@ -25,6 +25,7 @@ import {
   inspectLifecycleLock,
   openHostDatabase,
   openSupervisorDatabase,
+  resolveOmpPath,
   SqliteDatabaseError,
   type AcquiredLifecycleLock,
   type AuthBrokerManager,
@@ -518,10 +519,46 @@ export function defaultRuntimeOptions(
   }>,
 ): DaemonRuntimeOptions {
   const clock: Clock = { now: () => timestampFromEpochMilliseconds(Date.now()) };
+  const authBroker = defaultAuthBrokerOptions(input.mode, input.hostId);
   return {
     ...input,
     clock,
     ids: createSecureIdGenerator(clock),
+    ...(authBroker === undefined ? {} : { authBroker }),
+  };
+}
+
+/**
+ * PR 19: derive per-host auth-broker options for the ONE bounded case where the host ID
+ * is known before {@link startDaemonRuntime} runs — `mode === "host"` (remote SSH/WSL2-
+ * attached execution hosts; PR53/PR54's domain, exactly the security boundary this PR
+ * exists to protect). Both production entrypoints that call this function
+ * (`apps/daemon/src/index.ts`'s `main()` and, transitively, `apps/cli/src/index.ts`'s
+ * `start`) already require `--host-id` for host mode before `defaultRuntimeOptions` is
+ * ever reached, so `hostIdOption` is defined on any real `minions start --mode host`
+ * invocation.
+ *
+ * `mode === "local"` is deliberately left unwired here: its host ID is a fresh UUID
+ * minted INSIDE {@link startDaemonRuntime} itself (`hostId(options.ids.nextId())`) — there
+ * is no host ID to hand the broker before startup, a genuine chicken-and-egg problem — and
+ * node-execution/harnesses do not activate in local mode today regardless of auth-broker
+ * wiring, so there is no credential boundary to protect there yet. `mode === "supervisor"`
+ * never runs harnesses either.
+ *
+ * Throws (via {@link resolveOmpPath}) when host mode is otherwise ready to run but no OMP
+ * binary can be found anywhere — fail-closed, since a host daemon with no OMP available
+ * cannot run any harness safely regardless of auth-broker wiring (acceptance 11: missing
+ * secure credential storage fails host registration).
+ */
+function defaultAuthBrokerOptions(
+  mode: DaemonModeName,
+  hostIdOption: HostId | undefined,
+): AuthBrokerRuntimeOptions | undefined {
+  if (mode !== "host" || hostIdOption === undefined) return undefined;
+  return {
+    enabled: true,
+    hostId: hostIdOption,
+    ompPath: resolveOmpPath(),
   };
 }
 
