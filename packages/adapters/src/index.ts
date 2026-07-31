@@ -313,6 +313,29 @@ export type {
   JjCapabilityOptions,
   JjCapabilityProbe,
 } from "./jj-capability.js";
+export { createRevsetManager, RevsetManagerError } from "./revset-adapter.js";
+export type {
+  NodeImpact,
+  NodeReadiness,
+  RevsetErrorCode,
+  RevsetJjRunResult,
+  RevsetJjRunner,
+  RevsetManager,
+  RevsetManagerOptions,
+} from "./revset-adapter.js";
+export {
+  buildRevsetExpression,
+  EMPTY_REVSET,
+  filterBindings,
+  REVSET_QUERY_KINDS,
+  treeUnion,
+} from "@minions/core";
+export type {
+  RevsetExpressionScope,
+  RevsetQuery,
+  RevsetQueryKind,
+  RevsetResult,
+} from "@minions/core";
 export { createJjCentralRepoManager, JjCentralRepoError } from "./jj-central-repo.js";
 export type {
   JjCentralRepo,
