@@ -148,6 +148,20 @@ describe("SystemdCredentialVault factory (always run)", () => {
     expect(err.backend).toBe("systemd-creds");
     expect(err.name).toBe("CredentialVaultError");
   });
+
+  it("rejects tpm2-absent as an unencrypted-at-rest key mode", () => {
+    let thrown: unknown;
+    try {
+      createCredentialVault(HOST_ID, {
+        storeDirectory: makeStoreDirectory(),
+        systemdCredsKeyMode: "tpm2-absent",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(CredentialVaultError);
+    expect((thrown as CredentialVaultError).code).toBe("vault_unavailable");
+  });
 });
 
 function makeVault(): CredentialVault {
@@ -186,7 +200,10 @@ function detectKeyMode(): SystemdCredsKeyMode | undefined {
   const plain = join(tmpdir(), `mvault-probe-${String(process.pid)}-${String(Date.now())}.plain`);
   writeFileSync(plain, "probe");
   try {
-    const modes: readonly SystemdCredsKeyMode[] = ["host", "auto-initrd", "tpm2-absent", "auto"];
+    // tpm2-absent deliberately excluded: createCredentialVault now rejects it
+    // (P1, review #20 - it stores the vault unencrypted at rest), so it must
+    // never be selected here as a "working" mode for makeVault() to use.
+    const modes: readonly SystemdCredsKeyMode[] = ["host", "auto-initrd", "auto"];
     for (const mode of modes) {
       const cipher = join(
         tmpdir(),

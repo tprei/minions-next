@@ -111,11 +111,25 @@ export function createCredentialVault(
   if (process.platform === "darwin") {
     return new KeychainVault(hostId, options.securityPath ?? defaultSecurityPath);
   }
+  // P1 (review #20): 'tpm2-absent' tells systemd-creds to encrypt with a
+  // zero-length key - no confidentiality or authentication at all, so the
+  // credential vault is effectively stored in the clear. Reject it fail
+  // closed rather than silently accepting a non-encrypting mode; the
+  // operator must pick a mode that actually protects the vault (host,
+  // tpm2, host+tpm2, auto, auto-initrd).
+  const keyMode = options.systemdCredsKeyMode ?? "host";
+  if (keyMode === "tpm2-absent") {
+    throw new CredentialVaultError(
+      "vault_unavailable",
+      "systemd-creds",
+      "systemdCredsKeyMode 'tpm2-absent' stores the vault unencrypted at rest and is refused",
+    );
+  }
   return new SystemdCredentialVault(
     hostId,
     options.systemdCredsPath ?? defaultSystemdCredsPath,
     options.storeDirectory ?? join(homedir(), ".local", "share", "minions", "vault", hostId),
-    options.systemdCredsKeyMode ?? "host",
+    keyMode,
   );
 }
 
