@@ -1,0 +1,57 @@
+.mn-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--mn-space-2);
+  height: 1.375rem;
+  border-radius: var(--mn-radius-sm);
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-sm);
+  font-weight: var(--mn-font-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mn-status-badge--neutral {
+  color: var(--mn-color-status-neutral-fg);
+  background-color: var(--mn-color-status-neutral-bg);
+}
+
+.mn-status-badge--info {
+  color: var(--mn-color-status-info-fg);
+  background-color: var(--mn-color-status-info-bg);
+}
+
+.mn-status-badge--success {
+  color: var(--mn-color-status-success-fg);
+  background-color: var(--mn-color-status-success-bg);
+}
+
+.mn-status-badge--warning {
+  color: var(--mn-color-status-warning-fg);
+  background-color: var(--mn-color-status-warning-bg);
+}
+
+.mn-status-badge--danger {
+  color: var(--mn-color-status-danger-fg);
+  background-color: var(--mn-color-status-danger-bg);
+}
+
+/* Facts render in the plain foreground with a solid left rule — a stable, deterministic
+   visual signature that never changes with theme mode beyond the token swap. */
+.mn-fact {
+  color: var(--mn-color-fact-fg);
+  border-left: 2px solid var(--mn-color-fact-border);
+  padding-left: var(--mn-space-2);
+  font-family: var(--mn-font-mono);
+  font-size: var(--mn-font-size-sm);
+}
+
+/* Commentary is always muted and italic — legible as "the model said this", not a recorded
+   value, at a glance and independent of color perception (WCAG 2.2 AA — not color-only). */
+.mn-commentary {
+  color: var(--mn-color-commentary-fg);
+  border-left: 2px dashed var(--mn-color-commentary-border);
+  padding-left: var(--mn-space-2);
+  font-family: var(--mn-font-sans);
+  font-style: italic;
+}

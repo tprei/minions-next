@@ -1,0 +1,52 @@
+.mn-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-3);
+}
+
+.mn-tabs__list {
+  display: flex;
+  gap: var(--mn-space-6);
+  border-bottom: 1px solid var(--mn-color-border);
+}
+
+.mn-tabs__trigger {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--mn-space-2) 0;
+  margin-bottom: -1px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background-color: transparent;
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-md);
+  font-weight: var(--mn-font-weight-medium);
+  color: var(--mn-color-fg-muted);
+  cursor: pointer;
+  transition:
+    color var(--mn-motion-duration) var(--mn-motion-easing),
+    border-color var(--mn-motion-duration) var(--mn-motion-easing);
+}
+
+.mn-tabs__trigger:not([data-state="active"]):hover {
+  color: var(--mn-color-fg);
+}
+
+/* Active state is never color-only: the border's presence and the bolder weight both read
+   without relying on hue perception (WCAG 2.2 AA — not color-only). */
+.mn-tabs__trigger[data-state="active"] {
+  border-bottom-color: var(--mn-color-accent);
+  font-weight: var(--mn-font-weight-semibold);
+  color: var(--mn-color-fg);
+}
+
+.mn-tabs__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mn-tabs__content {
+  font-family: var(--mn-font-sans);
+  font-size: var(--mn-font-size-md);
+  color: var(--mn-color-fg);
+}

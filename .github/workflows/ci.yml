@@ -33,8 +33,19 @@ jobs:
           corepack prepare pnpm@10.34.5 --activate
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
       - name: Verify
         run: pnpm verify:pr
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-test-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
 
   protobuf:
     name: protobuf

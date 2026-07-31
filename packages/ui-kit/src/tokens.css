@@ -1,0 +1,144 @@
+/*
+ * Semantic design tokens (PR 43 — ui-design-system-shell).
+ *
+ * Tokens are role-based ("surface", "fg-muted", "status-warning"), never raw color names.
+ * A feature MUST consume these custom properties rather than inventing local colors or
+ * status semantics (PR 43 acceptance). Light is the default; `[data-theme="dark"]` overrides.
+ * `prefers-color-scheme` is honored only when no explicit `data-theme` is set (system mode) —
+ * see theme.tsx for the JS side of that resolution.
+ */
+
+:root {
+  /* Layout density: components read `--mn-space-*` and `--mn-radius-*`, never literals. */
+  --mn-space-1: 0.25rem;
+  --mn-space-2: 0.5rem;
+  --mn-space-3: 0.75rem;
+  --mn-space-4: 1rem;
+  --mn-space-6: 1.5rem;
+  --mn-space-8: 2rem;
+  --mn-radius-sm: 0.25rem;
+  --mn-radius-md: 0.5rem;
+  --mn-radius-lg: 0.75rem;
+
+  /* Typography scale. */
+  --mn-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mn-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --mn-font-size-sm: 0.8125rem;
+  --mn-font-size-md: 0.9375rem;
+  --mn-font-size-lg: 1.125rem;
+  --mn-line-height-md: 1.5;
+  --mn-font-weight-regular: 400;
+  --mn-font-weight-medium: 500;
+  --mn-font-weight-semibold: 600;
+
+  /* Motion. Components MUST read this rather than hardcoding transition durations, so
+     `prefers-reduced-motion`/the in-app reduced-motion toggle (theme.tsx) can zero it out. */
+  --mn-motion-duration: 150ms;
+  --mn-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+
+  color-scheme: light;
+
+  /* Surfaces. */
+  --mn-color-bg: #ffffff;
+  --mn-color-bg-raised: #f7f7f8;
+  --mn-color-bg-inset: #f0f0f2;
+  --mn-color-bg-overlay: #ffffff;
+  --mn-color-scrim: rgb(15 15 20 / 45%);
+  --mn-color-border: #d9d9de;
+  --mn-color-border-strong: #b8b8c0;
+
+  /* Foreground. */
+  --mn-color-fg: #16161a;
+  --mn-color-fg-muted: #55555f;
+  --mn-color-fg-faint: #85858f;
+  --mn-color-fg-on-accent: #ffffff;
+
+  /* Accent / interactive. */
+  --mn-color-accent: #4638e0;
+  --mn-color-accent-hover: #3b2ec9;
+  --mn-color-accent-muted: #eeecfd;
+  --mn-color-focus-ring: #4638e0;
+
+  /* Status roles. Every status-bearing component (StatusBadge, StateView) MUST route
+     through exactly these five roles — no feature-local status colors (UI-07). */
+  --mn-color-status-neutral-fg: #55555f;
+  --mn-color-status-neutral-bg: #f0f0f2;
+  --mn-color-status-info-fg: #1c5fd1;
+  --mn-color-status-info-bg: #e8f0fd;
+  --mn-color-status-success-fg: #167a3f;
+  --mn-color-status-success-bg: #e6f6ec;
+  --mn-color-status-warning-fg: #92600a;
+  --mn-color-status-warning-bg: #fdf1de;
+  --mn-color-status-danger-fg: #b3241f;
+  --mn-color-status-danger-bg: #fbe9e8;
+
+  /* Provenance roles (UI-07): a deterministic fact (a check result, a recorded outcome, an
+     exact SHA) and model commentary (an LLM's summary/diagnosis of that fact) are never the
+     same visual type. Components MUST pick one of these two roles, never the plain body
+     foreground, when rendering either kind of text. */
+  --mn-color-fact-fg: var(--mn-color-fg);
+  --mn-color-fact-border: var(--mn-color-border-strong);
+  --mn-color-commentary-fg: var(--mn-color-fg-muted);
+  --mn-color-commentary-border: var(--mn-color-border);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --mn-color-bg: #101014;
+  --mn-color-bg-raised: #17171c;
+  --mn-color-bg-inset: #1d1d24;
+  --mn-color-bg-overlay: #1d1d24;
+  --mn-color-scrim: rgb(0 0 0 / 60%);
+  --mn-color-border: #2c2c35;
+  --mn-color-border-strong: #43434f;
+
+  --mn-color-fg: #f0f0f4;
+  --mn-color-fg-muted: #b0b0bc;
+  --mn-color-fg-faint: #7d7d8a;
+  --mn-color-fg-on-accent: #ffffff;
+
+  --mn-color-accent: #5e50de;
+  --mn-color-accent-hover: #4c3fc9;
+  --mn-color-accent-muted: #241f4a;
+  --mn-color-focus-ring: #8577ff;
+
+  --mn-color-status-neutral-fg: #b0b0bc;
+  --mn-color-status-neutral-bg: #1d1d24;
+  --mn-color-status-info-fg: #7cadff;
+  --mn-color-status-info-bg: #16233d;
+  --mn-color-status-success-fg: #6bd69a;
+  --mn-color-status-success-bg: #12301f;
+  --mn-color-status-warning-fg: #f0b95f;
+  --mn-color-status-warning-bg: #3a2a0e;
+  --mn-color-status-danger-fg: #f2857f;
+  --mn-color-status-danger-bg: #3a1614;
+}
+
+/* Reduced motion — either the OS preference or the in-app toggle (theme.tsx sets
+   `data-reduced-motion="true"` on <html> when the user overrides `system`). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --mn-motion-duration: 0ms;
+  }
+}
+[data-reduced-motion="true"] {
+  --mn-motion-duration: 0ms;
+}
+
+.mn-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mn-focus-ring:focus-visible {
+  outline: 2px solid var(--mn-color-focus-ring);
+  outline-offset: 2px;
+}
