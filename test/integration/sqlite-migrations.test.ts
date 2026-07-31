@@ -934,8 +934,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 8,
-          appliedVersions: [2, 3, 4, 5, 6, 7, 8],
+          currentVersion: 9,
+          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1157,7 +1157,7 @@ describe("SQLite migration integration", () => {
           .prepare(
             "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
           )
-          .run(9, "future_state", "f".repeat(64), fixedTimestamp);
+          .run(10, "future_state", "f".repeat(64), fixedTimestamp);
       } finally {
         futureDatabase.close();
       }
@@ -1176,7 +1176,7 @@ describe("SQLite migration integration", () => {
       ).toEqual([
         ...expectedHistory(hostMigrations, fixedTimestamp),
         {
-          version: 9n,
+          version: 10n,
           name: "future_state",
           checksum: "f".repeat(64),
           applied_at_ms: BigInt(fixedTimestamp),
@@ -1222,8 +1222,8 @@ describe("SQLite v7 durable steering schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 8,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
+        currentVersion: 9,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
         backupPath: null,
       });
       expect(
@@ -1297,8 +1297,8 @@ describe("SQLite v7 durable steering schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 6,
-          currentVersion: 8,
-          appliedVersions: [7, 8],
+          currentVersion: 9,
+          appliedVersions: [7, 8, 9],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1352,8 +1352,8 @@ describe("SQLite v6 scheduler lease schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 8,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
+        currentVersion: 9,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
         backupPath: null,
       });
       expect(
@@ -1419,8 +1419,8 @@ describe("SQLite v6 scheduler lease schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 5,
-          currentVersion: 8,
-          appliedVersions: [6, 7, 8],
+          currentVersion: 9,
+          appliedVersions: [6, 7, 8, 9],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -2899,8 +2899,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 8,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
+        currentVersion: 9,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
         backupPath: null,
       });
       expect(
@@ -3037,8 +3037,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 8,
-          appliedVersions: [8],
+          currentVersion: 9,
+          appliedVersions: [8, 9],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3139,8 +3139,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 8,
-          appliedVersions: [8],
+          currentVersion: 9,
+          appliedVersions: [8, 9],
           backupPath: resolve(backupPath),
         });
         expect(

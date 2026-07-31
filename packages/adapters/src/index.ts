@@ -1,3 +1,4 @@
+export { createNodeGitProcess } from "./git-process.js";
 export { BlobCorruptionError, createFileContentBlobStore } from "./blob/file-content-blob-store.js";
 export type {
   BlobCorruptionErrorCode,
@@ -115,6 +116,41 @@ export type {
   CreateSqliteSchedulerStoreOptions,
   SqliteSchedulerErrorCode,
 } from "./sqlite/scheduler-store.js";
+export {
+  createSqliteGitMutationLeaseStore,
+  createSqliteWorkspaceRegistry,
+  GitMutationLeaseError,
+  SqliteGitMutationLeaseStore,
+  SqliteWorkspaceRegistry,
+  WorkspaceRegistryError,
+} from "./sqlite/workspace-registry.js";
+export type {
+  CreateSqliteGitMutationLeaseStoreOptions,
+  CreateSqliteWorkspaceRegistryOptions,
+  GitMutationLease,
+  GitMutationLeaseAcquireInput,
+  GitMutationLeaseErrorCode,
+  GitMutationLeaseAssertHeldInput,
+  GitMutationLeaseReleaseInput,
+  GitMutationLeaseRenewInput,
+  GitMutationLeaseStore,
+  WorkspaceBeginInput,
+  WorkspaceCleanedInput,
+  WorkspaceCleanupInput,
+  WorkspaceFailedInput,
+  WorkspaceReadyInput,
+  WorkspaceRegistry,
+  WorkspaceRegistryErrorCode,
+} from "./sqlite/workspace-registry.js";
+export { createWorkspaceManager, WorkspaceManagerError } from "./workspace-manager.js";
+export type {
+  WorkspaceCreateInput,
+  WorkspaceManager,
+  WorkspaceManagerCleanupInput,
+  WorkspaceManagerErrorCode,
+  WorkspaceManagerOptions,
+  WorkspaceStatusInput,
+} from "./workspace-manager.js";
 export { openHostDatabase, openSupervisorDatabase } from "./sqlite/database.js";
 export type {
   ManagedSqliteDatabase,

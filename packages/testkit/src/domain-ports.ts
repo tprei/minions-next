@@ -1,4 +1,9 @@
-import type { Clock, IdGenerator, Timestamp } from "@minions/core";
+import {
+  timestampFromEpochMilliseconds,
+  type Clock,
+  type IdGenerator,
+  type Timestamp,
+} from "@minions/core";
 
 export class FixedClock implements Clock {
   private readonly timestamp: Timestamp;
@@ -8,6 +13,26 @@ export class FixedClock implements Clock {
   }
 
   now(): Timestamp {
+    return this.timestamp;
+  }
+}
+
+export class AdvancingClock implements Clock {
+  private timestamp: Timestamp;
+
+  constructor(timestamp: Timestamp) {
+    this.timestamp = timestamp;
+  }
+
+  now(): Timestamp {
+    return this.timestamp;
+  }
+
+  advance(milliseconds: number): Timestamp {
+    if (!Number.isSafeInteger(milliseconds)) {
+      throw new RangeError("clock advancement must be a safe integer");
+    }
+    this.timestamp = timestampFromEpochMilliseconds(Number(this.timestamp) + milliseconds);
     return this.timestamp;
   }
 }
