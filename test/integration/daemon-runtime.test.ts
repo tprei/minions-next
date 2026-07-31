@@ -1,9 +1,10 @@
-import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { existsSync, symlinkSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, request, type Server } from "node:http";
+import { createConnection, type Socket } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Writable } from "node:stream";
 
 import { create } from "@bufbuild/protobuf";
@@ -33,8 +34,13 @@ import { timestampFromEpochMilliseconds } from "@minions/core";
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { describe, expect, it } from "vitest";
 
-import { createStructuredLogger, type StructuredLogger } from "@minions/daemon";
-import { startDaemonRuntime, type RunningDaemonRuntime } from "@minions/daemon";
+import {
+  DaemonStartupError,
+  createStructuredLogger,
+  startDaemonRuntime,
+  type RunningDaemonRuntime,
+  type StructuredLogger,
+} from "@minions/daemon";
 
 const STARTED_AT_MS = 1_700_000_000_000;
 const RESTARTED_AT_MS = STARTED_AT_MS + 1_000;
@@ -42,6 +48,13 @@ const FIRST_INSTANCE_ID = "01900000-0000-7000-8000-000000000001";
 const FIRST_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000002";
 const DUPLICATE_INSTANCE_ID = "01900000-0000-7000-8000-000000000003";
 const RESTART_INSTANCE_ID = "01900000-0000-7000-8000-000000000004";
+const RECONCILE_INSTANCE_ID = "01900000-0000-7000-8000-00000000000a";
+const RECONCILE_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-00000000000b";
+const RECONCILE_RESTART_INSTANCE_ID = "01900000-0000-7000-8000-00000000000c";
+const MISSING_DIGEST = "ccdd000000000000000000000000000000000000000000000000000000000000";
+const CORRUPT_DIGEST = "eeff000000000000000000000000000000000000000000000000000000000000";
+const ORPHAN_DIGEST = "aabb000000000000000000000000000000000000000000000000000000000000";
+const TEMPORARY_BLOB_ID = "01900000-0000-7000-8000-00000000000d";
 const RESTART_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000005";
 const FAILED_INSTANCE_ID = "01900000-0000-7000-8000-000000000006";
 const FAILED_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000007";
@@ -49,6 +62,8 @@ const CORRUPT_INSTANCE_ID = "01900000-0000-7000-8000-000000000008";
 const CORRUPT_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000009";
 const LOCAL_DISPLAY_NAME = "integration-local-host";
 const SECRET_TOKEN = "daemon-runtime-secret-token";
+const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
+const MAX_DAEMON_MESSAGE_BYTES = 86 * 1024 * 1024;
 
 type RuntimeClients = Readonly<{
   system: Client<typeof SystemService>;
@@ -314,6 +329,338 @@ describe("daemon runtime integration", () => {
     }
   });
 
+  it("reconciles temporary and orphan blobs before serving", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-daemon-reconcile-"));
+    const port = await reserveLoopbackPort();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const capture = createLogCapture();
+    const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const currentHostId = runtime.hostId;
+      if (currentHostId === undefined) {
+        throw new Error("local runtime did not produce a host ID");
+      }
+      await runtime.close();
+      runtime = undefined;
+
+      const digestDirectory = join(home, "hosts", currentHostId, "blobs", "sha256", "aa", "bb");
+      const orphanPath = join(digestDirectory, ORPHAN_DIGEST);
+      const temporaryPath = join(digestDirectory, `.tmp-${TEMPORARY_BLOB_ID}`);
+      await mkdir(digestDirectory, { recursive: true });
+      await writeFile(orphanPath, Buffer.from("orphan"));
+      await writeFile(temporaryPath, Buffer.from("temporary"));
+
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_RESTART_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      expect(existsSync(orphanPath)).toBe(false);
+      expect(existsSync(temporaryPath)).toBe(false);
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses to start through a symlinked host directory ancestor", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-daemon-symlink-"));
+    const outside = await mkdtemp(join(tmpdir(), "minions-daemon-symlink-outside-"));
+    const port = await reserveLoopbackPort();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const capture = createLogCapture();
+    const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const currentHostId = runtime.hostId;
+      if (currentHostId === undefined) {
+        throw new Error("local runtime did not produce a host ID");
+      }
+      await runtime.close();
+      runtime = undefined;
+
+      // Replace the already-provisioned host directory with a symlink to an
+      // attacker/adversary-controlled directory outside `home`. A restart
+      // must refuse to create/traverse through it (P1, review #13: the
+      // previous `mkdirSync(hostDirectory, { recursive: true })` would
+      // follow it, letting canonical blob writes/reads/deletes escape the
+      // host artifact boundary).
+      await rm(join(home, "hosts", currentHostId), { recursive: true, force: true });
+      symlinkSync(outside, join(home, "hosts", currentHostId));
+
+      await expect(
+        startDaemonRuntime(
+          runtimeOptions(
+            home,
+            port,
+            clock,
+            new SequenceIdGenerator([RECONCILE_RESTART_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+            logger,
+          ),
+        ),
+      ).rejects.toThrow(/symlink/u);
+      expect(existsSync(join(outside, "host.db"))).toBe(false);
+      expect(existsSync(join(outside, "blobs"))).toBe(false);
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(home, { force: true, recursive: true });
+      await rm(outside, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses startup when required blobs are missing or corrupt", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-daemon-reconcile-failure-"));
+    const port = await reserveLoopbackPort();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const capture = createLogCapture();
+    const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const currentHostId = runtime.hostId;
+      if (currentHostId === undefined) {
+        throw new Error("local runtime did not produce a host ID");
+      }
+      await runtime.close();
+      runtime = undefined;
+
+      const hostDatabase = new DatabaseSync(join(home, "hosts", currentHostId, "host.db"));
+      try {
+        hostDatabase.exec(`
+          INSERT INTO content_blobs (
+            digest,
+            size_bytes,
+            media_type,
+            relative_path,
+            retention_kind,
+            created_at_ms,
+            verified_at_ms
+          ) VALUES
+            ('${MISSING_DIGEST}', 1, 'text/plain', 'sha256/cc/dd/${MISSING_DIGEST}', 'active', 1, 1),
+            ('${CORRUPT_DIGEST}', 3, 'text/plain', 'sha256/ee/ff/${CORRUPT_DIGEST}', 'active', 1, 1)
+        `);
+      } finally {
+        hostDatabase.close();
+      }
+      const corruptPath = join(
+        home,
+        "hosts",
+        currentHostId,
+        "blobs",
+        "sha256",
+        "ee",
+        "ff",
+        CORRUPT_DIGEST,
+      );
+      await mkdir(dirname(corruptPath), { recursive: true });
+      await writeFile(corruptPath, Buffer.from("bad"));
+
+      const failure = await expectDaemonStartupError(() =>
+        startDaemonRuntime(
+          runtimeOptions(
+            home,
+            port,
+            clock,
+            new SequenceIdGenerator([RECONCILE_RESTART_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+            logger,
+          ),
+        ),
+      );
+      expect(failure.code).toBe("blob_reconciliation_failed");
+      expect(failure.missingDigests).toEqual([MISSING_DIGEST]);
+      expect(failure.corruptDigests).toEqual([CORRUPT_DIGEST]);
+      expect(inspectLifecycleLock(daemonLifecyclePath(home)).state).toBe("absent");
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects unknown JSON fields at the transport boundary", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-daemon-json-fields-"));
+    const port = await reserveLoopbackPort();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const capture = createLogCapture();
+    const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const response = await fetch(`${runtime.server.baseUrl}/minions.v1.SystemService/GetHealth`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ unexpected: true }),
+      });
+      await response.arrayBuffer();
+      expect(response.status).toBe(400);
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("accepts a 64 MiB artifact in JSON before strict field rejection", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-daemon-json-artifact-limit-"));
+    const port = await reserveLoopbackPort();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const capture = createLogCapture();
+    const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const content = Buffer.alloc(MAX_ARTIFACT_BYTES).toString("base64");
+      const body = JSON.stringify({ content, unexpected: true });
+      expect(Buffer.byteLength(body)).toBeLessThanOrEqual(MAX_DAEMON_MESSAGE_BYTES);
+      const response = await fetch(
+        `${runtime.server.baseUrl}/minions.v1.ArtifactService/CreateArtifact`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        },
+      );
+      await response.arrayBuffer();
+      expect(response.status).toBe(400);
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects over-limit transport messages before dispatch", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-daemon-message-limit-"));
+    const port = await reserveLoopbackPort();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const capture = createLogCapture();
+    const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const { promise, resolve, reject } = Promise.withResolvers<number>();
+      const incoming = request(
+        new URL("/minions.v1.SystemService/GetHealth", runtime.server.baseUrl),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "content-length": String(MAX_DAEMON_MESSAGE_BYTES + 1),
+          },
+        },
+        (response) => {
+          response.resume();
+          response.once("end", () => {
+            resolve(response.statusCode ?? 0);
+          });
+        },
+      );
+      incoming.once("error", reject);
+      incoming.end("{}");
+      await expect(promise).resolves.toBe(429);
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("drains a partial request body during shutdown", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-daemon-partial-request-"));
+    const port = await reserveLoopbackPort();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const capture = createLogCapture();
+    const logger = createStructuredLogger({ stream: capture.stream, now: () => STARTED_AT_MS });
+    let runtime: RunningDaemonRuntime | undefined;
+    let socket: Socket | undefined;
+    try {
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([RECONCILE_INSTANCE_ID, RECONCILE_HOST_CANDIDATE_ID]),
+          logger,
+        ),
+      );
+      const connected = Promise.withResolvers<undefined>();
+      socket = createConnection({ host: "127.0.0.1", port: runtime.server.port });
+      socket.once("connect", () => {
+        connected.resolve(undefined);
+      });
+      socket.on("error", connected.reject);
+      await connected.promise;
+      socket.write(
+        `POST /minions.v1.SystemService/GetHealth HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: keep-alive\r\n\r\n{`,
+      );
+
+      const closePromise = runtime.server.close();
+      await closePromise;
+    } finally {
+      socket?.destroy();
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(home, { force: true, recursive: true });
+    }
+  }, 15_000);
+
   it("marks the local host offline when listener startup fails", async () => {
     const home = await mkdtemp(join(tmpdir(), "minions-daemon-failed-start-"));
     const occupied = createServer();
@@ -420,3 +767,17 @@ describe("daemon runtime integration", () => {
     }
   });
 });
+
+async function expectDaemonStartupError(
+  action: () => Promise<unknown>,
+): Promise<DaemonStartupError> {
+  try {
+    await action();
+  } catch (error) {
+    if (error instanceof DaemonStartupError) {
+      return error;
+    }
+    throw error;
+  }
+  throw new Error("expected daemon startup to fail");
+}

@@ -15,7 +15,12 @@ export { createSchedulerLoop } from "./scheduler.js";
 export type { CreateSchedulerLoopOptions } from "./scheduler.js";
 export { startDaemonServer } from "./server.js";
 export type { CreateStructuredLoggerOptions, StructuredLogger } from "./logger.js";
-export type { DaemonRuntimeOptions, RunningDaemonRuntime } from "./runtime.js";
+export type {
+  DaemonRuntimeOptions,
+  DaemonStartupErrorCode,
+  RunningDaemonRuntime,
+} from "./runtime.js";
+export { DaemonStartupError } from "./runtime.js";
 export type { DaemonServerOptions, RunningDaemonServer } from "./server.js";
 
 export async function main(argv: readonly string[]): Promise<number> {

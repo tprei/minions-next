@@ -7,7 +7,9 @@ import { Code, ConnectError, createClient, type Client } from "@connectrpc/conne
 import { createConnectTransport } from "@connectrpc/connect-node";
 import {
   createEventCommitWaiter,
+  createFileContentBlobStore,
   createPlanRegistry,
+  createSqliteArtifactRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
   type EventCommitWaiter,
@@ -30,6 +32,7 @@ import {
 } from "@minions/contracts";
 import { hostId, timestampFromEpochMilliseconds } from "@minions/core";
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
+import { dirname, join } from "node:path";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -73,6 +76,16 @@ function createHostServices(
       database,
       commandStore,
       hostId: trustedHostId,
+    }),
+    artifactRegistry: createSqliteArtifactRegistry({
+      database,
+      commandStore,
+      hostId: trustedHostId,
+    }),
+    blobStore: createFileContentBlobStore({
+      rootPath: join(dirname(database.path), "blobs"),
+      clock,
+      ids: ports.ids,
     }),
     steeringStore: createSqliteSteeringCommandStore({ database, commandStore, ports }),
   };
@@ -138,7 +151,7 @@ describe("SystemService integration", () => {
     const clock = new FixedClock(fixtureNow);
     temporaryDatabase = await TemporarySqliteDatabase.create("host", clock);
     const eventWaiter = createEventCommitWaiter();
-    const { planRegistry, steeringStore } = createHostServices(
+    const { planRegistry, steeringStore, artifactRegistry, blobStore } = createHostServices(
       temporaryDatabase.database,
       eventWaiter,
       clock,
@@ -150,6 +163,8 @@ describe("SystemService integration", () => {
       eventWaiter,
       eventPollIntervalMs: 10,
       planRegistry,
+      artifactRegistry,
+      blobStore,
       clock,
       steeringStore,
       system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
@@ -199,6 +214,7 @@ describe("SystemService integration", () => {
       ServerCapability.EVENT_STREAM,
       ServerCapability.TREE_PLANNING,
       ServerCapability.STEERING,
+      ServerCapability.ARTIFACTS,
     ]);
   });
   it("returns typed daemon health identity", async () => {
@@ -325,7 +341,7 @@ describe("SystemService integration", () => {
 
     const eventWaiter = createEventCommitWaiter();
     const clock = new FixedClock(fixtureNow);
-    const { planRegistry, steeringStore } = createHostServices(
+    const { planRegistry, steeringStore, artifactRegistry, blobStore } = createHostServices(
       getTemporaryDatabase().database,
       eventWaiter,
       clock,
@@ -339,6 +355,8 @@ describe("SystemService integration", () => {
       planRegistry,
       clock,
       steeringStore,
+      artifactRegistry,
+      blobStore,
       system: {
         serverVersion: "not-a-semantic-version",
         health,

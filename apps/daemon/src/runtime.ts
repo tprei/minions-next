@@ -1,14 +1,16 @@
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
-import { mkdirSync, realpathSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
   acquireLifecycleLock,
   createEventCommitWaiter,
+  createFileContentBlobStore,
   createPlanRegistry,
   createRepositoryRegistry,
+  createSqliteArtifactRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
   createSecureIdGenerator,
@@ -43,7 +45,10 @@ import {
 import {
   hostId,
   timestampFromEpochMilliseconds,
+  type ArtifactRegistry,
   type Clock,
+  type ContentBlobStore,
+  type ContentHash,
   type HostId,
   type IdGenerator,
   type SteeringCommandStore,
@@ -52,6 +57,29 @@ import {
 
 import type { StructuredLogger } from "./logger.js";
 import { startDaemonServer, type RunningDaemonServer } from "./server.js";
+
+export type DaemonStartupErrorCode = "blob_reconciliation_failed";
+
+export class DaemonStartupError extends Error {
+  readonly code: DaemonStartupErrorCode;
+  readonly missingDigests: readonly ContentHash[];
+  readonly corruptDigests: readonly ContentHash[];
+
+  constructor(
+    missingDigests: readonly ContentHash[],
+    corruptDigests: readonly ContentHash[],
+    options?: ErrorOptions,
+  ) {
+    super(
+      `content blob reconciliation failed (missing: ${missingDigests.join(", ") || "none"}; corrupt: ${corruptDigests.join(", ") || "none"})`,
+      options,
+    );
+    this.name = "DaemonStartupError";
+    this.code = "blob_reconciliation_failed";
+    this.missingDigests = Object.freeze([...missingDigests]);
+    this.corruptDigests = Object.freeze([...corruptDigests]);
+  }
+}
 
 export type DaemonRuntimeOptions = Readonly<{
   home: string;
@@ -98,6 +126,8 @@ export async function startDaemonRuntime(
   let repositoryRegistry: RepositoryRegistry | undefined;
   let planRegistry: PlanRegistry | undefined;
   let steeringStore: SteeringCommandStore | undefined;
+  let artifactRegistry: ArtifactRegistry | undefined;
+  let blobStore: ContentBlobStore | undefined;
   let localHostId: HostId | undefined;
   let server: RunningDaemonServer | undefined;
 
@@ -131,8 +161,7 @@ export async function startDaemonRuntime(
 
     if (options.mode !== "supervisor") {
       const activeHostId = requireHostId(localHostId);
-      const hostDirectory = join(home, "hosts", activeHostId);
-      mkdirSync(hostDirectory, { recursive: true, mode: 0o700 });
+      const hostDirectory = ensureHostDirectorySync(home, activeHostId);
       hostDatabase = await openHostDatabase({
         path: join(hostDirectory, "host.db"),
         backupPath: backupPath(home, lifecycle.instanceId, `host-${activeHostId}`),
@@ -143,6 +172,16 @@ export async function startDaemonRuntime(
         database: hostDatabase,
         ports: { clock: options.clock, ids: options.ids },
         notifier: eventWaiter,
+      });
+      blobStore = createFileContentBlobStore({
+        rootPath: join(hostDirectory, "blobs"),
+        clock: options.clock,
+        ids: options.ids,
+      });
+      artifactRegistry = createSqliteArtifactRegistry({
+        database: hostDatabase,
+        commandStore,
+        hostId: activeHostId,
       });
       steeringStore = createSqliteSteeringCommandStore({
         database: hostDatabase,
@@ -161,6 +200,15 @@ export async function startDaemonRuntime(
       });
     }
     options.signal?.throwIfAborted();
+    if (options.mode !== "supervisor") {
+      const reconciliation = await requireBlobStore(blobStore).reconcile(
+        requireArtifactRegistry(artifactRegistry).expectedBlobs(),
+      );
+      if (reconciliation.missingDigests.length > 0 || reconciliation.corruptDigests.length > 0) {
+        throw new DaemonStartupError(reconciliation.missingDigests, reconciliation.corruptDigests);
+      }
+      options.signal?.throwIfAborted();
+    }
 
     const health = createHealth(lifecycle, localHostId, startedAt);
     const runDoctor = createDoctor({
@@ -182,6 +230,8 @@ export async function startDaemonRuntime(
         planRegistry: requirePlanRegistry(planRegistry),
         clock: options.clock,
         steeringStore: requireSteeringStore(steeringStore),
+        artifactRegistry: requireArtifactRegistry(artifactRegistry),
+        blobStore: requireBlobStore(blobStore),
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -200,6 +250,8 @@ export async function startDaemonRuntime(
         planRegistry: requirePlanRegistry(planRegistry),
         clock: options.clock,
         steeringStore: requireSteeringStore(steeringStore),
+        artifactRegistry: requireArtifactRegistry(artifactRegistry),
+        blobStore: requireBlobStore(blobStore),
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -539,6 +591,37 @@ function protobufTimestamp(milliseconds: Timestamp) {
   });
 }
 
+/**
+ * Create `<home>/hosts/<hostId>` (the artifact blob store's rootPath parent),
+ * rejecting a symlinked ancestor at every segment instead of following it. P1
+ * (review #13): the previous `mkdirSync(hostDirectory, { recursive: true })`
+ * creates/traverses through a preexisting symlinked ancestor (e.g. a
+ * `hosts/<hostId>` symlink planted before this daemon start), so canonical
+ * blob writes/reads/deletes could escape the host artifact boundary. `home`
+ * is already realpath-resolved by `prepareHome`; this walks only the two new
+ * segments this call owns ("hosts" and the host id).
+ */
+function ensureHostDirectorySync(home: string, hostId: string): string {
+  let current = home;
+  for (const segment of ["hosts", hostId]) {
+    current = join(current, segment);
+    let metadata;
+    try {
+      metadata = lstatSync(current);
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") {
+        throw error;
+      }
+      mkdirSync(current, { mode: 0o700 });
+      metadata = lstatSync(current);
+    }
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new TypeError(`refusing to use non-directory or symlinked host path '${current}'`);
+    }
+  }
+  return current;
+}
+
 function prepareHome(path: string): string {
   const absolute = resolve(path);
   mkdirSync(absolute, { recursive: true, mode: 0o700 });
@@ -610,6 +693,20 @@ function requireSteeringStore(value: SteeringCommandStore | undefined): Steering
 function requirePlanRegistry(value: PlanRegistry | undefined): PlanRegistry {
   if (value === undefined) {
     throw new Error("plan registry is not initialized");
+  }
+  return value;
+}
+
+function requireArtifactRegistry(value: ArtifactRegistry | undefined): ArtifactRegistry {
+  if (value === undefined) {
+    throw new Error("artifact registry is not initialized");
+  }
+  return value;
+}
+
+function requireBlobStore(value: ContentBlobStore | undefined): ContentBlobStore {
+  if (value === undefined) {
+    throw new Error("content blob store is not initialized");
   }
   return value;
 }

@@ -14,6 +14,7 @@ import {
   type SqliteDatabaseErrorCode,
   type SqliteMigration,
 } from "@minions/adapters";
+import { executeTestSqliteWrite } from "@minions/adapters/sqlite-test-support";
 import { timestampFromEpochMilliseconds } from "@minions/core";
 import { FixedClock } from "@minions/testkit";
 import { TemporarySqliteDatabase, type TestManagedSqliteDatabase } from "@minions/testkit/sqlite";
@@ -76,6 +77,18 @@ const steeringFailedDeliveryToken = "01900000-0000-7000-8000-000000000131";
 const steeringReviewDeliveryToken = "01900000-0000-7000-8000-000000000132";
 const steeringRedeliveryToken = "01900000-0000-7000-8000-000000000133";
 const steeringAckFailedDeliveryToken = "01900000-0000-7000-8000-000000000134";
+const planContentDigest = "b".repeat(64);
+const planEvidenceId = "01900000-0000-7000-8000-000000000018";
+const legacyCommitNodeId = "01900000-0000-7000-8000-000000000180";
+const legacyNoChangeNodeId = "01900000-0000-7000-8000-000000000181";
+const legacyOutcomeArtifactId = "01900000-0000-7000-8000-000000000182";
+const legacyArtifactEvidenceId = "01900000-0000-7000-8000-000000000183";
+const legacyCommitEvidenceId = "01900000-0000-7000-8000-000000000184";
+const legacyNoChangeEvidenceId = "01900000-0000-7000-8000-000000000185";
+const legacyOutcomeDigest = "d".repeat(64);
+const legacyCommitRevision = "1234567890abcdef1234567890abcdef12345678";
+const legacyUnnormalizedNodeId = "01900000-0000-7000-8000-000000000186";
+const legacyMismatchedArtifactEvidenceId = "01900000-0000-7000-8000-000000000187";
 
 const migrationCases = [
   {
@@ -302,6 +315,309 @@ function createHostV6SteeringFixture(path: string, appliedAtMs: number): void {
         "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
       )
       .run(planRepositoryId, planHostId, "/workspace/plan", appliedAtMs);
+  } finally {
+    database.close();
+  }
+}
+
+function createHostV7ArtifactsFixture(path: string, appliedAtMs: number): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const migration of hostMigrations.slice(0, 7)) {
+      database.exec(migration.sql);
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .run(migration.version, migration.name, migration.checksum, appliedAtMs);
+    }
+    database.exec("BEGIN");
+    database
+      .prepare(
+        "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      )
+      .run(planRepositoryId, planHostId, "/workspace/plan", appliedAtMs);
+    database
+      .prepare(
+        `INSERT INTO trees (
+           id, repository_id, host_id, base_commit, goal, active_plan_revision_id,
+           root_node_id, version, created_at_ms, updated_at_ms, archived_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)`,
+      )
+      .run(
+        planTreeId,
+        planRepositoryId,
+        planHostId,
+        planBaseCommit,
+        "plan foundation",
+        planRevisionId,
+        planRootNodeId,
+        appliedAtMs,
+        appliedAtMs,
+      );
+    database
+      .prepare(
+        `INSERT INTO plan_revisions (
+           id, tree_id, ordinal, goal, state_kind, version, created_at_ms,
+           approved_at_ms, superseded_at_ms
+         ) VALUES (?, ?, 1, ?, 'draft', 0, ?, NULL, NULL)`,
+      )
+      .run(planRevisionId, planTreeId, "plan foundation", appliedAtMs);
+    database
+      .prepare(
+        `INSERT INTO nodes (
+           id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+           mode, objective, output_kind, output_artifact_id, output_artifact_type,
+           state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+           blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+           outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+           outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+           version, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, NULL, ?, 'plan', ?, 'artifact', ?, 'plan',
+           'planned', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+           NULL, NULL, NULL, NULL, 0, ?, ?)`,
+      )
+      .run(
+        planRootNodeId,
+        planTreeId,
+        planRepositoryId,
+        planHostId,
+        planRevisionId,
+        "plan foundation",
+        planRootArtifactId,
+        appliedAtMs,
+        appliedAtMs,
+      );
+    database
+      .prepare(
+        "INSERT INTO node_acceptance_criteria (node_id, ordinal, criterion) VALUES (?, 0, ?)",
+      )
+      .run(planRootNodeId, "plan foundation");
+    database
+      .prepare(
+        `INSERT INTO content_blobs (
+           digest, size_bytes, media_type, relative_path, retention_kind,
+           created_at_ms, verified_at_ms
+         ) VALUES (?, 7, 'text/plain', ?, 'active', ?, ?)`,
+      )
+      .run(
+        planContentDigest,
+        `sha256/${planContentDigest.slice(0, 2)}/${planContentDigest.slice(2, 4)}/${planContentDigest}`,
+        appliedAtMs,
+        appliedAtMs,
+      );
+    database
+      .prepare(
+        `INSERT INTO artifacts (
+           id, node_id, attempt_id, tree_id, repository_id, host_id,
+           content_digest, artifact_type, evidence_id, retention_kind, created_at_ms
+         ) VALUES (?, ?, NULL, ?, ?, ?, ?, 'plan', ?, 'active', ?)`,
+      )
+      .run(
+        planRootArtifactId,
+        planRootNodeId,
+        planTreeId,
+        planRepositoryId,
+        planHostId,
+        planContentDigest,
+        planEvidenceId,
+        appliedAtMs,
+      );
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+function createHostV7OutcomeBackfillFixture(
+  path: string,
+  appliedAtMs: number,
+  artifactEvidenceId = legacyArtifactEvidenceId,
+): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const migration of hostMigrations.slice(0, 7)) {
+      database.exec(migration.sql);
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .run(migration.version, migration.name, migration.checksum, appliedAtMs);
+    }
+    database.exec("BEGIN");
+    database
+      .prepare(
+        "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      )
+      .run(planRepositoryId, planHostId, "/workspace/outcomes", appliedAtMs);
+    database
+      .prepare(
+        `INSERT INTO trees (
+           id, repository_id, host_id, base_commit, goal, active_plan_revision_id,
+           root_node_id, version, created_at_ms, updated_at_ms, archived_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)`,
+      )
+      .run(
+        planTreeId,
+        planRepositoryId,
+        planHostId,
+        planBaseCommit,
+        "outcome migration",
+        planRevisionId,
+        planRootNodeId,
+        appliedAtMs,
+        appliedAtMs + 4,
+      );
+    database
+      .prepare(
+        `INSERT INTO plan_revisions (
+           id, tree_id, ordinal, goal, state_kind, version, created_at_ms,
+           approved_at_ms, superseded_at_ms
+         ) VALUES (?, ?, 1, ?, 'approved', 0, ?, ?, NULL)`,
+      )
+      .run(planRevisionId, planTreeId, "outcome migration", appliedAtMs, appliedAtMs + 1);
+    const insertNode = database.prepare(
+      `INSERT INTO nodes (
+         id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+         mode, objective, output_kind, output_artifact_id, output_artifact_type,
+         state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+         blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+         outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+         outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+         version, created_at_ms, updated_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insertNode.run(
+      planRootNodeId,
+      planTreeId,
+      planRepositoryId,
+      planHostId,
+      null,
+      planRevisionId,
+      "plan",
+      "artifact outcome",
+      "artifact",
+      legacyOutcomeArtifactId,
+      "report",
+      "succeeded",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "artifact",
+      legacyOutcomeArtifactId,
+      legacyOutcomeDigest,
+      "report",
+      null,
+      legacyArtifactEvidenceId,
+      null,
+      null,
+      null,
+      1,
+      appliedAtMs,
+      appliedAtMs + 2,
+    );
+    insertNode.run(
+      legacyCommitNodeId,
+      planTreeId,
+      planRepositoryId,
+      planHostId,
+      planRootNodeId,
+      planRevisionId,
+      "implementation",
+      "commit outcome",
+      "implementation",
+      null,
+      null,
+      "succeeded",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "commit",
+      null,
+      null,
+      null,
+      legacyCommitRevision,
+      legacyCommitEvidenceId,
+      null,
+      null,
+      null,
+      1,
+      appliedAtMs + 3,
+      appliedAtMs + 5,
+    );
+    insertNode.run(
+      legacyNoChangeNodeId,
+      planTreeId,
+      planRepositoryId,
+      planHostId,
+      legacyCommitNodeId,
+      planRevisionId,
+      "implementation",
+      "no-change outcome",
+      "implementation",
+      null,
+      null,
+      "succeeded",
+      null,
+      null,
+      null,
+      null,
+      null,
+      "no_change",
+      null,
+      null,
+      null,
+      null,
+      legacyNoChangeEvidenceId,
+      "legacy unchanged",
+      null,
+      null,
+      1,
+      appliedAtMs + 6,
+      appliedAtMs + 8,
+    );
+    database
+      .prepare(
+        "INSERT INTO node_acceptance_criteria (node_id, ordinal, criterion) VALUES (?, 0, ?)",
+      )
+      .run(planRootNodeId, "outcome migration");
+    database
+      .prepare(
+        `INSERT INTO content_blobs (
+           digest, size_bytes, media_type, relative_path, retention_kind,
+           created_at_ms, verified_at_ms
+         ) VALUES (?, 7, 'text/plain', ?, 'active', ?, ?)`,
+      )
+      .run(
+        legacyOutcomeDigest,
+        `sha256/${legacyOutcomeDigest.slice(0, 2)}/${legacyOutcomeDigest.slice(2, 4)}/${legacyOutcomeDigest}`,
+        appliedAtMs + 2,
+        appliedAtMs + 2,
+      );
+    database
+      .prepare(
+        `INSERT INTO artifacts (
+           id, node_id, attempt_id, tree_id, repository_id, host_id,
+           content_digest, artifact_type, evidence_id, retention_kind, created_at_ms
+         ) VALUES (?, ?, NULL, ?, ?, ?, ?, 'report', ?, 'active', ?)`,
+      )
+      .run(
+        legacyOutcomeArtifactId,
+        planRootNodeId,
+        planTreeId,
+        planRepositoryId,
+        planHostId,
+        legacyOutcomeDigest,
+        artifactEvidenceId,
+        appliedAtMs + 2,
+      );
+    database.exec("COMMIT");
   } finally {
     database.close();
   }
@@ -618,8 +934,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 7,
-          appliedVersions: [2, 3, 4, 5, 6, 7],
+          currentVersion: 8,
+          appliedVersions: [2, 3, 4, 5, 6, 7, 8],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -841,7 +1157,7 @@ describe("SQLite migration integration", () => {
           .prepare(
             "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
           )
-          .run(8, "future_state", "f".repeat(64), fixedTimestamp);
+          .run(9, "future_state", "f".repeat(64), fixedTimestamp);
       } finally {
         futureDatabase.close();
       }
@@ -860,7 +1176,7 @@ describe("SQLite migration integration", () => {
       ).toEqual([
         ...expectedHistory(hostMigrations, fixedTimestamp),
         {
-          version: 8n,
+          version: 9n,
           name: "future_state",
           checksum: "f".repeat(64),
           applied_at_ms: BigInt(fixedTimestamp),
@@ -906,8 +1222,8 @@ describe("SQLite v7 durable steering schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 7,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7],
+        currentVersion: 8,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
         backupPath: null,
       });
       expect(
@@ -981,8 +1297,8 @@ describe("SQLite v7 durable steering schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 6,
-          currentVersion: 7,
-          appliedVersions: [7],
+          currentVersion: 8,
+          appliedVersions: [7, 8],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1036,8 +1352,8 @@ describe("SQLite v6 scheduler lease schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 7,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7],
+        currentVersion: 8,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
         backupPath: null,
       });
       expect(
@@ -1103,8 +1419,8 @@ describe("SQLite v6 scheduler lease schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 5,
-          currentVersion: 7,
-          appliedVersions: [6, 7],
+          currentVersion: 8,
+          appliedVersions: [6, 7, 8],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -2570,6 +2886,718 @@ describe("SQLite v7 durable steering constraints", () => {
         created_at_ms: BigInt(fixedTimestamp),
         resolved_at_ms: BigInt(fixedTimestamp + 4),
       });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+});
+
+describe("SQLite v8 artifacts and outcomes schema", () => {
+  it("creates the outcome table, index, foreign keys, checks, and durability triggers", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      expect(temporary.database.migration).toEqual({
+        databaseKind: "host",
+        previousVersion: 0,
+        currentVersion: 8,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8],
+        backupPath: null,
+      });
+      expect(
+        temporary.database.read((reader) =>
+          reader.all(
+            `SELECT type, name
+               FROM sqlite_schema
+              WHERE name IN (
+                'node_outcome_records',
+                'node_outcome_records_kind_created',
+                'content_blob_is_durable',
+                'artifact_is_durable',
+                'node_outcome_is_immutable',
+                'node_outcome_is_durable'
+              )
+              ORDER BY type, name`,
+          ),
+        ),
+      ).toEqual([
+        { type: "index", name: "node_outcome_records_kind_created" },
+        { type: "table", name: "node_outcome_records" },
+        { type: "trigger", name: "artifact_is_durable" },
+        { type: "trigger", name: "content_blob_is_durable" },
+        { type: "trigger", name: "node_outcome_is_durable" },
+        { type: "trigger", name: "node_outcome_is_immutable" },
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA table_info(node_outcome_records)")
+            .all()
+            .map((row) => [row["name"], row["type"], row["notnull"], row["pk"]]),
+        ),
+      ).toEqual([
+        ["node_id", "TEXT", 1n, 1n],
+        ["outcome_kind", "TEXT", 1n, 0n],
+        ["artifact_id", "TEXT", 0n, 0n],
+        ["revision", "TEXT", 0n, 0n],
+        ["evidence_id", "TEXT", 0n, 0n],
+        ["explanation", "TEXT", 0n, 0n],
+        ["created_at_ms", "INTEGER", 1n, 0n],
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA index_info(node_outcome_records_kind_created)")
+            .all()
+            .map((row) => [row["seqno"], row["name"]]),
+        ),
+      ).toEqual([
+        [0n, "outcome_kind"],
+        [1n, "created_at_ms"],
+        [2n, "node_id"],
+      ]);
+      expect(
+        withReadOnlyDatabase(temporary.path, (database) =>
+          database
+            .prepare("PRAGMA foreign_key_list(node_outcome_records)")
+            .all()
+            .map((row) => ({
+              table: row["table"],
+              from: row["from"],
+              to: row["to"],
+              on_update: row["on_update"],
+              on_delete: row["on_delete"],
+            }))
+            .sort((left, right) =>
+              `${String(left.table)}/${String(left.from)}`.localeCompare(
+                `${String(right.table)}/${String(right.from)}`,
+              ),
+            ),
+        ),
+      ).toEqual([
+        {
+          table: "artifacts",
+          from: "artifact_id",
+          to: "id",
+          on_update: "RESTRICT",
+          on_delete: "RESTRICT",
+        },
+        {
+          table: "artifacts",
+          from: "node_id",
+          to: "node_id",
+          on_update: "RESTRICT",
+          on_delete: "RESTRICT",
+        },
+        {
+          table: "nodes",
+          from: "node_id",
+          to: "id",
+          on_update: "RESTRICT",
+          on_delete: "RESTRICT",
+        },
+      ]);
+      const tableSql = temporary.database.read(
+        (reader) =>
+          reader.get(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'node_outcome_records'",
+          )?.["sql"],
+      );
+      expect(tableSql).toEqual(expect.stringContaining("STRICT"));
+      expect(tableSql).toEqual(expect.stringContaining("UNIQUE (node_id, outcome_kind)"));
+      expect(tableSql).toEqual(expect.stringContaining("outcome_kind = 'artifact'"));
+      expect(tableSql).toEqual(expect.stringContaining("outcome_kind = 'no_change'"));
+      expect(tableSql).toEqual(expect.stringContaining("outcome_kind = 'commit'"));
+      expect(
+        temporary.database.read((reader) =>
+          reader.get(
+            `SELECT
+               (SELECT COUNT(*) FROM content_blobs) AS content_blobs,
+               (SELECT COUNT(*) FROM artifacts) AS artifacts,
+               (SELECT COUNT(*) FROM node_outcome_records) AS outcomes`,
+          ),
+        ),
+      ).toEqual({ content_blobs: 0n, artifacts: 0n, outcomes: 0n });
+    } finally {
+      await temporary.dispose();
+    }
+  });
+
+  it("upgrades a v7 host database and preserves content and artifact rows", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-artifact-migration-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV7ArtifactsFixture(path, fixedTimestamp);
+      const database = await openHostDatabase({
+        path,
+        clock: new FixedClock(fixedTimestamp),
+        backupPath,
+      });
+      try {
+        expect(database.migration).toEqual({
+          databaseKind: "host",
+          previousVersion: 7,
+          currentVersion: 8,
+          appliedVersions: [8],
+          backupPath: resolve(backupPath),
+        });
+        expect(
+          database.read((reader) =>
+            reader.get(
+              "SELECT digest, size_bytes, media_type, relative_path, retention_kind, created_at_ms, verified_at_ms FROM content_blobs WHERE digest = ?",
+              [planContentDigest],
+            ),
+          ),
+        ).toEqual({
+          digest: planContentDigest,
+          size_bytes: 7n,
+          media_type: "text/plain",
+          relative_path: `sha256/${planContentDigest.slice(0, 2)}/${planContentDigest.slice(2, 4)}/${planContentDigest}`,
+          retention_kind: "active",
+          created_at_ms: BigInt(fixedTimestamp),
+          verified_at_ms: BigInt(fixedTimestamp),
+        });
+        expect(
+          database.read((reader) =>
+            reader.get(
+              "SELECT id, node_id, attempt_id, tree_id, repository_id, host_id, content_digest, artifact_type, evidence_id, retention_kind, created_at_ms FROM artifacts WHERE id = ?",
+              [planRootArtifactId],
+            ),
+          ),
+        ).toEqual({
+          id: planRootArtifactId,
+          node_id: planRootNodeId,
+          attempt_id: null,
+          tree_id: planTreeId,
+          repository_id: planRepositoryId,
+          host_id: planHostId,
+          content_digest: planContentDigest,
+          artifact_type: "plan",
+          evidence_id: planEvidenceId,
+          retention_kind: "active",
+          created_at_ms: BigInt(fixedTimestamp),
+        });
+        expect(
+          database.read(
+            (reader) => reader.get("SELECT COUNT(*) AS count FROM node_outcome_records")?.["count"],
+          ),
+        ).toBe(0n);
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            ),
+          ),
+        ).toEqual(expectedHistory(hostMigrations, fixedTimestamp));
+      } finally {
+        await database.close();
+      }
+      expect(
+        withReadOnlyDatabase(backupPath, (backup) =>
+          backup
+            .prepare(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            )
+            .all(),
+        ),
+      ).toEqual(expectedHistory(hostMigrations.slice(0, 7), fixedTimestamp));
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects v7 artifact metadata mismatches during backfill", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-outcome-mismatch-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV7OutcomeBackfillFixture(path, fixedTimestamp, legacyMismatchedArtifactEvidenceId);
+      await expect(
+        openHostDatabase({
+          path,
+          clock: new FixedClock(fixedTimestamp),
+          backupPath,
+        }),
+      ).rejects.toMatchObject({ code: "migration_failed" });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("backfills every succeeded v7 outcome and rejects normalized mismatches", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-outcome-backfill-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV7OutcomeBackfillFixture(path, fixedTimestamp);
+      const database = await openHostDatabase({
+        path,
+        clock: new FixedClock(fixedTimestamp),
+        backupPath,
+      });
+      try {
+        expect(database.migration).toEqual({
+          databaseKind: "host",
+          previousVersion: 7,
+          currentVersion: 8,
+          appliedVersions: [8],
+          backupPath: resolve(backupPath),
+        });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              `SELECT node_id, outcome_kind, artifact_id, revision, evidence_id, explanation,
+                      created_at_ms
+                 FROM node_outcome_records
+                ORDER BY node_id`,
+            ),
+          ),
+        ).toEqual([
+          {
+            node_id: planRootNodeId,
+            outcome_kind: "artifact",
+            artifact_id: legacyOutcomeArtifactId,
+            revision: null,
+            evidence_id: null,
+            explanation: null,
+            created_at_ms: BigInt(fixedTimestamp + 2),
+          },
+          {
+            node_id: legacyCommitNodeId,
+            outcome_kind: "commit",
+            artifact_id: null,
+            revision: legacyCommitRevision,
+            evidence_id: legacyCommitEvidenceId,
+            explanation: null,
+            created_at_ms: BigInt(fixedTimestamp + 5),
+          },
+          {
+            node_id: legacyNoChangeNodeId,
+            outcome_kind: "no_change",
+            artifact_id: null,
+            revision: legacyCommitRevision,
+            evidence_id: legacyNoChangeEvidenceId,
+            explanation: "legacy unchanged",
+            created_at_ms: BigInt(fixedTimestamp + 8),
+          },
+        ]);
+        expect(
+          database.read((reader) =>
+            reader.get(
+              `SELECT COUNT(*) AS missing
+                 FROM nodes AS node
+                WHERE node.state_kind = 'succeeded'
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM node_outcome_records AS outcome
+                     WHERE outcome.node_id = node.id
+                  )`,
+            ),
+          ),
+        ).toEqual({ missing: 0n });
+
+        await expectSqliteFailure(
+          () =>
+            executeTestSqliteWrite(database, (transaction) => {
+              transaction.run("UPDATE nodes SET outcome_commit = ? WHERE id = ?", [
+                planBaseCommit,
+                legacyCommitNodeId,
+              ]);
+            }),
+          "transaction_failed",
+        );
+        await expectSqliteFailure(
+          () =>
+            executeTestSqliteWrite(database, (transaction) => {
+              transaction.run("UPDATE nodes SET outcome_content_hash = ? WHERE id = ?", [
+                "e".repeat(64),
+                planRootNodeId,
+              ]);
+            }),
+          "transaction_failed",
+        );
+
+        await executeTestSqliteWrite(database, (transaction) => {
+          transaction.run(
+            `INSERT INTO nodes (
+               id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+               mode, objective, output_kind, output_artifact_id, output_artifact_type,
+               state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+               blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+               outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+               outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+               version, created_at_ms, updated_at_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, 'implementation', 'missing outcome', 'implementation',
+                       NULL, NULL, 'active', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                       NULL, NULL, NULL, NULL, NULL, NULL, 0, ?, ?)`,
+            [
+              legacyUnnormalizedNodeId,
+              planTreeId,
+              planRepositoryId,
+              planHostId,
+              legacyNoChangeNodeId,
+              planRevisionId,
+              fixedTimestamp + 9,
+              fixedTimestamp + 9,
+            ],
+          );
+        });
+        await expectSqliteFailure(
+          () =>
+            executeTestSqliteWrite(database, (transaction) => {
+              transaction.run(
+                `UPDATE nodes
+                    SET state_kind = 'succeeded', outcome_kind = 'commit',
+                        outcome_commit = ?, outcome_evidence_id = ?,
+                        version = version + 1, updated_at_ms = ?
+                  WHERE id = ?`,
+                [
+                  legacyCommitRevision,
+                  legacyCommitEvidenceId,
+                  fixedTimestamp + 10,
+                  legacyUnnormalizedNodeId,
+                ],
+              );
+            }),
+          "transaction_failed",
+        );
+        await expectSqliteFailure(
+          () =>
+            executeTestSqliteWrite(database, (transaction) => {
+              transaction.run(
+                `INSERT INTO node_outcome_records (
+                   node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+                 ) VALUES (?, 'no_change', NULL, ?, ?, ?, ?)`,
+                [
+                  legacyUnnormalizedNodeId,
+                  planBaseCommit,
+                  legacyNoChangeEvidenceId,
+                  "wrong inherited revision",
+                  fixedTimestamp + 10,
+                ],
+              );
+            }),
+          "transaction_failed",
+        );
+      } finally {
+        await database.close();
+      }
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("enforces one outcome per node, ownership, oneof checks, and immutable durable rows", async () => {
+    const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
+    try {
+      await seedPlanFoundation(temporary.database);
+      await seedSchedulerChildren(temporary.database);
+      const orphanContentDigest = "c".repeat(64);
+      await temporary.database.write((transaction) => {
+        const insertNodeSql = `INSERT INTO nodes (
+             id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+             mode, objective, output_kind, output_artifact_id, output_artifact_type,
+             state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+             blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+             outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+             outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+             version, created_at_ms, updated_at_ms
+           ) VALUES (?, ?, ?, ?, ?, ?, 'implementation', ?, 'implementation', NULL, NULL,
+                     'active', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                     NULL, NULL, NULL, NULL, 0, ?, ?)`;
+        transaction.run(insertNodeSql, [
+          legacyCommitNodeId,
+          planTreeId,
+          planRepositoryId,
+          planHostId,
+          planRootNodeId,
+          planRevisionId,
+          "outcome commit",
+          fixedTimestamp,
+          fixedTimestamp,
+        ]);
+        transaction.run(insertNodeSql, [
+          legacyNoChangeNodeId,
+          planTreeId,
+          planRepositoryId,
+          planHostId,
+          legacyCommitNodeId,
+          planRevisionId,
+          "outcome no-change",
+          fixedTimestamp,
+          fixedTimestamp,
+        ]);
+      });
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `INSERT INTO content_blobs (
+             digest, size_bytes, media_type, relative_path, retention_kind,
+             created_at_ms, verified_at_ms
+           ) VALUES (?, 7, 'text/plain', ?, 'active', ?, ?)`,
+          [
+            planContentDigest,
+            `sha256/${planContentDigest.slice(0, 2)}/${planContentDigest.slice(2, 4)}/${planContentDigest}`,
+            fixedTimestamp,
+            fixedTimestamp,
+          ],
+        );
+        transaction.run(
+          `INSERT INTO content_blobs (
+             digest, size_bytes, media_type, relative_path, retention_kind,
+             created_at_ms, verified_at_ms
+           ) VALUES (?, 0, 'application/octet-stream', ?, 'active', ?, ?)`,
+          [
+            orphanContentDigest,
+            `sha256/${orphanContentDigest.slice(0, 2)}/${orphanContentDigest.slice(2, 4)}/${orphanContentDigest}`,
+            fixedTimestamp,
+            fixedTimestamp,
+          ],
+        );
+        transaction.run(
+          `INSERT INTO artifacts (
+             id, node_id, attempt_id, tree_id, repository_id, host_id,
+             content_digest, artifact_type, evidence_id, retention_kind, created_at_ms
+           ) VALUES (?, ?, NULL, ?, ?, ?, ?, 'plan', ?, 'active', ?)`,
+          [
+            planRootArtifactId,
+            planRootNodeId,
+            planTreeId,
+            planRepositoryId,
+            planHostId,
+            planContentDigest,
+            planEvidenceId,
+            fixedTimestamp,
+          ],
+        );
+        transaction.run(
+          `INSERT INTO artifacts (
+             id, node_id, attempt_id, tree_id, repository_id, host_id,
+             content_digest, artifact_type, evidence_id, retention_kind, created_at_ms
+           ) VALUES (?, ?, NULL, ?, ?, ?, ?, 'plan', ?, 'active', ?)`,
+          [
+            schedulerChildArtifactId,
+            schedulerChildNodeId,
+            planTreeId,
+            planRepositoryId,
+            planHostId,
+            planContentDigest,
+            planEvidenceId,
+            fixedTimestamp,
+          ],
+        );
+      });
+
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM content_blobs WHERE digest = ?", [orphanContentDigest]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM artifacts WHERE id = ?", [schedulerChildArtifactId]);
+          }),
+        "transaction_failed",
+      );
+
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          "UPDATE nodes SET state_kind = 'active' WHERE id = ? AND state_kind = 'planned'",
+          [planRootNodeId],
+        );
+      });
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `INSERT INTO node_outcome_records (
+             node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+           ) VALUES (?, 'artifact', ?, NULL, NULL, NULL, ?)`,
+          [planRootNodeId, planRootArtifactId, fixedTimestamp],
+        );
+        transaction.run(
+          `UPDATE nodes
+              SET state_kind = 'succeeded', outcome_kind = 'artifact',
+                  outcome_artifact_id = ?, outcome_content_hash = ?,
+                  outcome_artifact_type = 'plan', outcome_evidence_id = ?,
+                  version = version + 1, updated_at_ms = ?
+            WHERE id = ?`,
+          [
+            planRootArtifactId,
+            planContentDigest,
+            planEvidenceId,
+            fixedTimestamp + 1,
+            planRootNodeId,
+          ],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `INSERT INTO node_outcome_records (
+                 node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+               ) VALUES (?, 'commit', NULL, ?, ?, NULL, ?)`,
+              [planRootNodeId, planBaseCommit, planEvidenceId, fixedTimestamp],
+            );
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `INSERT INTO node_outcome_records (
+                 node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+               ) VALUES (?, 'no_change', NULL, ?, ?, ?, ?)`,
+              [
+                legacyNoChangeNodeId,
+                planBaseCommit,
+                planEvidenceId,
+                "parent must complete first",
+                fixedTimestamp,
+              ],
+            );
+          }),
+        "transaction_failed",
+      );
+      await temporary.database.write((transaction) => {
+        transaction.run(
+          `INSERT INTO node_outcome_records (
+             node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+           ) VALUES (?, 'commit', NULL, ?, ?, NULL, ?)`,
+          [legacyCommitNodeId, planBaseCommit, secondAttentionId, fixedTimestamp],
+        );
+        transaction.run(
+          `UPDATE nodes
+              SET state_kind = 'succeeded', outcome_kind = 'commit', outcome_commit = ?,
+                  outcome_evidence_id = ?, version = version + 1, updated_at_ms = ?
+            WHERE id = ?`,
+          [planBaseCommit, secondAttentionId, fixedTimestamp + 1, legacyCommitNodeId],
+        );
+        transaction.run(
+          `INSERT INTO node_outcome_records (
+             node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+           ) VALUES (?, 'no_change', NULL, ?, ?, ?, ?)`,
+          [
+            legacyNoChangeNodeId,
+            planBaseCommit,
+            planEvidenceId,
+            "inherited unchanged output",
+            fixedTimestamp,
+          ],
+        );
+      });
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run(
+              `INSERT INTO node_outcome_records (
+                 node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+               ) VALUES (?, 'artifact', ?, NULL, NULL, NULL, ?)`,
+              [schedulerThirdChildNodeId, planRootArtifactId, fixedTimestamp],
+            );
+          }),
+        "transaction_failed",
+      );
+
+      const malformedOutcomes = [
+        ["artifact with revision", "artifact", planRootArtifactId, planBaseCommit, null, null],
+        ["artifact without artifact", "artifact", null, null, null, null],
+        ["no-change without explanation", "no_change", null, planBaseCommit, planEvidenceId, null],
+        ["no-change without evidence", "no_change", null, planBaseCommit, null, "unchanged"],
+        [
+          "commit with explanation",
+          "commit",
+          null,
+          planBaseCommit,
+          planEvidenceId,
+          "unexpected explanation",
+        ],
+        ["commit without revision", "commit", null, null, planEvidenceId, null],
+        ["invalid revision", "no_change", null, "G".repeat(40), planEvidenceId, "unchanged"],
+        ["invalid evidence", "no_change", null, planBaseCommit, "short", "unchanged"],
+        ["empty explanation", "commit", null, planBaseCommit, planEvidenceId, ""],
+      ] as const;
+      for (const [
+        ,
+        outcomeKind,
+        artifactId,
+        revision,
+        evidenceId,
+        explanation,
+      ] of malformedOutcomes) {
+        await expectSqliteFailure(
+          () =>
+            temporary.database.write((transaction) => {
+              transaction.run(
+                `INSERT INTO node_outcome_records (
+                   node_id, outcome_kind, artifact_id, revision, evidence_id, explanation, created_at_ms
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  schedulerThirdChildNodeId,
+                  outcomeKind,
+                  artifactId,
+                  revision,
+                  evidenceId,
+                  explanation,
+                  fixedTimestamp,
+                ],
+              );
+            }),
+          "transaction_failed",
+        );
+      }
+
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("UPDATE node_outcome_records SET explanation = ? WHERE node_id = ?", [
+              "changed",
+              planRootNodeId,
+            ]);
+          }),
+        "transaction_failed",
+      );
+      await expectSqliteFailure(
+        () =>
+          temporary.database.write((transaction) => {
+            transaction.run("DELETE FROM node_outcome_records WHERE node_id = ?", [planRootNodeId]);
+          }),
+        "transaction_failed",
+      );
+      expect(
+        temporary.database.read((reader) =>
+          reader.all(
+            "SELECT node_id, outcome_kind, artifact_id, revision, evidence_id, explanation FROM node_outcome_records ORDER BY node_id",
+          ),
+        ),
+      ).toEqual([
+        {
+          node_id: planRootNodeId,
+          outcome_kind: "artifact",
+          artifact_id: planRootArtifactId,
+          revision: null,
+          evidence_id: null,
+          explanation: null,
+        },
+        {
+          node_id: legacyCommitNodeId,
+          outcome_kind: "commit",
+          artifact_id: null,
+          revision: planBaseCommit,
+          evidence_id: secondAttentionId,
+          explanation: null,
+        },
+        {
+          node_id: legacyNoChangeNodeId,
+          outcome_kind: "no_change",
+          artifact_id: null,
+          revision: planBaseCommit,
+          evidence_id: planEvidenceId,
+          explanation: "inherited unchanged output",
+        },
+      ]);
     } finally {
       await temporary.dispose();
     }

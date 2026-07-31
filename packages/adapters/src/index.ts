@@ -1,3 +1,9 @@
+export { BlobCorruptionError, createFileContentBlobStore } from "./blob/file-content-blob-store.js";
+export type {
+  BlobCorruptionErrorCode,
+  CreateFileContentBlobStoreOptions,
+} from "./blob/file-content-blob-store.js";
+
 export type { SchedulerStore, SteeringCommandStore } from "@minions/core";
 
 export { inspectRepository, RepositoryInspectionError } from "./repository-inspector.js";
@@ -99,6 +105,11 @@ export type {
   TreeRecord,
   TreeSummaryRecord,
 } from "./sqlite/plan-registry.js";
+export { createSqliteArtifactRegistry, ArtifactRegistryError } from "./sqlite/artifact-registry.js";
+export type {
+  ArtifactRegistryErrorCode,
+  CreateSqliteArtifactRegistryOptions,
+} from "./sqlite/artifact-registry.js";
 export { createSqliteSchedulerStore, SqliteSchedulerError } from "./sqlite/scheduler-store.js";
 export type {
   CreateSqliteSchedulerStoreOptions,

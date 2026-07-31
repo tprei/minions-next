@@ -463,6 +463,7 @@ describe("task node lifecycle", () => {
 
     const noChangeOutcome = {
       kind: "no_change",
+      revision: gitSha("0123456789abcdef0123456789abcdef01234567"),
       evidenceId: evidenceId(deterministicUuid(121)),
       explanation: nonEmptyText("the requested state already holds", "no-change explanation"),
     } as const;
