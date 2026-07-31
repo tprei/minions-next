@@ -797,3 +797,12 @@ export type {
   SplitSegmentReceipt,
   SplitWorkingCopy,
 } from "./split-coordinator.js";
+
+export {
+  createProductionSplitWorkingCopy,
+  ProductionSplitWorkingCopyError,
+} from "./split-working-copy.js";
+export type {
+  ProductionSplitWorkingCopy,
+  ProductionSplitWorkingCopyErrorCode,
+} from "./split-working-copy.js";
