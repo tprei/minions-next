@@ -2,6 +2,7 @@ import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
+import { createSqliteVcsChangeBindingStore, openHostDatabase } from "@minions/adapters";
 import {
   ApiVersionSchema,
   ApprovePlanRequestSchema,
@@ -35,6 +36,8 @@ import {
   TreeService,
   TreeState,
   TreeSummarySchema,
+  VcsChangeBindingSchema,
+  VcsConflictState,
   type PlanAttention,
   type PlanRevision,
   type TaskNode,
@@ -42,6 +45,10 @@ import {
   type TreeBudget,
 } from "@minions/contracts";
 import {
+  contentHash,
+  gitSha,
+  taskNodeId,
+  taskTreeId,
   timestampFromEpochMilliseconds,
   type Clock,
   type Timestamp as ClockTimestamp,
@@ -183,6 +190,25 @@ const CONNECT_SECOND_DEEP_OBJECTIVE = "research the final child output";
 const CONNECT_REPAIR_GOAL = "repair the connect tree";
 const CLI_INITIAL_GOAL = "cli tree root";
 const CLI_PLAN_GOAL = "ship nested cli tree";
+const VCS_BINDING_INSTANCE_ID = "01900000-0000-7000-8000-000000000601";
+const VCS_BINDING_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000602";
+const VCS_BINDING_REGISTER_EVENT_ID = "01900000-0000-7000-8000-000000000603";
+const VCS_BINDING_CREATE_EVENT_ID = "01900000-0000-7000-8000-000000000604";
+const VCS_BINDING_RESTART_INSTANCE_ID = "01900000-0000-7000-8000-000000000605";
+const VCS_BINDING_RESTART_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000606";
+const VCS_BINDING_REGISTER_COMMAND_ID = "01900000-0000-7000-8000-000000000607";
+const VCS_BINDING_ACTOR_SESSION_ID = "01900000-0000-7000-8000-000000000608";
+const VCS_BINDING_REPOSITORY_ID = "01900000-0000-7000-8000-000000000609";
+const VCS_BINDING_TREE_ID = "01900000-0000-7000-8000-00000000060a";
+const VCS_BINDING_INITIAL_REVISION_ID = "01900000-0000-7000-8000-00000000060b";
+const VCS_BINDING_ROOT_NODE_ID = "01900000-0000-7000-8000-00000000060c";
+const VCS_BINDING_ROOT_ARTIFACT_ID = "01900000-0000-7000-8000-00000000060d";
+const VCS_BINDING_ATTENTION_ID = "01900000-0000-7000-8000-00000000060e";
+const VCS_BINDING_CREATE_COMMAND_ID = "01900000-0000-7000-8000-00000000060f";
+const VCS_BINDING_GOAL = "vcs binding tree root";
+const VCS_BINDING_JJ_CHANGE_ID = "ab".repeat(32);
+const VCS_BINDING_CURRENT_COMMIT_ID = "cd".repeat(20);
+const VCS_BINDING_LAST_JJ_OPERATION_ID = "ef".repeat(32);
 
 interface GitFixture {
   readonly directory: string;
@@ -2079,6 +2105,160 @@ describe("tree service integration", () => {
       expect(restartedSnapshot.attention).toEqual(snapshot.attention);
       expect(restartedSnapshot.lastSequence).toBe(7n);
       expect(restartedSnapshot.minimumAvailableSequence).toBe(1n);
+      await restartedRuntime.close();
+      restartedRuntime = undefined;
+    } finally {
+      await restartedRuntime?.close();
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(fixture.directory, { force: true, recursive: true });
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("returns the daemon-recorded VCS change binding on GetTree", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-tree-service-vcs-binding-home-"));
+    const fixture = await createGitFixture("vcs-binding");
+    const capture = createLogCapture();
+    const clock = new MutableClock(STARTED_AT_MS);
+    let runtime: RunningDaemonRuntime | undefined;
+    let restartedRuntime: RunningDaemonRuntime | undefined;
+    try {
+      const port = await reserveLoopbackPort();
+      const logger = createStructuredLogger({ stream: capture.stream, now: () => clock.now() });
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([
+            VCS_BINDING_INSTANCE_ID,
+            VCS_BINDING_HOST_CANDIDATE_ID,
+            VCS_BINDING_REGISTER_EVENT_ID,
+            VCS_BINDING_CREATE_EVENT_ID,
+          ]),
+          logger,
+        ),
+      );
+      const hostId = runtime.hostId;
+      if (hostId === undefined) {
+        throw new Error("local runtime did not produce a host ID");
+      }
+      const clients = connectClients(runtime.server.baseUrl);
+      await clients.repository.registerRepository(
+        registerRequest(
+          VCS_BINDING_REGISTER_COMMAND_ID,
+          VCS_BINDING_ACTOR_SESSION_ID,
+          VCS_BINDING_REPOSITORY_ID,
+          fixture.root,
+        ),
+      );
+
+      const createdResponse = await clients.tree.createTree(
+        createTreeRequest(
+          VCS_BINDING_CREATE_COMMAND_ID,
+          VCS_BINDING_ACTOR_SESSION_ID,
+          VCS_BINDING_REPOSITORY_ID,
+          VCS_BINDING_TREE_ID,
+          VCS_BINDING_INITIAL_REVISION_ID,
+          VCS_BINDING_ROOT_NODE_ID,
+          VCS_BINDING_ROOT_ARTIFACT_ID,
+          VCS_BINDING_ATTENTION_ID,
+          VCS_BINDING_GOAL,
+          fixture.baseCommit,
+          treeBudget(),
+        ),
+      );
+      const created = createdResponse.tree;
+      if (created === undefined) {
+        throw new Error("create response did not contain a tree");
+      }
+      const rootNodeBeforeBinding = expectedArtifactNode(
+        VCS_BINDING_ROOT_NODE_ID,
+        VCS_BINDING_TREE_ID,
+        VCS_BINDING_REPOSITORY_ID,
+        hostId,
+        VCS_BINDING_INITIAL_REVISION_ID,
+        PlanNodeMode.PLAN,
+        VCS_BINDING_GOAL,
+        [VCS_BINDING_GOAL],
+        VCS_BINDING_ROOT_ARTIFACT_ID,
+        "plan",
+        NodeState.PLANNED,
+        0n,
+        STARTED_AT_MS,
+        STARTED_AT_MS,
+      );
+      // No binding exists yet: an unstarted plan node's field stays unset.
+      expect(created.nodes).toEqual([rootNodeBeforeBinding]);
+      expect(created.nodes[0]?.vcsChangeBinding).toBeUndefined();
+
+      await runtime.close();
+      runtime = undefined;
+
+      const bindingDatabase = await openHostDatabase({
+        path: join(home, "hosts", hostId, "host.db"),
+        clock,
+      });
+      try {
+        await createSqliteVcsChangeBindingStore({ database: bindingDatabase }).upsertBinding({
+          treeId: taskTreeId(VCS_BINDING_TREE_ID),
+          nodeId: taskNodeId(VCS_BINDING_ROOT_NODE_ID),
+          jjChangeId: contentHash(VCS_BINDING_JJ_CHANGE_ID),
+          currentCommitId: gitSha(VCS_BINDING_CURRENT_COMMIT_ID),
+          parentChangeId: undefined,
+          bookmark: undefined,
+          rewriteGeneration: 0,
+          lastJjOperationId: contentHash(VCS_BINDING_LAST_JJ_OPERATION_ID),
+          lastPushedCommitId: undefined,
+          lastReviewedCommitId: undefined,
+          conflictState: "clean",
+          recordedAt: timestampFromEpochMilliseconds(STARTED_AT_MS),
+        });
+      } finally {
+        await bindingDatabase.close();
+      }
+
+      const restartedClock = new MutableClock(RESTARTED_AT_MS);
+      const restartedLogger = createStructuredLogger({
+        stream: capture.stream,
+        now: () => restartedClock.now(),
+      });
+      restartedRuntime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          restartedClock,
+          new SequenceIdGenerator([
+            VCS_BINDING_RESTART_INSTANCE_ID,
+            VCS_BINDING_RESTART_HOST_CANDIDATE_ID,
+          ]),
+          restartedLogger,
+        ),
+      );
+      expect(restartedRuntime.hostId).toBe(hostId);
+      const restartedClients = connectClients(restartedRuntime.server.baseUrl);
+      const restartedTreeResponse = await restartedClients.tree.getTree({
+        treeId: VCS_BINDING_TREE_ID,
+      });
+      const restartedTree = restartedTreeResponse.tree;
+      if (restartedTree === undefined) {
+        throw new Error("restarted get response did not contain a tree");
+      }
+      const expectedBinding = create(VcsChangeBindingSchema, {
+        jjChangeId: VCS_BINDING_JJ_CHANGE_ID,
+        currentCommitId: VCS_BINDING_CURRENT_COMMIT_ID,
+        rewriteGeneration: 0,
+        lastJjOperationId: VCS_BINDING_LAST_JJ_OPERATION_ID,
+        conflictState: VcsConflictState.CLEAN,
+      });
+      expect(restartedTree.nodes).toHaveLength(1);
+      expect(restartedTree.nodes[0]?.vcsChangeBinding).toEqual(expectedBinding);
+      expect(restartedTree.nodes[0]).toEqual({
+        ...rootNodeBeforeBinding,
+        vcsChangeBinding: expectedBinding,
+      });
+
       await restartedRuntime.close();
       restartedRuntime = undefined;
     } finally {

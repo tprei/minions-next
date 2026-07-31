@@ -8,6 +8,7 @@ import {
   type PlanRegistry,
   type SupervisorHostRegistry,
   type RepositoryRegistry,
+  type VcsChangeBindingStore,
 } from "@minions/adapters";
 import type { Interceptor } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
@@ -59,6 +60,7 @@ export type DaemonServerOptions =
         eventPollIntervalMs: number;
         planRegistry: PlanRegistry;
         clock: Clock;
+        vcsChangeBindingStore: VcsChangeBindingStore;
         steeringStore: SteeringCommandStore;
         artifactRegistry: ArtifactRegistry;
         blobStore: ContentBlobStore;
@@ -77,6 +79,7 @@ export type DaemonServerOptions =
         eventPollIntervalMs: number;
         planRegistry: PlanRegistry;
         clock: Clock;
+        vcsChangeBindingStore: VcsChangeBindingStore;
         steeringStore: SteeringCommandStore;
         artifactRegistry: ArtifactRegistry;
         blobStore: ContentBlobStore;
@@ -123,6 +126,7 @@ export async function startDaemonServer(
           ...(options.repository === undefined
             ? {}
             : { repositoryRegistry: options.repository.registry }),
+          vcsChangeBindingStore: options.vcsChangeBindingStore,
         });
         registerSteeringService(router, {
           store: options.steeringStore,

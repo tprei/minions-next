@@ -10,6 +10,7 @@ import {
   createSqliteArtifactRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
+  createSqliteVcsChangeBindingStore,
   openHostDatabase,
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
@@ -443,6 +444,7 @@ describe("EventService integration", () => {
         eventPollIntervalMs: 10,
         planRegistry,
         clock,
+        vcsChangeBindingStore: createSqliteVcsChangeBindingStore({ database: temporary.database }),
         steeringStore: createSqliteSteeringCommandStore({
           database: temporary.database,
           commandStore,
@@ -792,6 +794,7 @@ async function startEventFixture(
     eventPollIntervalMs: 10,
     planRegistry,
     clock,
+    vcsChangeBindingStore: createSqliteVcsChangeBindingStore({ database }),
     steeringStore: createSqliteSteeringCommandStore({
       database,
       commandStore,

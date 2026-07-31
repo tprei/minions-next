@@ -12,6 +12,7 @@ import {
   createSqliteArtifactRegistry,
   createSqliteCommandStore,
   createSqliteSteeringCommandStore,
+  createSqliteVcsChangeBindingStore,
   type EventCommitWaiter,
   type ManagedSqliteDatabase,
 } from "@minions/adapters";
@@ -88,6 +89,7 @@ function createHostServices(
       ids: ports.ids,
     }),
     steeringStore: createSqliteSteeringCommandStore({ database, commandStore, ports }),
+    vcsChangeBindingStore: createSqliteVcsChangeBindingStore({ database }),
   };
 }
 
@@ -151,11 +153,8 @@ describe("SystemService integration", () => {
     const clock = new FixedClock(fixtureNow);
     temporaryDatabase = await TemporarySqliteDatabase.create("host", clock);
     const eventWaiter = createEventCommitWaiter();
-    const { planRegistry, steeringStore, artifactRegistry, blobStore } = createHostServices(
-      temporaryDatabase.database,
-      eventWaiter,
-      clock,
-    );
+    const { planRegistry, steeringStore, artifactRegistry, blobStore, vcsChangeBindingStore } =
+      createHostServices(temporaryDatabase.database, eventWaiter, clock);
     systemServer = await startDaemonServer({
       mode: "host",
       port: 0,
@@ -166,6 +165,7 @@ describe("SystemService integration", () => {
       artifactRegistry,
       blobStore,
       clock,
+      vcsChangeBindingStore,
       steeringStore,
       system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
     });
@@ -341,11 +341,8 @@ describe("SystemService integration", () => {
 
     const eventWaiter = createEventCommitWaiter();
     const clock = new FixedClock(fixtureNow);
-    const { planRegistry, steeringStore, artifactRegistry, blobStore } = createHostServices(
-      getTemporaryDatabase().database,
-      eventWaiter,
-      clock,
-    );
+    const { planRegistry, steeringStore, artifactRegistry, blobStore, vcsChangeBindingStore } =
+      createHostServices(getTemporaryDatabase().database, eventWaiter, clock);
     const startup = await startDaemonServer({
       mode: "host",
       port,
@@ -354,6 +351,7 @@ describe("SystemService integration", () => {
       eventPollIntervalMs: 10,
       planRegistry,
       clock,
+      vcsChangeBindingStore,
       steeringStore,
       artifactRegistry,
       blobStore,
