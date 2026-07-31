@@ -308,11 +308,21 @@ export type TranscriptSummary = Readonly<{
   chunkCount: number;
 }>;
 
+/**
+ * Which success shape a completed attempt resolved to; `undefined` when the
+ * attempt did not succeed (failed/cancelled). Public so a caller that defers
+ * outcome recording (see {@link ExecutionCoordinator.runNode}'s `options`) can
+ * later hand the result back to {@link ExecutionCoordinator.recordDeferredOutcome}
+ * without the coordinator re-deriving it.
+ */
+export type NodeExecutionSuccessKind = "commit" | "artifact" | "no_change";
+
 /** The full result of a node execution attempt. */
 export type NodeExecutionResult = Readonly<{
   attemptId: AttemptId;
   nodeId: TaskNodeId;
   outcome: NodeOutcome;
+  successKind: NodeExecutionSuccessKind | undefined;
   transcript: TranscriptSummary;
   checkpoints: Readonly<{ initial: AttemptCheckpoint; final: AttemptCheckpoint }>;
   contextDigest: ContentHash;
@@ -473,10 +483,35 @@ export type ExecutionCoordinatorPorts = Readonly<{
  * ports — the OMP adapter and concrete sandbox are injected, never imported.
  */
 export interface ExecutionCoordinator {
-  /** Run a node attempt end to end (claim → sandbox → harness → outcome). */
-  runNode(request: NodeExecutionRequest): Promise<NodeExecutionResult>;
+  /**
+   * Run a node attempt end to end (claim → sandbox → harness → outcome).
+   *
+   * `options.deferOutcomeRecording`: when `true`, a successful attempt's
+   * outcome is resolved and returned but NOT durably recorded — the node
+   * stays ineligible-for-children/not-`succeeded` until the caller explicitly
+   * calls {@link recordDeferredOutcome}. A failed/cancelled attempt is
+   * unaffected (nothing is recorded for those either way). Used by callers
+   * that must gate a result (e.g. bounded repair-retry) before the success
+   * becomes visible to the scheduler/tree — recording success before that
+   * gate runs is a fail-open hole (a node the gate would reject is already
+   * `succeeded` and unblocking children).
+   */
+  runNode(
+    request: NodeExecutionRequest,
+    options?: Readonly<{ deferOutcomeRecording?: boolean }>,
+  ): Promise<NodeExecutionResult>;
   /** Interrupt an in-flight attempt: cancelled outcome, lease released, sandbox destroyed. */
   interrupt(attemptId: AttemptId): Promise<NodeExecutionResult>;
+  /**
+   * Durably record a `result` previously returned by `runNode` with
+   * `deferOutcomeRecording: true`. No-ops if `result.successKind` is
+   * `undefined` (the attempt did not succeed — nothing to record). Callers
+   * MUST call this AT MOST ONCE per deferred `result`: it is not verified
+   * idempotent against the underlying artifact registry's optimistic
+   * concurrency check (`expectedNodeVersion`), so a second call for the same
+   * node may be rejected as a version conflict rather than no-op.
+   */
+  recordDeferredOutcome(request: NodeExecutionRequest, result: NodeExecutionResult): Promise<void>;
   /**
    * Resume an attempt from a checkpoint. Re-binds the SAME harness identity +
    * sandbox instance (HAR-01) and replays from the checkpoint sequence, resuming

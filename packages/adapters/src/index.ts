@@ -185,6 +185,39 @@ export type {
   ExecutionCoordinatorOptions,
   ExecutionCoordinatorErrorCode,
 } from "./execution-coordinator.js";
+export { createRepairCoordinator, RepairCoordinatorError } from "./repair-coordinator.js";
+export type {
+  AttemptRepairInput,
+  RepairAttentionSink,
+  RepairCoordinator,
+  RepairCoordinatorErrorCode,
+  RepairCoordinatorOptions,
+} from "./repair-coordinator.js";
+export {
+  canRetry,
+  classifyFailure,
+  consume,
+  createRetryBudget,
+  decideRepair,
+  DEFAULT_REPAIR_CEILING,
+  IS_BLOCKER_FAILURE_CLASS,
+  IS_TERMINAL_FAILURE_CLASS,
+  isNoProgress,
+  signaturesEqual,
+} from "@minions/core";
+export type {
+  FailureClass,
+  NoProgressSignature,
+  RepairAction,
+  RepairAttemptEvidence,
+  RepairAttention,
+  RepairAttentionKind,
+  RepairDecision,
+  RepairEvidenceRef,
+  RepairOutcome,
+  RepairStatus,
+  RetryBudget,
+} from "@minions/core";
 export {
   createSandboxPolicyFingerprinter,
   fingerprintSandboxPolicy,
