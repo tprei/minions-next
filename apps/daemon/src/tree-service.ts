@@ -49,6 +49,7 @@ import {
   timestampFromEpochMilliseconds,
   taskTreeId,
   type Clock,
+  type VcsChangeBindingStore,
 } from "@minions/core";
 
 const responseValidator = createValidator();
