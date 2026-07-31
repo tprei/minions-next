@@ -14,7 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { isIP } from "node:net";
-import { arch, homedir, platform } from "node:os";
+import { arch, platform } from "node:os";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
@@ -1342,12 +1342,39 @@ async function makeCloneWritable(path: string): Promise<void> {
   await chmod(path, 0o600);
 }
 
-async function assertHostMounts(
+/**
+ * P1 (review #17) + Codex inline comment on this function: the previous
+ * check rejected any mount source CONTAINED WITHIN homedir() at all - which
+ * rejects every ordinary `/Users/<user>/repo` workspace (the backend was
+ * unusable for real repos) - while accepting anything OUTSIDE limaHome/
+ * stateDirectory/homedir entirely, so `/Library`, `/private/etc`, `/dev`,
+ * `/var`, etc. passed through unchecked and could be mounted (read-only or
+ * read-write) against host secrets/system files. Fixed to an explicit
+ * denylist of EXACT sensitive macOS roots (never a valid mount source,
+ * regardless of caller intent) instead of a homedir-containment blacklist -
+ * a real workspace living somewhere under homedir (the normal case) is no
+ * longer rejected, while these categorically-sensitive roots now are.
+ */
+const SENSITIVE_MACOS_MOUNT_SOURCE_ROOTS = new Set([
+  "/",
+  "/Applications",
+  "/Library",
+  "/System",
+  "/Users",
+  "/etc",
+  "/private",
+  "/private/etc",
+  "/private/var",
+  "/var",
+  "/dev",
+  "/Volumes",
+]);
+
+export async function assertHostMounts(
   policy: SandboxPolicy,
   options: MacOsLimaSandboxOptions,
 ): Promise<void> {
   const protectedRoots = [resolve(options.limaHome), resolve(options.stateDirectory)];
-  const protectedPaths = [...protectedRoots, resolve(homedir())];
   for (const mount of policy.mounts) {
     const sourcePath = resolve(mount.sourcePath);
     let metadata;
@@ -1374,10 +1401,7 @@ async function assertHostMounts(
         (protectedRoot) =>
           pathContainedBy(sourcePath, protectedRoot) || pathContainedBy(protectedRoot, sourcePath),
       ) ||
-      protectedPaths.some(
-        (protectedPath) =>
-          pathContainedBy(protectedPath, sourcePath) || pathContainedBy(sourcePath, protectedPath),
-      )
+      SENSITIVE_MACOS_MOUNT_SOURCE_ROOTS.has(sourcePath)
     ) {
       throw new MacOsLimaSandboxError(
         "invalid_configuration",
