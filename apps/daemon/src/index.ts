@@ -15,18 +15,17 @@ export { createSchedulerLoop } from "./scheduler.js";
 export type { CreateSchedulerLoopOptions } from "./scheduler.js";
 export { startDaemonServer } from "./server.js";
 export type { CreateStructuredLoggerOptions, StructuredLogger } from "./logger.js";
+export type { DaemonRuntimeOptions, RunningDaemonRuntime } from "./runtime.js";
+export type { DaemonServerOptions, RunningDaemonServer } from "./server.js";
 export { DaemonStartupError, AuthRuntimeStartupError } from "./runtime.js";
 export type {
   AuthBrokerRuntimeOptions,
   AuthRuntimeStartupErrorCode,
-  DaemonRuntimeOptions,
   DaemonStartupErrorCode,
   NodeExecutionRuntimeOptions,
   ProviderAdmissionRuntimeOptions,
   RunningAuthRuntime,
-  RunningDaemonRuntime,
 } from "./runtime.js";
-export type { DaemonServerOptions, RunningDaemonServer } from "./server.js";
 export type { ExecutionCoordinator } from "@minions/core";
 
 export async function main(argv: readonly string[]): Promise<number> {
