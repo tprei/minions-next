@@ -49,7 +49,7 @@ import {
 import { SequenceIdGenerator } from "@minions/testkit";
 import { execFile } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1063,6 +1063,13 @@ async function runGit(cwd: string, args: readonly string[]): Promise<string> {
   });
 }
 
+const GATE_PROFILE_FIXTURE = `required_categories:
+  - lint
+gates:
+  lint:
+    executable: "true"
+`;
+
 async function createGitFixture(name: string): Promise<GitFixture> {
   const directory = await mkdtemp(join(tmpdir(), `minions-tree-service-${name}-`));
   const origin = join(directory, "origin.git");
@@ -1075,7 +1082,9 @@ async function createGitFixture(name: string): Promise<GitFixture> {
     await runGit(root, ["config", "user.email", "tree-service@example.test"]);
     await runGit(root, ["checkout", "-b", "main"]);
     await writeFile(join(root, "README.md"), `${name}\n`, "utf8");
-    await runGit(root, ["add", "README.md"]);
+    await mkdir(join(root, ".minions"), { recursive: true });
+    await writeFile(join(root, ".minions", "gates.yaml"), GATE_PROFILE_FIXTURE, "utf8");
+    await runGit(root, ["add", "README.md", ".minions/gates.yaml"]);
     await runGit(root, ["commit", "-m", "initial"]);
     await runGit(root, ["push", "--set-upstream", "origin", "main"]);
     await runGit(origin, ["symbolic-ref", "HEAD", "refs/heads/main"]);

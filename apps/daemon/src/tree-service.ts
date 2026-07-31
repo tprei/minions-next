@@ -60,16 +60,14 @@ export function registerTreeService(router: ConnectRouter, options: TreeServiceO
   router.service(TreeService, {
     async createTree(request) {
       try {
-        if (options.hostMinimum !== undefined) {
-          if (options.repositoryRegistry === undefined) {
-            throw new ConnectError(
-              "repository registry is required when gate enforcement is enabled",
-              Code.FailedPrecondition,
-            );
-          }
-          const repository = options.repositoryRegistry.get(repositoryId(request.repositoryId));
-          await loadGateProfile(repository.canonicalRoot, options.hostMinimum);
+        if (options.repositoryRegistry === undefined) {
+          throw new ConnectError(
+            "repository registry is required to enforce the gate profile",
+            Code.FailedPrecondition,
+          );
         }
+        const repository = options.repositoryRegistry.get(repositoryId(request.repositoryId));
+        await loadGateProfile(repository.canonicalRoot, options.hostMinimum);
         const tree = await options.planRegistry.create({
           request,
           at: timestampFromEpochMilliseconds(options.clock.now()),

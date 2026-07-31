@@ -38,9 +38,7 @@ export function registerRepositoryService(
         const inspection = await inspectRepository(request.rootPath);
         assertRegistrationPolicy(inspection);
         assertRepositoryLocation(options.home, inspection.canonicalRoot);
-        if (options.hostMinimum !== undefined) {
-          await loadGateProfile(inspection.canonicalRoot, options.hostMinimum);
-        }
+        await loadGateProfile(inspection.canonicalRoot, options.hostMinimum);
         const registration = await options.registry.register({
           request,
           inspection,
