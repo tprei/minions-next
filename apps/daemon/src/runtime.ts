@@ -199,9 +199,10 @@ export type DaemonRuntimeOptions = Readonly<{
   /**
    * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing). When
    * enabled, the daemon constructs a process-lifetime {@link DeviceSessionStore},
-   * shares it between the pairing RPCs and the remote-access interceptor, and binds
-   * every interface instead of loopback only (see `server.ts`'s `remoteAccess` doc for
-   * the full security model). Only meaningful for "local"/"host" mode, which is where
+   * shares it between the pairing RPCs and the remote-access interceptor, and starts
+   * a second loopback listener for phones (see `server.ts`'s `remoteAccess` doc for the
+   * full security model — trust derives from the listener, not the peer
+   * address). Only meaningful for "local"/"host" mode, which is where
    * the mutation RPCs a phone session gates actually live; ignored for "supervisor"
    * mode. Omitted, daemon behaviour is unchanged (REMOTE-01's loopback-only default).
    */
@@ -685,6 +686,7 @@ export async function startDaemonRuntime(
       mode: lifecycle.mode,
       host_id: localHostId,
       port: server.port,
+      ...(server.remotePort === undefined ? {} : { remote_port: server.remotePort }),
     });
 
     let closePromise: Promise<void> | undefined;

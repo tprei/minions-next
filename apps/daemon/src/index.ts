@@ -32,8 +32,6 @@ export { createDeviceSessionStore } from "./device-session-store.js";
 export type { DeviceSessionStore } from "./device-session-store.js";
 export {
   createRemoteAccessInterceptor,
-  isLoopbackAddress,
-  isLoopbackContextKey,
   PHONE_REMOTE_ACCESS_POLICY,
 } from "./remote-access-interceptor.js";
 export type { RemoteAccessPolicy } from "./remote-access-interceptor.js";

@@ -2,9 +2,7 @@ import {
   Code,
   ConnectError,
   createClient,
-  createContextValues,
   createRouterTransport,
-  type Interceptor,
 } from "@connectrpc/connect";
 import { PairingService } from "@minions/contracts";
 import { describe, expect, it } from "vitest";
@@ -12,8 +10,6 @@ import { describe, expect, it } from "vitest";
 import {
   createDeviceSessionStore,
   createRemoteAccessInterceptor,
-  isLoopbackAddress,
-  isLoopbackContextKey,
   registerPairingService,
   type DeviceSessionStore,
   type RemoteAccessPolicy,
@@ -22,79 +18,35 @@ import {
 /**
  * Remote-access interceptor tests (PR 57 — private-phone-pairing, REMOTE-01/REMOTE-02).
  *
- * `isLoopbackAddress` tests are pure-function unit tests. The interceptor tests below
- * exercise the actual `createRemoteAccessInterceptor` factory wired in front of the real
- * `registerPairingService` via `createRouterTransport` — real interceptor composition and
- * dispatch against a real, already-covered service, not a hand-rolled fake. Connect's
- * `ContextValues` are never transmitted over the wire (by design — a remote caller must
- * never be able to claim its own trust level), so `createRouterTransport` has no
- * client-to-server hook for them the way `connectNodeAdapter({ contextValues })` does in
- * production; `withLoopbackContext` below is a tiny outermost test interceptor that
- * injects the value directly, standing in for that hook (itself a thin,
- * directly-inspectable wrapper around `isLoopbackAddress`, unit-tested above).
+ * Trust derives from the LISTENER, not the peer address: `server.ts` attaches this
+ * interceptor to the remote (phone) listener ONLY, so it ALWAYS enforces the phone
+ * policy + device-session auth for every request that reaches it — there is no loopback
+ * short-circuit. These tests exercise the real `createRemoteAccessInterceptor` factory
+ * wired in front of the real `registerPairingService` via `createRouterTransport` — real
+ * interceptor composition and dispatch against a real, already-covered service, not a
+ * hand-rolled fake. (Connect `ContextValues` are never transmitted over the wire, so the
+ * only way to prove the interceptor's enforcement is to call it directly.)
  *
  * All tests target `PairingService.ListDevices` — real `minions.v1.PairingService/...`
- * method-name strings, exercised the same way `PHONE_REMOTE_ACCESS_POLICY` builds its own
- * keys — because it is the one PairingService RPC with no auth requirement baked into the
- * handler itself (`RevokeDevice` calls `sessionStore.authenticate` unconditionally, real
- * `Date.now()`, regardless of caller; using it here would test that pre-existing check
- * instead of this interceptor). Varying the test policy's required scope for
- * `ListDevices` exercises every interceptor decision in isolation.
+ * method-name strings — because it is the one PairingService RPC with no auth requirement
+ * baked into the handler itself (`RevokeDevice` calls `sessionStore.authenticate`
+ * unconditionally, real `Date.now()`, regardless of caller). Varying the test policy's
+ * required scope for `ListDevices` exercises every interceptor decision in isolation.
  */
-describe("isLoopbackAddress", () => {
-  it("accepts IPv4 loopback", () => {
-    expect(isLoopbackAddress("127.0.0.1")).toBe(true);
-  });
-
-  it("accepts IPv6 loopback", () => {
-    expect(isLoopbackAddress("::1")).toBe(true);
-  });
-
-  it("accepts the IPv4-mapped-IPv6 form of loopback", () => {
-    expect(isLoopbackAddress("::ffff:127.0.0.1")).toBe(true);
-  });
-
-  it("rejects a private (non-loopback) LAN address", () => {
-    expect(isLoopbackAddress("10.0.0.5")).toBe(false);
-  });
-
-  it("rejects a Tailscale CGNAT-range address", () => {
-    expect(isLoopbackAddress("100.64.1.5")).toBe(false);
-  });
-
-  it("fails closed on an undefined remote address", () => {
-    expect(isLoopbackAddress(undefined)).toBe(false);
-  });
-});
-
 const LIST_DEVICES = "minions.v1.PairingService/ListDevices";
 const FIXED_NOW = 1_000_000;
 
-/** Outermost test interceptor standing in for `connectNodeAdapter`'s `contextValues`
- * hook — see the file doc comment for why `createRouterTransport` needs this. */
-function withLoopbackContext(isLoopback: boolean): Interceptor {
-  return (next) => (request) =>
-    next({
-      ...request,
-      contextValues: createContextValues().set(isLoopbackContextKey, isLoopback),
-    });
-}
-
-function harness(options?: { policy?: RemoteAccessPolicy; now?: number; isLoopback?: boolean }) {
+function harness(options?: { policy?: RemoteAccessPolicy; now?: number }) {
   const sessionStore = createDeviceSessionStore();
   const policy = options?.policy ?? new Map([[LIST_DEVICES, "read_only" as const]]);
   const now = options?.now ?? FIXED_NOW;
-  const isLoopback = options?.isLoopback ?? false;
   const transport = createRouterTransport(
     (router) => {
       registerPairingService(router, { sessionStore });
     },
     {
       router: {
-        interceptors: [
-          withLoopbackContext(isLoopback),
-          createRemoteAccessInterceptor({ sessionStore, policy, now: () => now }),
-        ],
+        interceptors: [createRemoteAccessInterceptor({ sessionStore, policy, now: () => now })],
       },
     },
   );
@@ -128,36 +80,27 @@ async function expectPermissionDenied(
 }
 
 describe("createRemoteAccessInterceptor", () => {
-  it("passes a loopback caller through untouched, even for a method absent from the policy", async () => {
-    const { client } = harness({ policy: new Map(), isLoopback: true });
-    await expect(client.listDevices({})).resolves.toMatchObject({ devices: [] });
+  it("always enforces: rejects an RPC absent from the policy, fail-closed", async () => {
+    const { client } = harness({ policy: new Map() });
+    await expectPermissionDenied(client.listDevices({}), "not reachable from a remote caller");
   });
 
-  it("rejects a non-loopback caller for an RPC absent from the policy, fail-closed", async () => {
-    const { client } = harness({ policy: new Map(), isLoopback: false });
-    await expectPermissionDenied(
-      client.listDevices({}),
-      "not reachable from a non-loopback caller",
-    );
-  });
-
-  it("rejects a non-loopback caller with no session cookie for an RPC in the policy", async () => {
-    const { client } = harness({ isLoopback: false });
+  it("rejects a caller with no session cookie for an RPC in the policy", async () => {
+    const { client } = harness();
     await expectPermissionDenied(client.listDevices({}), "no device session cookie");
   });
 
-  it("admits a non-loopback caller with a read_only session for a read_only-policy RPC", async () => {
-    const { client, sessionStore } = harness({ isLoopback: false });
+  it("admits a caller with a read_only session for a read_only-policy RPC", async () => {
+    const { client, sessionStore } = harness();
     const session = activeSession(sessionStore, "read_only");
     await expect(
       client.listDevices({}, { headers: sessionHeaders(session) }),
     ).resolves.toMatchObject({});
   });
 
-  it("rejects a non-loopback read_only session against a control-policy RPC", async () => {
+  it("rejects a read_only session against a control-policy RPC", async () => {
     const { client, sessionStore } = harness({
       policy: new Map([[LIST_DEVICES, "control"]]),
-      isLoopback: false,
     });
     const session = activeSession(sessionStore, "read_only");
     await expectPermissionDenied(
@@ -166,10 +109,9 @@ describe("createRemoteAccessInterceptor", () => {
     );
   });
 
-  it("admits a non-loopback control session against a control-policy RPC", async () => {
+  it("admits a control session against a control-policy RPC", async () => {
     const { client, sessionStore } = harness({
       policy: new Map([[LIST_DEVICES, "control"]]),
-      isLoopback: false,
     });
     const session = activeSession(sessionStore, "control");
     await expect(
@@ -177,16 +119,16 @@ describe("createRemoteAccessInterceptor", () => {
     ).resolves.toMatchObject({});
   });
 
-  it("admits a non-loopback control session against a read_only-policy RPC (control satisfies read_only)", async () => {
-    const { client, sessionStore } = harness({ isLoopback: false });
+  it("admits a control session against a read_only-policy RPC (control satisfies read_only)", async () => {
+    const { client, sessionStore } = harness();
     const session = activeSession(sessionStore, "control");
     await expect(
       client.listDevices({}, { headers: sessionHeaders(session) }),
     ).resolves.toMatchObject({});
   });
 
-  it("rejects an expired non-loopback session", async () => {
-    const { client, sessionStore } = harness({ isLoopback: false });
+  it("rejects an expired session", async () => {
+    const { client, sessionStore } = harness();
     // Created and immediately expired relative to the harness's FIXED_NOW interceptor
     // clock: ttlMs 0 means expiresAt === FIXED_NOW, and the check is `now >= expiresAt`.
     const session = sessionStore.create({
@@ -201,8 +143,8 @@ describe("createRemoteAccessInterceptor", () => {
     );
   });
 
-  it("rejects a non-loopback session whose CSRF header does not match", async () => {
-    const { client, sessionStore } = harness({ isLoopback: false });
+  it("rejects a session whose CSRF header does not match", async () => {
+    const { client, sessionStore } = harness();
     const session = activeSession(sessionStore, "read_only");
     await expectPermissionDenied(
       client.listDevices(
@@ -218,8 +160,8 @@ describe("createRemoteAccessInterceptor", () => {
     );
   });
 
-  it("rejects a revoked non-loopback session", async () => {
-    const { client, sessionStore } = harness({ isLoopback: false });
+  it("rejects a revoked session", async () => {
+    const { client, sessionStore } = harness();
     const session = activeSession(sessionStore, "read_only");
     sessionStore.revoke(session.session.sessionId);
     await expectPermissionDenied(

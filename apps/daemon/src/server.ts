@@ -1,5 +1,5 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, sep } from "node:path";
 import type { AddressInfo } from "node:net";
 
@@ -12,7 +12,7 @@ import {
   type RepositoryRegistry,
   type VcsChangeBindingStore,
 } from "@minions/adapters";
-import { createContextValues, type Interceptor } from "@connectrpc/connect";
+import { type ConnectRouter, type Interceptor } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { createValidateInterceptor } from "@connectrpc/validate";
 import {
@@ -44,11 +44,7 @@ import { registerRecoveryService } from "./recovery-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
 import type { DeviceSessionStore } from "./device-session-store.js";
 import type { RecoveryRestarter } from "./recovery-restart.js";
-import {
-  createRemoteAccessInterceptor,
-  isLoopbackAddress,
-  isLoopbackContextKey,
-} from "./remote-access-interceptor.js";
+import { createRemoteAccessInterceptor } from "./remote-access-interceptor.js";
 
 type DaemonSystemOptions = Readonly<{
   serverVersion: string;
@@ -69,24 +65,31 @@ type BaseDaemonServerOptions = Readonly<{
   webDistDir?: string;
   /**
    * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing,
-   * REMOTE-01/REMOTE-02). When set, the daemon binds every interface (not loopback
-   * only) so a phone reachable over Tailscale can connect through the same RPC surface
-   * the desktop UI already uses, and every RPC in `remote-access-interceptor.ts`'s
-   * `PHONE_REMOTE_ACCESS_POLICY` requires a valid device session from a non-loopback
-   * caller; every other RPC is unreachable from one. Binding every interface, rather
-   * than replacing the loopback bind with one specific address, keeps the desktop UI's
-   * own `127.0.0.1` connections working unchanged; the private-network reachability
-   * half of REMOTE-01/REMOTE-02 comes from the operator's own Tailscale configuration
-   * (e.g. `tailscale serve`), not from this daemon managing a second listener. Omitted,
-   * the daemon binds loopback only (REMOTE-01's default) and no session check runs —
-   * desktop-UI behaviour is unchanged either way, since loopback callers always skip
-   * the check.
+   * REMOTE-01/REMOTE-02). When set, the daemon starts a SECOND http.Server (in addition
+   * to the trusted loopback listener on `port`) bound to `remoteAccess.bindHost` (default
+   * `127.0.0.1`) on its own port. Both listeners serve the SAME RPC routes; they differ
+   * only in their interceptor chain — the remote listener prepends
+   * `createRemoteAccessInterceptor`, which ALWAYS enforces the phone policy
+   * (`PHONE_REMOTE_ACCESS_POLICY`) plus a valid device session. Trust therefore derives
+   * from WHICH listener accepted the connection, never from the peer address: the
+   * documented `tailscale serve` deployment proxies the phone onto
+   * `http://127.0.0.1:<remotePort>`, so phone requests arrive with a loopback
+   * `remoteAddress` yet are still gated on the remote listener, while the desktop UI's
+   * own `127.0.0.1` connections to the trusted listener stay completely unaffected.
+   * Omitted, the daemon binds loopback only (REMOTE-01's default) and no session check
+   * runs — desktop-UI behaviour is unchanged.
    */
   remoteAccess?: RemoteAccessServerOptions;
 }>;
 
 export type RemoteAccessServerOptions = Readonly<{
   sessionStore: DeviceSessionStore;
+  /**
+   * Host the remote (phone) listener binds. Defaults to `127.0.0.1` — the daemon never
+   * binds a non-loopback interface itself; an operator exposes the remote port over an
+   * authenticated private network (e.g. `tailscale serve http://127.0.0.1:<port>`).
+   */
+  bindHost?: string;
 }>;
 
 export type DaemonServerOptions =
@@ -138,6 +141,12 @@ export type DaemonServerOptions =
 export type RunningDaemonServer = Readonly<{
   baseUrl: string;
   port: number;
+  /**
+   * Port of the remote (phone) listener, present only when `remoteAccess` is enabled.
+   * Distinct from `port` (the trusted loopback listener); the remote listener's adapter
+   * enforces the phone policy + device-session auth.
+   */
+  remotePort?: number;
   close: () => Promise<void>;
 }>;
 
@@ -147,79 +156,84 @@ export async function startDaemonServer(
   const shutdownController = new AbortController();
   const pendingBodyRequests = new Set<PendingBodyRequest>();
   const inFlightHandlers = new Set<Promise<unknown>>();
-  const handler = connectNodeAdapter({
+  const inFlightInterceptor = createInFlightInterceptor(inFlightHandlers);
+
+  // Identical RPC routes for every listener — the ONLY thing that differs between the
+  // trusted loopback (desktop) listener and the remote (phone) listener is the
+  // interceptor chain (see below). Registering the same services on both keeps the wire
+  // surface identical; the remote listener's interceptor gates WHICH of those RPCs a
+  // phone may actually reach.
+  const registerRoutes = (router: ConnectRouter): void => {
+    registerSystemService(router, {
+      ...options.system,
+      capabilities: capabilitiesForOptions(options),
+    });
+    if (options.mode !== "supervisor") {
+      registerArtifactService(router, {
+        registry: options.artifactRegistry,
+        blobStore: options.blobStore,
+        clock: options.clock,
+      });
+      registerEventService(router, {
+        store: createSqliteEventStore({ database: options.database }),
+        waiter: options.eventWaiter,
+        pollIntervalMs: options.eventPollIntervalMs,
+      });
+      registerTreeService(router, {
+        planRegistry: options.planRegistry,
+        clock: options.clock,
+        ...(options.repository === undefined
+          ? {}
+          : { repositoryRegistry: options.repository.registry }),
+        vcsChangeBindingStore: options.vcsChangeBindingStore,
+        ...(options.revset === undefined ? {} : { revset: options.revset }),
+      });
+      registerSteeringService(router, {
+        store: options.steeringStore,
+        clock: options.clock,
+      });
+      if (options.repository !== undefined) {
+        registerRepositoryService(router, options.repository);
+      }
+      registerMaintenanceService(router, { database: options.database });
+      registerWslHostService(router, {});
+      registerRecoveryService(router, {
+        store: options.recoveryStore,
+        gateProfile: options.recoveryGateProfile,
+        clock: options.clock,
+        ids: options.recoveryIds,
+        restart: options.recoveryRestart,
+      });
+      registerPairingService(
+        router,
+        options.remoteAccess === undefined
+          ? {}
+          : { sessionStore: options.remoteAccess.sessionStore },
+      );
+    }
+    if (options.mode !== "host") {
+      registerHostService(router, options.hostRegistry);
+    }
+  };
+
+  // Trusted loopback (desktop UI) listener: the SAME interceptor chain the daemon has
+  // always run, WITHOUT createRemoteAccessInterceptor. Behaviour is unchanged whether or
+  // not remote access is enabled — the desktop UI never depends on a peer-address check.
+  const trustedHandler = connectNodeAdapter({
     readMaxBytes: DAEMON_MESSAGE_MAX_BYTES,
     writeMaxBytes: DAEMON_MESSAGE_MAX_BYTES,
     jsonOptions: { ignoreUnknownFields: false },
     shutdownSignal: shutdownController.signal,
-    contextValues: (request) =>
-      createContextValues().set(
-        isLoopbackContextKey,
-        isLoopbackAddress(request.socket.remoteAddress),
-      ),
-    routes: (router) => {
-      registerSystemService(router, {
-        ...options.system,
-        capabilities: capabilitiesForOptions(options),
-      });
-      if (options.mode !== "supervisor") {
-        registerArtifactService(router, {
-          registry: options.artifactRegistry,
-          blobStore: options.blobStore,
-          clock: options.clock,
-        });
-        registerEventService(router, {
-          store: createSqliteEventStore({ database: options.database }),
-          waiter: options.eventWaiter,
-          pollIntervalMs: options.eventPollIntervalMs,
-        });
-        registerTreeService(router, {
-          planRegistry: options.planRegistry,
-          clock: options.clock,
-          ...(options.repository === undefined
-            ? {}
-            : { repositoryRegistry: options.repository.registry }),
-          vcsChangeBindingStore: options.vcsChangeBindingStore,
-          ...(options.revset === undefined ? {} : { revset: options.revset }),
-        });
-        registerSteeringService(router, {
-          store: options.steeringStore,
-          clock: options.clock,
-        });
-        if (options.repository !== undefined) {
-          registerRepositoryService(router, options.repository);
-        }
-        registerMaintenanceService(router, { database: options.database });
-        registerWslHostService(router, {});
-        registerRecoveryService(router, {
-          store: options.recoveryStore,
-          gateProfile: options.recoveryGateProfile,
-          clock: options.clock,
-          ids: options.recoveryIds,
-          restart: options.recoveryRestart,
-        });
-        registerPairingService(
-          router,
-          options.remoteAccess === undefined
-            ? {}
-            : { sessionStore: options.remoteAccess.sessionStore },
-        );
-      }
-      if (options.mode !== "host") {
-        registerHostService(router, options.hostRegistry);
-      }
-    },
+    routes: registerRoutes,
     interceptors: [
       createErrorDetailInterceptor(),
-      ...(options.remoteAccess === undefined
-        ? []
-        : [createRemoteAccessInterceptor({ sessionStore: options.remoteAccess.sessionStore })]),
       createUnknownFieldInterceptor(),
       createValidateInterceptor(),
-      createInFlightInterceptor(inFlightHandlers),
+      inFlightInterceptor,
     ],
   });
-  const server = createServer((request, response) => {
+
+  const trustedServer = createServer((request, response) => {
     if (shutdownController.signal.aborted) {
       request.destroy();
       return;
@@ -230,50 +244,75 @@ export async function startDaemonServer(
       serveStaticWeb(request, response, options.webDistDir);
       return;
     }
-    handler(request, response);
+    trustedHandler(request, response);
   });
 
-  await new Promise<void>((resolve, reject) => {
-    const rejectOnError = (error: Error): void => {
-      reject(error);
-    };
-    server.once("error", rejectOnError);
-    server.listen(
-      options.port,
-      options.remoteAccess === undefined ? "127.0.0.1" : "0.0.0.0",
-      () => {
-        server.off("error", rejectOnError);
-        resolve();
-      },
-    );
-  });
-
-  const address = server.address();
+  await listenOnce(trustedServer, options.port, "127.0.0.1");
+  const address = trustedServer.address();
   if (address === null || typeof address === "string") {
-    server.close();
+    trustedServer.close();
     throw new Error("daemon server did not bind to a TCP address");
+  }
+
+  // Optional remote (phone) listener: a SEPARATE http.Server with the SAME routes but a
+  // different interceptor chain that prepends createRemoteAccessInterceptor. The
+  // interceptor now ONLY runs on this listener, so it ALWAYS enforces the phone policy +
+  // device-session auth for every request that reaches it — trust derives from THIS
+  // listener, never from the peer address. The documented `tailscale serve` deployment
+  // proxies the phone onto http://127.0.0.1:<remotePort>, so phone requests arrive with
+  // a loopback remoteAddress yet are still gated here.
+  let remoteServer: Server | undefined;
+  let remotePort: number | undefined;
+  if (options.remoteAccess !== undefined) {
+    const remoteHandler = connectNodeAdapter({
+      readMaxBytes: DAEMON_MESSAGE_MAX_BYTES,
+      writeMaxBytes: DAEMON_MESSAGE_MAX_BYTES,
+      jsonOptions: { ignoreUnknownFields: false },
+      shutdownSignal: shutdownController.signal,
+      routes: registerRoutes,
+      interceptors: [
+        createErrorDetailInterceptor(),
+        createRemoteAccessInterceptor({ sessionStore: options.remoteAccess.sessionStore }),
+        createUnknownFieldInterceptor(),
+        createValidateInterceptor(),
+        inFlightInterceptor,
+      ],
+    });
+    remoteServer = createServer((request, response) => {
+      if (shutdownController.signal.aborted) {
+        request.destroy();
+        return;
+      }
+      trackPendingBodyRequest(request, pendingBodyRequests);
+      remoteHandler(request, response);
+    });
+    await listenOnce(remoteServer, 0, options.remoteAccess.bindHost ?? "127.0.0.1");
+    const remoteAddress = remoteServer.address();
+    if (remoteAddress === null || typeof remoteAddress === "string") {
+      trustedServer.close();
+      remoteServer.close();
+      throw new Error("remote-access server did not bind to a TCP address");
+    }
+    remotePort = remoteAddress.port;
   }
 
   let closePromise: Promise<void> | undefined;
   return {
     baseUrl: toBaseUrl(address),
     port: address.port,
+    ...(remotePort === undefined ? {} : { remotePort }),
     close: () => {
       closePromise ??= (async () => {
         shutdownController.abort();
         closeEventWaiter(options);
         abortPendingBodyRequests(pendingBodyRequests);
-        const { promise, resolve, reject } = Promise.withResolvers<undefined>();
-        server.close((error) => {
-          if (error === undefined) {
-            resolve(undefined);
-            return;
-          }
-          reject(error);
-        });
-        await promise;
+        await closeServer(trustedServer);
+        if (remoteServer !== undefined) {
+          await closeServer(remoteServer);
+        }
         await drainInFlightHandlers(inFlightHandlers);
-        server.closeIdleConnections();
+        trustedServer.closeIdleConnections();
+        remoteServer?.closeIdleConnections();
       })();
       return closePromise;
     },
@@ -360,6 +399,31 @@ function closeEventWaiter(options: DaemonServerOptions): void {
 
 function toBaseUrl(address: AddressInfo): string {
   return `http://127.0.0.1:${String(address.port)}`;
+}
+
+function listenOnce(server: Server, port: number, host: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const rejectOnError = (error: Error): void => {
+      reject(error);
+    };
+    server.once("error", rejectOnError);
+    server.listen(port, host, () => {
+      server.off("error", rejectOnError);
+      resolve();
+    });
+  });
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error === undefined) {
+        resolve();
+      } else {
+        reject(error);
+      }
+    });
+  });
 }
 
 const STATIC_CONTENT_TYPES: Readonly<Record<string, string>> = {
