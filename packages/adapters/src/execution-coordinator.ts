@@ -192,12 +192,25 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       options.outputCaptureLimitBytes ?? DEFAULT_OUTPUT_CAPTURE_LIMIT_BYTES;
   }
 
-  runNode(request: NodeExecutionRequest): Promise<NodeExecutionResult> {
+  runNode(
+    request: NodeExecutionRequest,
+    options?: Readonly<{ deferOutcomeRecording?: boolean }>,
+  ): Promise<NodeExecutionResult> {
     validateNodeExecutionRequest(request);
     const abort = new AbortController();
-    const done = this.#runAttempt(request, abort, undefined);
+    const done = this.#runAttempt(request, abort, undefined, options);
     this.#runs.set(request.context.attemptId, { abort, session: undefined, done });
     return done;
+  }
+
+  async recordDeferredOutcome(
+    request: NodeExecutionRequest,
+    result: NodeExecutionResult,
+  ): Promise<void> {
+    await this.#recordOutcome(request, {
+      outcome: result.outcome,
+      successKind: result.successKind,
+    });
   }
 
   interrupt(attemptIdValue: AttemptId): Promise<NodeExecutionResult> {
@@ -249,6 +262,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     request: NodeExecutionRequest,
     abort: AbortController,
     resumeFrom: AttemptCheckpoint | undefined,
+    options?: Readonly<{ deferOutcomeRecording?: boolean }>,
   ): Promise<NodeExecutionResult> {
     const attemptIdValue = request.context.attemptId;
     let phase: NodeExecutionPhase = "claimed";
@@ -262,7 +276,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       }
       const stream = await this.#stream(setup, request, abort, resumeFrom);
       phase = "finalizing";
-      return await this.#complete(setup, request, stream);
+      return await this.#complete(setup, request, stream, options);
     } catch (error) {
       await this.#failClosed(request, setup, phase, error);
       throw toCoordinatorError(error, attemptIdValue);
@@ -560,6 +574,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     setup: Setup,
     request: NodeExecutionRequest,
     stream: StreamOutcome,
+    options?: Readonly<{ deferOutcomeRecording?: boolean }>,
   ): Promise<NodeExecutionResult> {
     const attemptIdValue = request.context.attemptId;
     const resolved = await this.#resolveOutcome(request, stream);
@@ -571,6 +586,15 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     // final checkpoint FIRST, so any later failure leaves the node without
     // a durable outcome (still retry/resume-eligible) rather than
     // succeeded-but-uncheckpointed.
+    //
+    // P0 fix (review #27): recording success here - before a caller-side gate
+    // (e.g. bounded repair-retry) has run - makes the node `succeeded` and
+    // unblocks children/exits retry-eligibility before the gate is known to
+    // pass. `deferOutcomeRecording` lets such a caller resolve+inspect the
+    // outcome without committing it; it must then call
+    // `recordDeferredOutcome` itself once its own gate passes. The normal
+    // (non-deferred) path is byte-for-byte the previous unconditional call,
+    // and still runs AFTER the final checkpoint per the #24 fix above.
     const finalCheckpoint = this.#checkpoint(
       request,
       setup.session.identity,
@@ -580,7 +604,9 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       "finalizing",
     );
     await this.#checkpoints.record(finalCheckpoint);
-    await this.#recordOutcome(request, resolved);
+    if (!options?.deferOutcomeRecording) {
+      await this.#recordOutcome(request, resolved);
+    }
     await this.#releaseLease(setup.lease);
     await this.#destroySandbox(setup.sandbox);
     const transcript = await this.#transcriptSummary(attemptIdValue);
@@ -589,11 +615,13 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       node_id: request.context.nodeId,
       outcome_kind: resolved.outcome.kind,
       context_digest: setup.pack.digest,
+      outcome_recording_deferred: options?.deferOutcomeRecording === true,
     });
     return Object.freeze({
       attemptId: attemptIdValue,
       nodeId: request.context.nodeId,
       outcome: resolved.outcome,
+      successKind: resolved.successKind,
       transcript,
       checkpoints: Object.freeze({ initial: setup.initialCheckpoint, final: finalCheckpoint }),
       contextDigest: setup.pack.digest,

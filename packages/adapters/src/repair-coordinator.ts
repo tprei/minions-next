@@ -363,7 +363,7 @@ class ComposedRepairCoordinator implements RepairCoordinator {
       let result: NodeExecutionResult | undefined;
       let thrown: ThrownAttempt | undefined;
       try {
-        result = await this.#coordinator.runNode(input.request);
+        result = await this.#coordinator.runNode(input.request, { deferOutcomeRecording: true });
       } catch (error) {
         thrown = this.#captureThrown(error);
         this.#logger.log("warn", "repair_attempt_threw", {
@@ -393,11 +393,21 @@ class ComposedRepairCoordinator implements RepairCoordinator {
       // Success short-circuits — harness succeeded AND every gate passes. The
       // successful attempt is the terminal state; only failed attempts are
       // retained as repair evidence.
+      //
+      // P0 fix (review #27): `runNode` was called with `deferOutcomeRecording:
+      // true` above, so the node has NOT been durably recorded as `succeeded`
+      // yet — it is still retry-eligible/not visible to the scheduler as done.
+      // Only THIS gated success path may durably commit it, and only once every
+      // gate for this exact commit has passed. A harness "succeeded" outcome
+      // whose gate then fails is intentionally never recorded here: the node
+      // stays without a durable outcome and the retry loop continues (or the
+      // attempt is escalated below), never exposing an ungated success.
       if (
         result !== undefined &&
         outcome.kind === "succeeded" &&
         gateReceipts.every((receipt) => receipt.outcome === "passed")
       ) {
+        await this.#coordinator.recordDeferredOutcome(input.request, result);
         this.#logger.log("info", "repair_succeeded", {
           node_id: input.nodeId,
           attempts: attempts.length + 1,

@@ -30,6 +30,7 @@ import {
   type HarnessUsage,
   type NodeExecutionRequest,
   type NodeExecutionResult,
+  type NodeExecutionSuccessKind,
   type NodeOutcome,
   type NodeOutcomeKind,
   type NoProgressSignature,
@@ -132,11 +133,21 @@ function checkpoint(): AttemptCheckpoint {
   });
 }
 
-function executionResult(outcomeValue: NodeOutcome): NodeExecutionResult {
+function executionResult(
+  outcomeValue: NodeOutcome,
+  successKind?: NodeExecutionSuccessKind,
+): NodeExecutionResult {
   return Object.freeze({
     attemptId: ATTEMPT_ID,
     nodeId: NODE_ID,
     outcome: outcomeValue,
+    successKind:
+      successKind ??
+      (outcomeValue.kind === "succeeded"
+        ? outcomeValue.revision !== undefined
+          ? "commit"
+          : "no_change"
+        : undefined),
     transcript: Object.freeze({ firstSequence: 0n, lastSequence: 0n, chunkCount: 0 }),
     checkpoints: Object.freeze({ initial: checkpoint(), final: checkpoint() }),
     contextDigest: CONTEXT_DIGEST,
@@ -281,16 +292,24 @@ type ScriptedRun =
 class FakeExecutionCoordinator implements ExecutionCoordinator {
   runCount = 0;
   readonly nodeIds: TaskNodeId[] = [];
+  readonly runNodeOptions: (Readonly<{ deferOutcomeRecording?: boolean }> | undefined)[] = [];
+  /** Every `recordDeferredOutcome` call, in order — asserts the P0 invariant: this must be
+   * called if and only if the repair attempt actually reached "repaired". */
+  readonly recordedDeferredOutcomes: NodeExecutionResult[] = [];
   readonly #script: readonly ScriptedRun[];
 
   constructor(script: readonly ScriptedRun[]) {
     this.#script = script;
   }
 
-  runNode(request: NodeExecutionRequest): Promise<NodeExecutionResult> {
+  runNode(
+    request: NodeExecutionRequest,
+    options?: Readonly<{ deferOutcomeRecording?: boolean }>,
+  ): Promise<NodeExecutionResult> {
     const entry = this.#script[this.runCount];
     this.runCount += 1;
     this.nodeIds.push(request.context.nodeId);
+    this.runNodeOptions.push(options);
     if (entry === undefined) {
       return Promise.reject(new Error("FakeExecutionCoordinator script exhausted"));
     }
@@ -302,6 +321,11 @@ class FakeExecutionCoordinator implements ExecutionCoordinator {
 
   interrupt(): Promise<NodeExecutionResult> {
     return Promise.reject(new Error("FakeExecutionCoordinator.interrupt not used"));
+  }
+
+  recordDeferredOutcome(_request: NodeExecutionRequest, result: NodeExecutionResult): Promise<void> {
+    this.recordedDeferredOutcomes.push(result);
+    return Promise.resolve();
   }
 
   resumeFromCheckpoint(): Promise<NodeExecutionResult> {
@@ -523,6 +547,49 @@ describe("repair coordinator", () => {
     expect(h.coordinator.runCount).toBe(2);
     expect(h.coordinator.nodeIds).toEqual([NODE_ID, NODE_ID]);
     expect(h.gateRunner.runCount).toBe(2);
+    // P0 (review #27): every attempt defers recording to the repair coordinator
+    // itself, and only the gate-passing attempt is ever durably recorded.
+    expect(h.coordinator.runNodeOptions).toEqual([
+      { deferOutcomeRecording: true },
+      { deferOutcomeRecording: true },
+    ]);
+    expect(h.coordinator.recordedDeferredOutcomes).toHaveLength(1);
+    expect(h.coordinator.recordedDeferredOutcomes[0]?.outcome).toBe(fixed);
+  });
+
+  it("never records a harness-succeeded outcome whose gate fails, even through escalation", async () => {
+    // Every attempt: the harness reports "succeeded" (a naive coordinator would
+    // record the node succeeded on each one), but the gate fails every time, so
+    // the node must never be visible as `succeeded` and must exhaust the budget
+    // into escalation instead of leaking an ungated success.
+    const succeededButUngated = outcome("succeeded", "looks done");
+    const h = harness(
+      [
+        { kind: "result", result: executionResult(succeededButUngated) },
+        { kind: "result", result: executionResult(succeededButUngated) },
+      ],
+      [[receipt("failed", 1)], [receipt("failed", 2)]],
+      [status(HEAD_1, "p1", "d1"), status(HEAD_1, "p1", "d1"), status(HEAD_1, "p1", "d1")],
+    );
+
+    const result = await h.repair.attemptRepair({
+      ...repairInput(),
+      gates: gateRunRequest(),
+      ceiling: 2,
+    });
+
+    expect(result.status).toBe("escalated");
+    // The invariant this P0 protects: a harness "succeeded" outcome whose gate
+    // failed is NEVER durably recorded, on any attempt, even once the budget is
+    // exhausted and the node is escalated for human attention. Pre-fix, the
+    // execution coordinator recorded the node `succeeded` unconditionally
+    // inside `runNode` itself, before this repair coordinator's gate result was
+    // known — this assertion is the exact case that exposed.
+    expect(h.coordinator.recordedDeferredOutcomes).toHaveLength(0);
+    expect(h.coordinator.runNodeOptions).toEqual([
+      { deferOutcomeRecording: true },
+      { deferOutcomeRecording: true },
+    ]);
   });
 
   it("escalates with budget_exhausted after distinct failures reach the ceiling", async () => {
