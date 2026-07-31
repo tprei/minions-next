@@ -474,3 +474,107 @@ describe("revset domain: filterBindings topology", () => {
     ).toThrow();
   });
 });
+
+describe("revset manager: reviewHeaders", () => {
+  /**
+   * A runner that returns change ids for `log` and configurable interdiff output.
+   * `capturedArgs`, when supplied, records every `interdiff` invocation's argv so tests
+   * can assert on exactly what was passed to jj (e.g. that `--summary` is no longer used).
+   */
+  function reviewRunner(
+    changeIds: readonly string[],
+    interdiffOutput = "",
+    capturedArgs?: string[][],
+  ): RevsetJjRunner {
+    return (args) => {
+      if (args[0] === "interdiff") {
+        capturedArgs?.push([...args]);
+        return Promise.resolve<RevsetJjRunResult>({
+          exitCode: 0,
+          stdout: interdiffOutput,
+          stderr: "",
+        });
+      }
+      return Promise.resolve<RevsetJjRunResult>({
+        exitCode: 0,
+        stdout: `${changeIds.join("\n")}\n`,
+        stderr: "",
+      });
+    };
+  }
+
+  async function upsertReviewBindings(): Promise<void> {
+    if (temporary === undefined) throw new Error("test database not initialized");
+    const store = createSqliteVcsChangeBindingStore({ database: temporary.database });
+    // GRANDCHILD: needs interdiff (commits differ, rewrite generation 1).
+    await store.upsertBinding(
+      bindingA(GRANDCHILD_NODE, {
+        currentCommitId: commit(31),
+        lastReviewedCommitId: commit(3),
+        rewriteGeneration: 1,
+      }),
+    );
+    // LEAF: needs interdiff (commits differ, same generation).
+    await store.upsertBinding(
+      bindingA(LEAF_NODE, {
+        currentCommitId: commit(41),
+        lastReviewedCommitId: commit(4),
+      }),
+    );
+  }
+
+  function reviewManager(interdiffOutput = "", capturedArgs?: string[][]) {
+    if (temporary === undefined) throw new Error("test database not initialized");
+    return createRevsetManager({
+      jjBinaryPath: "/nonexistent/jj",
+      workingCopyPath: "/nonexistent/repo",
+      bindingStore: createSqliteVcsChangeBindingStore({ database: temporary.database }),
+      runJj: reviewRunner(TREE_A_CHANGES, interdiffOutput, capturedArgs),
+    });
+  }
+
+  it("classifies fresh and never_reviewed from binding fields alone", async () => {
+    // beforeEach already seeded ROOT (fresh) and SIBLING (never_reviewed).
+    const headers = await reviewManager().reviewHeaders(TREE_A);
+    const byNode = new Map(headers.map((h) => [String(h.nodeId), h]));
+    expect(byNode.get(String(ROOT_NODE))?.freshness).toBe("fresh");
+    expect(byNode.get(String(SIBLING_NODE))?.freshness).toBe("never_reviewed");
+    expect(byNode.get(String(ROOT_NODE))?.contentChangedSinceReview).toBe(false);
+    // Neither classification runs jj interdiff, so there is no diff body to carry.
+    expect(byNode.get(String(ROOT_NODE))?.interdiffContent).toBeUndefined();
+    expect(byNode.get(String(SIBLING_NODE))?.interdiffContent).toBeUndefined();
+  });
+
+  it("classifies ancestry_only when interdiff is empty (restack) and carries no diff content", async () => {
+    await upsertReviewBindings();
+    const headers = await reviewManager("").reviewHeaders(TREE_A);
+    const byNode = new Map(headers.map((h) => [String(h.nodeId), h]));
+    expect(byNode.get(String(GRANDCHILD_NODE))?.freshness).toBe("ancestry_only");
+    expect(byNode.get(String(GRANDCHILD_NODE))?.contentChangedSinceReview).toBe(false);
+    // The interdiff ran but found nothing: no diff body left to show the reviewer.
+    expect(byNode.get(String(GRANDCHILD_NODE))?.interdiffContent).toBeUndefined();
+  });
+
+  it("classifies stale_content when interdiff is non-empty, drops --summary, and carries the full diff body", async () => {
+    await upsertReviewBindings();
+    const diff =
+      "diff --git a/src/handler.ts b/src/handler.ts\n" +
+      "--- a/src/handler.ts\n" +
+      "+++ b/src/handler.ts\n" +
+      "@@ -1,3 +1,4 @@\n" +
+      " export function handler() {\n" +
+      '+  console.log("reviewed");\n' +
+      "   return true;\n" +
+      " }\n";
+    const capturedArgs: string[][] = [];
+    const headers = await reviewManager(diff, capturedArgs).reviewHeaders(TREE_A);
+    const byNode = new Map(headers.map((h) => [String(h.nodeId), h]));
+    expect(byNode.get(String(LEAF_NODE))?.freshness).toBe("stale_content");
+    expect(byNode.get(String(LEAF_NODE))?.contentChangedSinceReview).toBe(true);
+    // The full interdiff body is captured and carried on the header — not discarded, and
+    // not a --summary (one line per changed file) list.
+    expect(byNode.get(String(LEAF_NODE))?.interdiffContent).toBe(diff);
+    expect(capturedArgs.length).toBeGreaterThan(0);
+    expect(capturedArgs.every((call) => !call.includes("--summary"))).toBe(true);
+  });
+});

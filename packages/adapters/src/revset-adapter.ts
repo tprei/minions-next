@@ -27,10 +27,13 @@ import { stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 import {
+  buildReviewHeader,
   buildRevsetExpression,
+  classifyReviewFreshness,
   filterBindings,
   type RevsetQuery,
   type RevsetResult,
+  type ReviewHeader,
   type TaskNodeId,
   type TaskTreeId,
   type VcsChangeBinding,
@@ -119,6 +122,8 @@ export interface RevsetManager {
   execute(query: RevsetQuery): Promise<RevsetResult>;
   /** Per-node descendant impact for the tree (UI stack-impact view). */
   stackImpact(treeId: TaskTreeId): Promise<readonly NodeImpact[]>;
+  /** Per-node review-header projection: what changed since last review (PR 48). */
+  reviewHeaders(treeId: TaskTreeId): Promise<readonly ReviewHeader[]>;
   /** Per-node landing readiness for the tree (ready-to-land view). */
   readyToLand(treeId: TaskTreeId): Promise<readonly NodeReadiness[]>;
 }
@@ -334,10 +339,36 @@ export function createRevsetManager(options: RevsetManagerOptions): RevsetManage
       });
     });
   }
+  async function reviewHeadersImpl(treeId: TaskTreeId): Promise<readonly ReviewHeader[]> {
+    const treeBindings = await bindingStore.listForTree(treeId);
+    const headers: ReviewHeader[] = [];
+    for (const binding of treeBindings) {
+      const base = classifyReviewFreshness(binding);
+      if (base !== "needs_interdiff") {
+        headers.push(buildReviewHeader(binding, true));
+        continue;
+      }
+      // Commits differ — run jj interdiff to check whether content actually changed. No
+      // `--summary`: that flag only lists one line per changed file and discards the actual
+      // diff body, which the reviewer needs (PR 48). Empty stdout = ancestry-only (a restack
+      // with no file content change); non-empty stdout is the full diff, carried on the header.
+      const from = binding.lastReviewedCommitId;
+      const to = binding.currentCommitId;
+      if (from === undefined) {
+        headers.push(buildReviewHeader(binding, true));
+        continue;
+      }
+      const result = await run(["interdiff", "--from", from, "--to", to]);
+      const interdiffEmpty = result.stdout.trim().length === 0;
+      headers.push(buildReviewHeader(binding, interdiffEmpty, result.stdout));
+    }
+    return Object.freeze(headers);
+  }
 
   return Object.freeze({
     execute,
     stackImpact: (treeId: TaskTreeId) => serialized(() => stackImpactImpl(treeId)),
+    reviewHeaders: (treeId: TaskTreeId) => serialized(() => reviewHeadersImpl(treeId)),
     readyToLand: (treeId: TaskTreeId) => serialized(() => readyToLandImpl(treeId)),
   });
 }

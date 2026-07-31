@@ -13,6 +13,7 @@ service TreeService {
   rpc ProposePlan(ProposePlanRequest) returns (ProposePlanResponse);
   rpc RepairPlan(RepairPlanRequest) returns (RepairPlanResponse);
   rpc ApprovePlan(ApprovePlanRequest) returns (ApprovePlanResponse);
+  rpc GetReviewHeaders(GetReviewHeadersRequest) returns (GetReviewHeadersResponse);
 }
 
 enum PlanRevisionState {
@@ -48,6 +49,14 @@ enum VcsConflictState {
   VCS_CONFLICT_STATE_CLEAN = 1;
   VCS_CONFLICT_STATE_CONFLICT = 2;
   VCS_CONFLICT_STATE_RESOLVED = 3;
+}
+
+enum ReviewFreshness {
+  REVIEW_FRESHNESS_UNSPECIFIED = 0;
+  REVIEW_FRESHNESS_NEVER_REVIEWED = 1;
+  REVIEW_FRESHNESS_FRESH = 2;
+  REVIEW_FRESHNESS_ANCESTRY_ONLY = 3;
+  REVIEW_FRESHNESS_STALE_CONTENT = 4;
 }
 
 message TreeBudget {
@@ -88,6 +97,16 @@ message VcsChangeBinding {
     (buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"
   ];
   VcsConflictState conflict_state = 9 [(buf.validate.field).enum.defined_only = true];
+}
+
+message ReviewHeader {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  string logical_change_id = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  uint32 rewrite_generation = 3;
+  optional string parent_change_id = 4 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  bool content_changed_since_review = 5;
+  ReviewFreshness freshness = 6 [(buf.validate.field).enum.defined_only = true];
+  optional string interdiff_content = 7 [(buf.validate.field).string.max_len = 1048576];
 }
 
 message ProposedNode {
@@ -315,4 +334,12 @@ message ApprovePlanRequest {
 
 message ApprovePlanResponse {
   TaskTree tree = 1 [(buf.validate.field).required = true];
+}
+
+message GetReviewHeadersRequest {
+  string tree_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetReviewHeadersResponse {
+  repeated ReviewHeader headers = 1;
 }

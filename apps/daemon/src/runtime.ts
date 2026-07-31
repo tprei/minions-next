@@ -86,6 +86,7 @@ import {
 
 import type { StructuredLogger } from "./logger.js";
 import { startDaemonServer, type RunningDaemonServer } from "./server.js";
+import type { TreeServiceRevsetOptions } from "./tree-service.js";
 
 export type DaemonStartupErrorCode = "blob_reconciliation_failed" | "auth_runtime_failed";
 
@@ -530,6 +531,7 @@ export async function startDaemonRuntime(
         : undefined,
     });
     let jjCentralRepo: Readonly<{ manager: JjCentralRepoManager }> | undefined;
+    let revset: TreeServiceRevsetOptions | undefined;
     if (options.jjCapability?.enabled) {
       // Fail-closed (GIT-14): the operator enabled jj gating, so the pinned jj binary MUST be
       // available before the daemon will accept repository registrations. An unavailable probe
@@ -542,14 +544,25 @@ export async function startDaemonRuntime(
           `jj capability unavailable (${probe.failureCode}); cannot enable repository jj gating: ${probe.message}`,
         );
       }
+      const jjReposRoot = join(home, "jj-repos");
       jjCentralRepo = {
         manager: createJjCentralRepoManager({
           jjBinaryPath: probe.binaryPath,
-          hostRoot: join(home, "jj-repos"),
+          hostRoot: jjReposRoot,
           clock: options.clock,
           ids: options.ids,
         }),
       };
+      // The review-header projection (PR 48) needs the host database to persist its
+      // node<->change bindings; supervisor mode has no host database, so revset stays
+      // unconfigured there (mirroring jjCentralRepo, which is likewise unused for supervisor).
+      if (hostDatabase !== undefined) {
+        revset = {
+          jjBinaryPath: probe.binaryPath,
+          hostRoot: jjReposRoot,
+          bindingStore: createSqliteVcsChangeBindingStore({ database: hostDatabase }),
+        };
+      }
       options.logger.log("info", "jj_central_repo_enabled", {
         jj_binary: probe.binaryPath,
         jj_version: probe.version,
@@ -577,6 +590,7 @@ export async function startDaemonRuntime(
           ...(jjCentralRepo !== undefined ? { jjCentralRepo } : {}),
         },
         hostRegistry: requireRegistry(hostRegistry),
+        ...(revset !== undefined ? { revset } : {}),
       });
     } else if (options.mode === "host") {
       server = await startDaemonServer({
@@ -598,6 +612,7 @@ export async function startDaemonRuntime(
           clock: options.clock,
           ...(jjCentralRepo !== undefined ? { jjCentralRepo } : {}),
         },
+        ...(revset !== undefined ? { revset } : {}),
       });
     } else {
       server = await startDaemonServer({

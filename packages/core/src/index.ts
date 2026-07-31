@@ -15,6 +15,7 @@ export * from "./vcs-backend.js";
 export * from "./stack-parentage.js";
 export * from "./revset.js";
 export * from "./vcs-change-binding.js";
+export * from "./review-header.js";
 export * from "./fixup.js";
 export * from "./revision-gates.js";
 export * from "./node-split.js";

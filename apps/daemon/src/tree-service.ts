@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import {
   create,
   type DescMessage,
@@ -8,16 +10,20 @@ import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { createValidator } from "@bufbuild/protovalidate";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import {
+  createRevsetManager,
   GateProfileError,
   loadGateProfile,
   PlanRegistryError,
   RepositoryRegistryError,
   type ConflictState,
+  RevsetManagerError,
   type HostGateMinimum,
   type PlanAttentionRecord,
   type PlanRegistry,
   type PlanRevisionRecord,
   type RepositoryRegistry,
+  type RevsetJjRunner,
+  type RevsetManager,
   type TaskNodeRecord,
   type TreeRecord,
   type TreeSummaryRecord,
@@ -29,6 +35,7 @@ import {
   ArtifactOutputContractSchema,
   CreateTreeResponseSchema,
   ImplementationOutputContractSchema,
+  GetReviewHeadersResponseSchema,
   GetTreeResponseSchema,
   ListTreesResponseSchema,
   NodeBudgetSchema,
@@ -36,6 +43,8 @@ import {
   PlanRevisionSchema,
   ProposePlanResponseSchema,
   RepairPlanResponseSchema,
+  ReviewFreshness,
+  ReviewHeaderSchema,
   TaskNodeSchema,
   TaskTreeSchema,
   TreeBudgetSchema,
@@ -49,10 +58,31 @@ import {
   timestampFromEpochMilliseconds,
   taskTreeId,
   type Clock,
+  type ReviewFreshness as ReviewFreshnessDomain,
+  type ReviewHeader,
   type VcsChangeBindingStore,
 } from "@minions/core";
 
 const responseValidator = createValidator();
+
+/**
+ * Optional jj revset capability for the review-header projection (PR 48). When present,
+ * `getReviewHeaders` resolves a per-repository {@link RevsetManager} (cached across calls, so
+ * its internal jj-invocation serialization holds across requests instead of letting concurrent
+ * RPCs interleave on the shared jj op log) bound to `join(hostRoot, repositoryId)` — the same
+ * central jj repo path `JjCentralRepoManager` bootstraps. Omitted, `getReviewHeaders` fails
+ * closed with `FailedPrecondition`.
+ */
+export type TreeServiceRevsetOptions = Readonly<{
+  /** Absolute path to the pinned, digest-verified jj binary (from ensureJjCapability). */
+  jjBinaryPath: string;
+  /** Absolute host-local root under which per-repository central jj repos live. */
+  hostRoot: string;
+  /** Durable node<->change bindings (PR 29); read tree-scoped by the review projection. */
+  bindingStore: VcsChangeBindingStore;
+  /** Test seam: overrides the jj subprocess runner (see RevsetManagerOptions.runJj). */
+  runJj?: RevsetJjRunner;
+}>;
 
 export type TreeServiceOptions = Readonly<{
   planRegistry: PlanRegistry;
@@ -60,9 +90,36 @@ export type TreeServiceOptions = Readonly<{
   vcsChangeBindingStore: VcsChangeBindingStore;
   repositoryRegistry?: RepositoryRegistry;
   hostMinimum?: HostGateMinimum;
+  revset?: TreeServiceRevsetOptions;
 }>;
 
 export function registerTreeService(router: ConnectRouter, options: TreeServiceOptions): void {
+  // Cached per repository: a RevsetManager serializes its own jj invocations against one
+  // working copy, so reusing the same instance across calls (rather than constructing a
+  // fresh one per request) preserves that serialization instead of letting concurrent RPCs
+  // interleave on the shared jj op log.
+  const revsetManagers = new Map<string, RevsetManager>();
+  function revsetManagerForRepository(repoId: string): RevsetManager {
+    const revset = options.revset;
+    if (revset === undefined) {
+      throw new ConnectError(
+        "jj revset capability is not enabled on this daemon",
+        Code.FailedPrecondition,
+      );
+    }
+    let manager = revsetManagers.get(repoId);
+    if (manager === undefined) {
+      manager = createRevsetManager({
+        jjBinaryPath: revset.jjBinaryPath,
+        workingCopyPath: join(revset.hostRoot, repoId),
+        bindingStore: revset.bindingStore,
+        ...(revset.runJj === undefined ? {} : { runJj: revset.runJj }),
+      });
+      revsetManagers.set(repoId, manager);
+    }
+    return manager;
+  }
+
   router.service(TreeService, {
     async createTree(request) {
       try {
@@ -157,6 +214,20 @@ export function registerTreeService(router: ConnectRouter, options: TreeServiceO
         return validateResponse(
           ApprovePlanResponseSchema,
           create(ApprovePlanResponseSchema, { tree: toTreeMessage(tree, bindings) }),
+        );
+      } catch (error) {
+        throw toConnectError(error);
+      }
+    },
+    async getReviewHeaders(request) {
+      try {
+        const treeId = parseTreeId(request.treeId);
+        const tree = options.planRegistry.get(treeId);
+        const manager = revsetManagerForRepository(tree.repositoryId);
+        const headers = await manager.reviewHeaders(treeId);
+        return validateResponse(
+          GetReviewHeadersResponseSchema,
+          create(GetReviewHeadersResponseSchema, { headers: headers.map(toReviewHeaderMessage) }),
         );
       } catch (error) {
         throw toConnectError(error);
@@ -301,6 +372,35 @@ function toTreeSummaryMessage(summary: TreeSummaryRecord) {
   });
 }
 
+function toReviewHeaderMessage(header: ReviewHeader) {
+  return create(ReviewHeaderSchema, {
+    nodeId: header.nodeId,
+    logicalChangeId: header.logicalChangeId,
+    rewriteGeneration: header.rewriteGeneration,
+    ...(header.parentChangeId === undefined ? {} : { parentChangeId: header.parentChangeId }),
+    contentChangedSinceReview: header.contentChangedSinceReview,
+    freshness: toReviewFreshnessMessage(header.freshness),
+    ...(header.interdiffContent === undefined ? {} : { interdiffContent: header.interdiffContent }),
+  });
+}
+
+function toReviewFreshnessMessage(freshness: ReviewFreshnessDomain): ReviewFreshness {
+  switch (freshness) {
+    case "never_reviewed":
+      return ReviewFreshness.NEVER_REVIEWED;
+    case "fresh":
+      return ReviewFreshness.FRESH;
+    case "ancestry_only":
+      return ReviewFreshness.ANCESTRY_ONLY;
+    case "stale_content":
+      return ReviewFreshness.STALE_CONTENT;
+    case "needs_interdiff":
+      // buildReviewHeader always resolves needs_interdiff to ancestry_only/stale_content
+      // before returning a ReviewHeader; this pre-resolution state must never reach here.
+      throw new ConnectError("review header carries an unresolved freshness state", Code.Internal);
+  }
+}
+
 function timestampMessage(milliseconds: number) {
   const value = BigInt(milliseconds);
   return create(TimestampSchema, {
@@ -330,6 +430,10 @@ function toConnectError(error: unknown): ConnectError {
   }
   if (error instanceof RepositoryRegistryError) {
     return new ConnectError(error.message, Code.NotFound, undefined, undefined, error);
+  }
+  if (error instanceof RevsetManagerError) {
+    const code = error.code === "invalid_options" ? Code.InvalidArgument : Code.FailedPrecondition;
+    return new ConnectError(error.message, code, undefined, undefined, error);
   }
   if (error instanceof PlanRegistryError) {
     switch (error.code) {
