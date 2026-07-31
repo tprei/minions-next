@@ -6,6 +6,7 @@ import {
   createEventCommitWaiter,
   createPlanRegistry,
   createSqliteCommandStore,
+  createSqliteRecoveryStore,
   createSqliteSteeringCommandStore,
   createSqliteVcsChangeBindingStore,
 } from "@minions/adapters";
@@ -21,6 +22,7 @@ import {
   timestampFromEpochMilliseconds,
   type ArtifactRegistry,
   type ContentBlobStore,
+  type RecoveryGateProfile,
 } from "@minions/core";
 import { SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
@@ -45,6 +47,11 @@ import {
 const NOW = timestampFromEpochMilliseconds(1_700_000_000_000);
 const HOST_ID = hostId("01900000-0000-7000-8000-0000000000f1");
 const INSTANCE_ID = "01900000-0000-7000-8000-0000000000f2";
+const RECOVERY_TEST_GATE_PROFILE: RecoveryGateProfile = {
+  allowedKinds: ["restart"],
+  requiredApprovals: 1,
+  maxGrantDurationMs: 900_000,
+};
 
 type Fixture = Readonly<{
   temporary: TemporarySqliteDatabase;
@@ -141,6 +148,10 @@ async function createFixture(options: { withRemoteAccess: boolean }): Promise<Fi
     steeringStore,
     artifactRegistry,
     blobStore,
+    recoveryStore: createSqliteRecoveryStore({ database }),
+    recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+    recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f0"]),
+    recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
     system: {
       serverVersion: "0.0.0",
       health: create(GetHealthResponseSchema, {
