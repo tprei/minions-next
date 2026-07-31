@@ -1,4 +1,5 @@
 export { createNodeGitProcess } from "./git-process.js";
+export { createNativeGitVcsBackend } from "./vcs-backend-native-git.js";
 export { BlobCorruptionError, createFileContentBlobStore } from "./blob/file-content-blob-store.js";
 export type {
   BlobCorruptionErrorCode,
