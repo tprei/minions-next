@@ -4,7 +4,6 @@ import {
   AnswerNodeCommandSchema,
   EmptyNodeCommandSchema,
   GetTreeRequestSchema,
-  NodeCommandDeliveryState,
   NodeCommandPayloadSchema,
   PlanNodeMode,
   QueueNodeCommandRequestSchema,
@@ -30,6 +29,8 @@ import {
   generateUuidV7,
   type ApiClients,
 } from "../../data/index.js";
+import { EvidencePanel } from "./EvidencePanel.js";
+import { useEvidence } from "./use-evidence.js";
 import { useEventClient } from "../../data/use-event-client.js";
 import { describeConnectError, type TypedError } from "../home/connect-error.js";
 import { shortId } from "../home/labels.js";
@@ -103,6 +104,12 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
     }
     return undefined;
   }, [projection.nodeAttention, nodeId]);
+  const evidenceSections = useEvidence({
+    node: fetchedNode,
+    commands,
+    openAttention: openAttention !== undefined ? [openAttention] : [],
+    connectionState,
+  });
 
   async function handleAction(action: SteeringAction): Promise<void> {
     setSubmitting(true);
@@ -193,13 +200,6 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
       ) : null}
 
       {(() => {
-        const commandCount = commands.length;
-        const appliedCount = commands.filter(
-          (c) => c.deliveryState === NodeCommandDeliveryState.APPLIED,
-        ).length;
-        const failedCount = commands.filter(
-          (c) => c.deliveryState === NodeCommandDeliveryState.FAILED,
-        ).length;
         const tabItems: TabItem[] = [
           {
             value: "console",
@@ -255,30 +255,10 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
             value: "evidence",
             label: "Evidence",
             content: (
-              <div className="mn-node-console__evidence" data-testid="evidence-panel">
-                <Fact>
-                  commands: {String(commandCount)} ({String(appliedCount)} applied,{" "}
-                  {String(failedCount)} failed)
-                </Fact>
-                {fetchedNode?.vcsChangeBinding !== undefined ? (
-                  <>
-                    <Fact title={fetchedNode.vcsChangeBinding.currentCommitId}>
-                      commit {shortId(fetchedNode.vcsChangeBinding.currentCommitId)}
-                    </Fact>
-                    {fetchedNode.vcsChangeBinding.bookmark !== undefined ? (
-                      <Fact>branch: {fetchedNode.vcsChangeBinding.bookmark}</Fact>
-                    ) : null}
-                    <Fact>
-                      rewrite generation: {String(fetchedNode.vcsChangeBinding.rewriteGeneration)}
-                    </Fact>
-                  </>
-                ) : (
-                  <Commentary>No VCS change binding recorded for this node.</Commentary>
-                )}
-                <Commentary>
-                  Source: projection store (live) + GetTree. Freshness: {connectionState}.
-                </Commentary>
-              </div>
+              <EvidencePanel
+                sections={evidenceSections}
+                emptyMessage="No evidence recorded for this node yet."
+              />
             ),
           },
         ];
