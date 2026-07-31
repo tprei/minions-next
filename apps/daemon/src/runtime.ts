@@ -173,6 +173,7 @@ export type DaemonRuntimeOptions = Readonly<{
    */
   nodeExecution?: NodeExecutionRuntimeOptions;
 }>;
+
 export type ProviderAdmissionRuntimeOptions = Readonly<{
   enabled: true;
   /** Unvalidated policy config; validated (fail-closed) at construction. */
