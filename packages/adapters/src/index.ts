@@ -767,3 +767,42 @@ export type {
   ProductionFixupWorkingCopy,
   ProductionFixupWorkingCopyErrorCode,
 } from "./fixup-working-copy.js";
+
+// PR 40 — plan repair via split (core domain re-export + coordinator).
+export { computeResultingTopology, previewSplit, validateSplitProposal } from "@minions/core";
+export type {
+  AssignedChildIdentity,
+  ExistingTreeNode,
+  HunkRange,
+  SplitPlan,
+  SplitPreview,
+  SplitProposal,
+  SplitProposalContext,
+  SplitProposalVerdict,
+  SplitResultNode,
+  SplitSegment,
+  SplitSegmentPreview,
+} from "@minions/core";
+export { createSplitCoordinator, SplitError } from "./split-coordinator.js";
+export type {
+  ExecuteSplitOptions,
+  SplitChildRecord,
+  SplitCoordinator,
+  SplitCoordinatorOptions,
+  SplitErrorCode,
+  SplitLogger,
+  SplitPlanRegistry,
+  SplitRecordInput,
+  SplitRecordResult,
+  SplitSegmentReceipt,
+  SplitWorkingCopy,
+} from "./split-coordinator.js";
+
+export {
+  createProductionSplitWorkingCopy,
+  ProductionSplitWorkingCopyError,
+} from "./split-working-copy.js";
+export type {
+  ProductionSplitWorkingCopy,
+  ProductionSplitWorkingCopyErrorCode,
+} from "./split-working-copy.js";
