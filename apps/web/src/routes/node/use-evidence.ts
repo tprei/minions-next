@@ -24,7 +24,7 @@ import {
  * than mocked.
  */
 
-export interface EvidenceFact {
+interface EvidenceFact {
   readonly label: string;
   readonly value: string;
   readonly title?: string;
