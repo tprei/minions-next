@@ -34,6 +34,7 @@ import {
   taskTreeId,
   timestampFromEpochMilliseconds,
   type DomainPorts,
+  type RecoveryGateProfile,
   type VcsChangeBinding,
 } from "@minions/core";
 import {
@@ -43,6 +44,7 @@ import {
   createRepositoryRegistry,
   createSqliteArtifactRegistry,
   createSqliteCommandStore,
+  createSqliteRecoveryStore,
   createSqliteSteeringCommandStore,
   createSqliteVcsChangeBindingStore,
   type RepositoryInspection,
@@ -169,6 +171,12 @@ const doctor = create(RunDoctorResponseSchema, {
 });
 
 const noOpNotifier = Object.freeze({ commandCommitted: () => undefined });
+
+const RECOVERY_TEST_GATE_PROFILE: RecoveryGateProfile = {
+  allowedKinds: ["restart"],
+  requiredApprovals: 1,
+  maxGrantDurationMs: 900_000,
+};
 
 type ReviewHeadersFixture = Readonly<{
   temporary: TemporarySqliteDatabase;
@@ -308,6 +316,10 @@ async function createFixture(
     steeringStore,
     artifactRegistry,
     blobStore,
+    recoveryStore: createSqliteRecoveryStore({ database }),
+    recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+    recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f0"]),
+    recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
     vcsChangeBindingStore: bindingStore,
     system: {
       serverVersion: "0.0.0",
