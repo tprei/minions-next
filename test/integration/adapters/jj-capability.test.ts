@@ -1,6 +1,15 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import { appendFile, chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

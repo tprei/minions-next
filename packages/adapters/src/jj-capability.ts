@@ -16,7 +16,17 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
@@ -630,7 +640,6 @@ async function assertUnchangedIdentity(path: string, expected: FileIdentity): Pr
     );
   }
 }
-
 
 async function fileExists(path: string): Promise<boolean> {
   try {
