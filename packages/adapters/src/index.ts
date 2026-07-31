@@ -209,3 +209,16 @@ export {
   PodmanSandboxError,
 } from "./podman-sandbox.js";
 export type { PodmanSandboxErrorCode, PodmanSandboxOptions } from "./podman-sandbox.js";
+export {
+  createOmpAcpHarnessAdapter,
+  OmpAcpAdapterError,
+  buildSessionNewParams,
+} from "./omp-acp-adapter.js";
+export type {
+  AcpFrame,
+  AcpRpcError,
+  DecodeAcpFrameResult,
+  OmpAcpAdapterOptions,
+  OmpAcpAdapterErrorCode,
+} from "./omp-acp-adapter.js";
+export { decodeAcpFrame, normalizeAcpNotification } from "./omp-acp-adapter.js";
