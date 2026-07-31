@@ -765,7 +765,16 @@ describe("SQLite scheduler leases", () => {
            (attempt_id, node_id, durable_harness_id, harness_version, model, reasoning_level,
             capabilities_json, tools_json, security_policy_digest, created_at_ms)
          VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?)`,
-        [lease.attemptId, lease.nodeId, durableHarnessId, "1.0.0", model, "high", policyDigest, START],
+        [
+          lease.attemptId,
+          lease.nodeId,
+          durableHarnessId,
+          "1.0.0",
+          model,
+          "high",
+          policyDigest,
+          START,
+        ],
       );
       transaction.run(
         `INSERT INTO harness_process_leases
@@ -783,9 +792,11 @@ describe("SQLite scheduler leases", () => {
       expect.objectContaining({ leaseId: lease.id, recovered: true, retryScheduled: true }),
     ]);
     expect(
-      row(fixture.database, "SELECT state_kind, released_at_ms FROM harness_process_leases WHERE id = ?", [
-        harnessLeaseId,
-      ]),
+      row(
+        fixture.database,
+        "SELECT state_kind, released_at_ms FROM harness_process_leases WHERE id = ?",
+        [harnessLeaseId],
+      ),
     ).toEqual({ state_kind: "released", released_at_ms: BigInt(START + 220) });
     expect(
       row(fixture.database, "SELECT state_kind FROM attempts WHERE id = ?", [lease.attemptId]),
@@ -823,7 +834,16 @@ describe("SQLite scheduler leases", () => {
            (attempt_id, node_id, durable_harness_id, harness_version, model, reasoning_level,
             capabilities_json, tools_json, security_policy_digest, created_at_ms)
          VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?)`,
-        [lease.attemptId, lease.nodeId, durableHarnessId, "1.0.0", model, "high", policyDigest, START],
+        [
+          lease.attemptId,
+          lease.nodeId,
+          durableHarnessId,
+          "1.0.0",
+          model,
+          "high",
+          policyDigest,
+          START,
+        ],
       );
       transaction.run(
         `INSERT INTO harness_process_leases
@@ -840,9 +860,11 @@ describe("SQLite scheduler leases", () => {
       evidenceId: evidenceId(uuid(0xc020)),
     });
     expect(
-      row(fixture.database, "SELECT state_kind, released_at_ms FROM harness_process_leases WHERE id = ?", [
-        harnessLeaseId,
-      ]),
+      row(
+        fixture.database,
+        "SELECT state_kind, released_at_ms FROM harness_process_leases WHERE id = ?",
+        [harnessLeaseId],
+      ),
     ).toEqual({ state_kind: "released", released_at_ms: BigInt(START + 150) });
     expect(
       row(fixture.database, "SELECT state_kind FROM nodes WHERE id = ?", [lease.nodeId]),
