@@ -22,7 +22,6 @@ export type {
   DaemonRuntimeOptions,
   DaemonStartupErrorCode,
   ProviderAdmissionRuntimeOptions,
-  RemoteAccessRuntimeOptions,
   RunningAuthRuntime,
   RunningDaemonRuntime,
 } from "./runtime.js";

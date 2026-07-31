@@ -141,19 +141,6 @@ export type DaemonRuntimeOptions = Readonly<{
    * daemon behaviour is unchanged.
    */
   providerAdmission?: ProviderAdmissionRuntimeOptions;
-  /**
-   * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing). When
-   * enabled, the daemon constructs a process-lifetime {@link DeviceSessionStore},
-   * shares it between the pairing RPCs and the remote-access interceptor, and binds
-   * every interface instead of loopback only (see `server.ts`'s `remoteAccess` doc for
-   * the full security model). Only meaningful for "local"/"host" mode, which is where
-   * the mutation RPCs a phone session gates actually live; ignored for "supervisor"
-   * mode. Omitted, daemon behaviour is unchanged (REMOTE-01's loopback-only default).
-   */
-  remoteAccess?: RemoteAccessRuntimeOptions;
-}>;
-export type RemoteAccessRuntimeOptions = Readonly<{
-  enabled: true;
 }>;
 export type ProviderAdmissionRuntimeOptions = Readonly<{
   enabled: true;
