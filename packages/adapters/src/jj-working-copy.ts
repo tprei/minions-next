@@ -27,7 +27,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmod, lstat, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
 
@@ -36,10 +36,12 @@ import type {
   GitSha,
   IdGenerator,
   NonEmptyText,
+  SandboxMount,
+  SandboxMountAccess,
   TaskNodeId,
   Timestamp,
 } from "@minions/core";
-import { gitSha, nonEmptyText } from "@minions/core";
+import { gitSha, nonEmptyText, SandboxDeniedError } from "@minions/core";
 import { createNodeGitProcess } from "./git-process.js";
 
 export const JJ_METADATA_DIR = ".jj";
@@ -1093,4 +1095,72 @@ export function createJjWorkingCopyManager(
 export function pathContainsDotJj(path: string): boolean {
   if (typeof path !== "string" || path.length === 0) return false;
   return path.split(/[\\/]/u).some((segment) => segment === JJ_METADATA_DIR);
+}
+
+/**
+ * Build the sandbox mounts for a jj working copy's file tree WITHOUT ever
+ * exposing `.jj`.
+ *
+ * P0 fix (review #29): the accepted-as-"safe" pattern —
+ * `{ sourcePath: workingCopy.workingCopyPath, targetPath: "/workspace" }` as a
+ * SINGLE mount — binds the whole working-copy directory, and `.jj` lives
+ * directly inside it on the host, so it is fully reachable at
+ * `/workspace/.jj` in the guest. `pathContainsDotJj`/`validateSandboxPolicy`
+ * only reject a mount whose SOURCE or TARGET *string* contains a `.jj`
+ * segment — neither `workingCopyPath` nor `/workspace` does, so that check
+ * never fires. Masking `.jj` by inspecting path strings cannot work when the
+ * mount source is a directory whose *contents* include `.jj`.
+ *
+ * The fix masks at the mount/bind layer instead: bind-mount each of the
+ * working copy's top-level entries INDIVIDUALLY, skip `.jj`, and never
+ * construct (or accept) a mount for the working-copy root itself. `.jj` is
+ * never a source or target of any returned mount, so a sandbox built from
+ * exactly this list structurally cannot reach it — regardless of whether a
+ * caller also inspects path strings. Every remaining top-level entry is
+ * bind-mounted directly (not copied/mirrored): sandbox reads and writes land
+ * on the SAME files jj tracks, so `status`/`diff`/`commit` see them exactly
+ * as before, with no host-side mirror, sync step, or staleness window.
+ *
+ * Known, accepted limitation: a BRAND-NEW top-level entry a sandboxed process
+ * creates directly under the mount target (a sibling of the entries mounted
+ * here, not inside one of them) has no corresponding bind mount and is lost
+ * when the sandbox is destroyed. Callers that need to observe genuinely new
+ * top-level paths must rebuild the mount list (call this again) before the
+ * next sandbox attempt against the same working copy.
+ */
+export async function workspaceSandboxMounts(
+  workingCopyPath: string,
+  targetPath: string,
+  access: SandboxMountAccess,
+): Promise<readonly SandboxMount[]> {
+  const entries = await readdir(workingCopyPath, { withFileTypes: true });
+  const mounts: SandboxMount[] = [];
+  for (const entry of entries) {
+    if (entry.name === JJ_METADATA_DIR) continue;
+    const sourcePath = join(workingCopyPath, entry.name);
+    const mountTargetPath = join(targetPath, entry.name);
+    // Defense in depth beyond the name check above: an entry that is itself a
+    // symlink to (or through) `.jj` — e.g. a top-level entry literally named
+    // something else that resolves onto the metadata directory — would still
+    // expose it once bind-mounted under its own name. Fail closed rather than
+    // silently mount it.
+    const resolved = await realpath(sourcePath);
+    if (pathContainsDotJj(resolved)) {
+      throw new SandboxDeniedError(
+        "symlink_escape",
+        "build_workspace_mounts",
+        `working-copy entry '${entry.name}' resolves through '.jj' (${resolved}); refusing to mount it`,
+        { workingCopyPath, entry: entry.name },
+      );
+    }
+    mounts.push(
+      Object.freeze({
+        kind: "workspace" as const,
+        sourcePath,
+        targetPath: mountTargetPath,
+        access,
+      }),
+    );
+  }
+  return Object.freeze(mounts);
 }

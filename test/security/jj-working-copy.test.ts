@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
@@ -35,6 +35,7 @@ import {
   JjWorkingCopyError,
   createJjWorkingCopyManager,
   pathContainsDotJj,
+  workspaceSandboxMounts,
   type JjWorkingCopyManager,
 } from "../../packages/adapters/src/jj-working-copy.js";
 
@@ -308,7 +309,14 @@ describe("GIT-15 — .jj metadata is never reachable inside a sandbox", () => {
     );
     expect(() => validateSandboxPolicy(targetDotJj)).toThrow(SandboxPolicyError);
 
-    // A policy that mounts ONLY the working-copy file tree (no .jj) is accepted.
+    // NOTE: this only proves `validateSandboxPolicy`'s STRING check doesn't
+    // fire for this path shape (neither `wc.workingCopyPath` nor `/workspace`
+    // contains a literal `.jj` segment) — it does NOT prove `.jj` is
+    // unreachable once mounted, because `wc.workingCopyPath` is a directory
+    // whose CONTENTS include `.jj` on disk (P0, review #29: this exact
+    // single-mount pattern was wrongly treated as "safe"). See
+    // `workspaceSandboxMounts` and the next test for the actual safe
+    // construction.
     const safe = policyWithMounts(
       Object.freeze([
         Object.freeze({
@@ -320,6 +328,42 @@ describe("GIT-15 — .jj metadata is never reachable inside a sandbox", () => {
       ]),
     );
     expect(() => validateSandboxPolicy(safe)).not.toThrow();
+  }, 60_000);
+
+  it("workspaceSandboxMounts masks .jj at the mount/bind layer, not by inspecting path strings", async () => {
+    const central = await bootstrapCentralRepo("jj-wc-mask-");
+    const hostRoot = await makeDirectory("jj-wc-host-mask-");
+    const manager = freshManager(central.centralRepoPath, hostRoot);
+    const wc = await manager.createWorkingCopy(
+      taskNodeId("01900000-0000-7000-8000-000000000ff6"),
+      gitSha(central.baseCommit),
+    );
+
+    // Ground truth: `.jj` genuinely exists inside the working-copy directory on
+    // the host (this is the whole reason the single-mount pattern above is
+    // unsafe — mounting `wc.workingCopyPath` wholesale exposes it).
+    const trueEntries = await readdir(wc.workingCopyPath);
+    expect(trueEntries).toContain(JJ_METADATA_DIR);
+
+    const mounts = await workspaceSandboxMounts(wc.workingCopyPath, "/workspace", "read_write");
+
+    // The fix: no returned mount's source or target ever touches `.jj` ...
+    for (const mount of mounts) {
+      expect(pathContainsDotJj(mount.sourcePath)).toBe(false);
+      expect(pathContainsDotJj(mount.targetPath)).toBe(false);
+    }
+    // ... every OTHER top-level entry is still mounted (nothing legitimate is
+    // dropped) ...
+    const mountedEntryNames = mounts.map((mount) => relative(wc.workingCopyPath, mount.sourcePath));
+    expect(new Set(mountedEntryNames)).toEqual(
+      new Set(trueEntries.filter((name) => name !== JJ_METADATA_DIR)),
+    );
+    // ... and the resulting mount SET passes the existing (unmodified)
+    // validator — this is the actual safe construction, not the single-mount
+    // pattern the previous test exercises.
+    expect(() =>
+      validateSandboxPolicy(policyWithMounts(mounts.map((mount) => ({ ...mount })))),
+    ).not.toThrow();
   }, 60_000);
 
   it("the test sandbox lifecycle rejects a policy that mounts .jj (invalid_policy)", async () => {
