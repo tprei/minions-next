@@ -196,6 +196,24 @@ export type {
   VcsChangeBindingStore,
   VcsChangeBindingStoreErrorCode,
 } from "@minions/core";
+export {
+  buildStackPath,
+  determineBaseBranch,
+  determineBranchName,
+  retargetAfterLanding,
+  shortIdentity,
+  STACK_BRANCH_PREFIX,
+  STACK_NODE_SHORT_LENGTH,
+  STACK_TREE_SHORT_LENGTH,
+  STACK_TRUNK_BRANCH,
+  StackParentageError,
+} from "@minions/core";
+export type {
+  RetargetPlan,
+  StackNode,
+  StackParentageErrorCode,
+  StackPosition,
+} from "@minions/core";
 export { createExecutionCoordinator, ExecutionCoordinatorError } from "./execution-coordinator.js";
 export type {
   ExecutionCoordinatorOptions,
@@ -568,3 +586,8 @@ export type {
   ReviewObservation,
   ReviewState,
 } from "./github-pull-request.js";
+export { createStackParentageManager } from "./stack-parentage-adapter.js";
+export type {
+  StackParentageManager,
+  StackParentageManagerOptions,
+} from "./stack-parentage-adapter.js";

@@ -8,6 +8,7 @@ export * from "./command.js";
 export * from "./domain-error.js";
 export * from "./git.js";
 export * from "./vcs-backend.js";
+export * from "./stack-parentage.js";
 export * from "./vcs-change-binding.js";
 export * from "./harness.js";
 export * from "./ports.js";
