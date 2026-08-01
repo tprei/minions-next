@@ -75,6 +75,7 @@ export type {
   ExecutionHostState,
   HostRegistryErrorCode,
   ListExecutionHostsInput,
+  RegisterSshHostInput,
   SupervisorHostRegistry,
 } from "./sqlite/host-registry.js";
 export { createRepositoryRegistry, RepositoryRegistryError } from "./sqlite/repository-registry.js";
@@ -323,6 +324,17 @@ export type {
   RevsetManager,
   RevsetManagerOptions,
 } from "./revset-adapter.js";
+export { createSshConnection, SshAdapterError } from "./ssh-adapter.js";
+export type {
+  SshAdapterOptions,
+  SshConnection,
+  SshConnectionState,
+  SshErrorCode,
+  SshRunResult,
+  SshRunner,
+} from "./ssh-adapter.js";
+export { createReconnectStrategy } from "./ssh-reconnect.js";
+export type { ReconnectStrategy, ReconnectStrategyOptions } from "./ssh-reconnect.js";
 export {
   buildRevsetExpression,
   EMPTY_REVSET,
@@ -827,3 +839,14 @@ export type {
   RevisionRestoreOpFn,
   RevisionSnapshotFn,
 } from "./revision-gate-runner.js";
+
+export { createWslRequirementProbe, WslProbeError } from "./wsl-probe.js";
+export type {
+  CommandResult,
+  CommandRunner,
+  LoopbackProber,
+  StorageProber,
+  WslProbeOptions,
+  WslProbeErrorCode,
+  WslRequirementProbe,
+} from "./wsl-probe.js";

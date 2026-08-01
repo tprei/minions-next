@@ -1,4 +1,10 @@
 import {
+  createSecureIdGenerator,
+  HostRegistryError,
+  type ExecutionHostRecord,
+  type SupervisorHostRegistry,
+} from "@minions/adapters";
+import {
   create,
   type DescMessage,
   type MessageShape,
@@ -7,7 +13,6 @@ import {
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { createValidator } from "@bufbuild/protovalidate";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
-import type { ExecutionHostRecord, SupervisorHostRegistry } from "@minions/adapters";
 import {
   ExecutionHostKind,
   ExecutionHostSchema,
@@ -15,11 +20,12 @@ import {
   HostService,
   ListHostsResponseSchema,
 } from "@minions/contracts";
-import { DomainError, hostId, type HostId } from "@minions/core";
+import { DomainError, hostId, timestampFromEpochMilliseconds, type HostId } from "@minions/core";
 
 const responseValidator = createValidator();
 
 export function registerHostService(router: ConnectRouter, registry: SupervisorHostRegistry): void {
+  const ids = createSecureIdGenerator({ now: () => timestampFromEpochMilliseconds(Date.now()) });
   router.service(HostService, {
     listHosts(request) {
       const afterId = parsePageToken(request.pageToken);
@@ -31,7 +37,56 @@ export function registerHostService(router: ConnectRouter, registry: SupervisorH
       });
       return validateResponse(ListHostsResponseSchema, response);
     },
+    async registerSshHost(request) {
+      if (request.profile === undefined) {
+        throw new ConnectError("profile is required", Code.InvalidArgument);
+      }
+      const profile = request.profile;
+      if (profile.alias.trim().length === 0) {
+        throw new ConnectError("alias must not be empty", Code.InvalidArgument);
+      }
+      const host = await registry.registerSsh({
+        id: hostId(ids.nextId()),
+        displayName: profile.alias,
+        hostname: profile.hostname,
+        port: profile.port,
+        username: profile.user,
+        knownHostKeyFingerprint: profile.knownHostKey,
+        registeredAt: timestampFromEpochMilliseconds(Date.now()),
+      });
+      return { host: toHostMessage(host) };
+    },
+    async removeHost(request) {
+      const id = parseHostId(request.id);
+      try {
+        await registry.remove(id, timestampFromEpochMilliseconds(Date.now()));
+      } catch (error) {
+        // Idempotent: removing an unknown host id still succeeds — the caller's
+        // postcondition ("this host is not trusted") holds either way.
+        if (!(error instanceof HostRegistryError) || error.code !== "host_not_found") {
+          throw error;
+        }
+      }
+      return {};
+    },
   });
+}
+
+function parseHostId(value: string): HostId {
+  try {
+    return hostId(value);
+  } catch (error) {
+    if (error instanceof DomainError) {
+      throw new ConnectError(
+        "id must be a UUIDv7 identifier",
+        Code.InvalidArgument,
+        undefined,
+        undefined,
+        error,
+      );
+    }
+    throw error;
+  }
 }
 
 function parsePageToken(value: string | undefined): HostId | undefined {

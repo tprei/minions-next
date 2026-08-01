@@ -11,6 +11,9 @@ import { createStructuredLogger } from "./logger.js";
 import { defaultRuntimeOptions, startDaemonRuntime } from "./runtime.js";
 
 export { createStructuredLogger, defaultRuntimeOptions, startDaemonRuntime };
+export { registerHostService } from "./host-service.js";
+export { registerSystemService } from "./system-service.js";
+export type { SystemServiceOptions } from "./system-service.js";
 export { createSchedulerLoop } from "./scheduler.js";
 export type { CreateSchedulerLoopOptions } from "./scheduler.js";
 export { startDaemonServer } from "./server.js";
@@ -170,3 +173,4 @@ const entrypoint = process.argv[1];
 if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
   process.exitCode = await main(process.argv.slice(2));
 }
+export { registerWslHostService, type WslHostServiceOptions } from "./wsl-service.js";

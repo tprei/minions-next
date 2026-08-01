@@ -12,7 +12,7 @@
     "build": "pnpm -r --if-present build",
     "build:contracts": "pnpm --filter @minions/contracts exec tsc -b --force",
     "build:domain": "pnpm --filter @minions/core exec tsc -b --force && pnpm --filter @minions/testkit exec tsc -b --force",
-    "build:integration": "pnpm build:contracts && pnpm --filter @minions/core exec tsc -b --force && pnpm --filter @minions/adapters exec tsc -b --force && pnpm --filter @minions/testkit exec tsc -b --force",
+    "build:integration": "pnpm build:contracts && pnpm --filter @minions/core exec tsc -b --force && pnpm --filter @minions/adapters exec tsc -b --force && pnpm --filter @minions/testkit exec tsc -b --force && pnpm --filter @minions/daemon run build",
     "build:release": "pnpm build && node scripts/build-release-archive.mjs",
     "synthetic:lima": "pnpm build:integration && node scripts/run-lima-synthetic.mjs",
     "synthetic:podman": "pnpm build:integration && node scripts/run-podman-synthetic.mjs",
@@ -23,6 +23,8 @@
     "synthetic:github-onboarding": "pnpm build:integration && node scripts/run-github-onboarding-synthetic.mjs",
     "synthetic:github-pr": "pnpm build:integration && node scripts/run-github-pr-synthetic.mjs",
     "synthetic:github-landing": "pnpm build:integration && node scripts/run-github-landing-synthetic.mjs",
+    "synthetic:ssh-host": "pnpm build:integration && node scripts/run-ssh-host-synthetic.mjs",
+    "synthetic:wsl-host": "pnpm build:integration && node scripts/run-wsl-host-synthetic.mjs",
     "dogfood:register": "pnpm build:integration && node scripts/dogfood-register.mjs",
     "build:storybook": "storybook build -c .storybook -o storybook-static",
     "dev:web": "pnpm --filter @minions/web exec vite",
@@ -39,11 +41,11 @@
     "test:integration": "pnpm build:integration && vitest run test/integration",
     "test:domain": "pnpm build:domain && vitest run test/unit/domain",
     "test:security": "pnpm build:integration && vitest run test/security",
-    "test:unit": "pnpm build:domain && vitest run apps packages test/unit --passWithNoTests",
+    "test:unit": "pnpm build:integration && vitest run apps packages test/unit --passWithNoTests",
     "typecheck": "tsc --noEmit --pretty false -p tsconfig.json && tsc --noEmit --pretty false -p .storybook/tsconfig.json && pnpm -r exec tsc --noEmit --pretty false -p tsconfig.json",
     "test:visual": "pnpm --filter @minions/ui-kit run build && pnpm --filter @minions/web run build && playwright test -c playwright.config.ts",
-    "test:e2e": "pnpm build:integration && pnpm --filter @minions/daemon run build && pnpm --filter @minions/ui-kit run build && pnpm --filter @minions/web run build && playwright test -c playwright-e2e.config.ts",
-    "verify:pr": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm deadcode && pnpm generate:check && pnpm proto:lint && pnpm proto:breaking && pnpm test:unit && pnpm build && pnpm test:integration && pnpm test:security && pnpm test:visual"
+    "test:e2e": "pnpm build:integration && pnpm --filter @minions/ui-kit run build && pnpm --filter @minions/web run build && playwright test -c playwright-e2e.config.ts --project=chromium",
+    "verify:pr": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm deadcode && pnpm generate:check && pnpm proto:lint && pnpm proto:breaking && pnpm test:unit && pnpm build && pnpm test:integration && pnpm test:security && pnpm test:visual && pnpm test:e2e"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.12.1",
