@@ -14,7 +14,8 @@
     "@minions/ui-kit": "workspace:*",
     "d3-hierarchy": "3.1.2",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "workbox-precaching": "7.4.1"
   },
   "devDependencies": {
     "@types/d3-hierarchy": "3.1.7",

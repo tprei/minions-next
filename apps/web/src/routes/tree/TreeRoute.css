@@ -37,16 +37,22 @@
 .mn-tree-route__title h1 {
   margin: 0;
   font-size: var(--mn-font-size-lg);
+  overflow-wrap: anywhere;
 }
 
 .mn-tree-attention {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--mn-space-2);
   padding: var(--mn-space-3);
   border: 1px solid var(--mn-color-status-warning-fg);
   border-radius: var(--mn-radius-md);
   background-color: var(--mn-color-status-warning-bg);
+}
+
+.mn-tree-attention .mn-commentary {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .mn-tree-route__budget {

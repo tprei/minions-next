@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+
+// Mobile PWA Web Push subscription and delivery (PR 58 —
+// mobile-pwa-push-offline). Payloads are privacy-minimal: notification
+// titles are never persisted in server-side logs.
+service PushService {
+  rpc RegisterSubscription(RegisterSubscriptionRequest) returns (RegisterSubscriptionResponse);
+  rpc UnregisterSubscription(UnregisterSubscriptionRequest) returns (UnregisterSubscriptionResponse);
+  rpc SendPushNotification(SendPushNotificationRequest) returns (SendPushNotificationResponse);
+  // Mechanical prerequisite for RFC 8292 VAPID: the browser's
+  // `pushManager.subscribe({applicationServerKey})` call needs the daemon's raw VAPID
+  // public key before it can create a subscription at all.
+  rpc GetVapidPublicKey(GetVapidPublicKeyRequest) returns (GetVapidPublicKeyResponse);
+}
+
+// The kind of event a push notification reports.
+enum PushNotificationKind {
+  PUSH_NOTIFICATION_KIND_UNSPECIFIED = 0;
+  PUSH_NOTIFICATION_KIND_ATTENTION = 1;
+  PUSH_NOTIFICATION_KIND_OUTCOME = 2;
+  PUSH_NOTIFICATION_KIND_COMMAND_RECEIPT = 3;
+}
+
+// A Web Push subscription for a single browser/device endpoint. p256dh_key
+// and auth_key are the subscription's public key and authentication secret,
+// used to encrypt notification payloads per RFC 8291.
+message PushSubscription {
+  string endpoint = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+  string p256dh_key = 2 [(buf.validate.field).string = {min_len: 1}];
+  string auth_key = 3 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message RegisterSubscriptionRequest {
+  PushSubscription subscription = 1 [(buf.validate.field).required = true];
+}
+
+message RegisterSubscriptionResponse {
+  string subscription_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message UnregisterSubscriptionRequest {
+  string endpoint = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+  }];
+}
+
+message UnregisterSubscriptionResponse {}
+
+// Requests delivery of a privacy-minimal push notification. Complex plan
+// editing stays desktop-optimized; mobile payloads carry only enough
+// context to route the user back to the tree.
+message SendPushNotificationRequest {
+  string tree_id = 1 [(buf.validate.field).string.uuid = true];
+  string node_id = 2 [(buf.validate.field).string.uuid = true];
+  PushNotificationKind kind = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string title = 4 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message SendPushNotificationResponse {
+  uint32 delivered_count = 1;
+}
+
+message GetVapidPublicKeyRequest {}
+
+// The daemon's current VAPID public key (ECDSA P-256, uncompressed point, base64url —
+// RFC 8292 section 3.2's "k" parameter encoding), for use as the Push API's
+// `applicationServerKey`. The VAPID key pair is generated once per daemon process and
+// never persisted (see push-service.ts); it changes across daemon restarts.
+message GetVapidPublicKeyResponse {
+  string vapid_public_key = 1 [(buf.validate.field).string = {min_len: 1}];
+}

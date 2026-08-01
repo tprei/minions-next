@@ -125,6 +125,13 @@ export function HomeRoute(): ReactNode {
         <a className="mn-home__inbox-link" href="/inbox" data-testid="inbox-link">
           Inbox
         </a>
+        <a
+          className="mn-home__push-notifications-link"
+          href="/push-notifications"
+          data-testid="push-notifications-link"
+        >
+          Push notifications
+        </a>
         <StatusBadge
           status={CONNECTION_STATUS[connectionState]}
           label={`daemon: ${connectionState}`}

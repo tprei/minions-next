@@ -29,8 +29,6 @@ import {
   generateUuidV7,
   type ApiClients,
 } from "../../data/index.js";
-import { EvidencePanel } from "./EvidencePanel.js";
-import { useEvidence } from "./use-evidence.js";
 import { useEventClient } from "../../data/use-event-client.js";
 import { describeConnectError, type TypedError } from "../home/connect-error.js";
 import { shortId } from "../home/labels.js";
@@ -42,17 +40,10 @@ import {
 } from "./steering-labels.js";
 import { CommandTimeline } from "./CommandTimeline.js";
 import { Composer, type SteeringAction } from "./Composer.js";
+import { EvidencePanel } from "./EvidencePanel.js";
+import { useEvidence } from "./use-evidence.js";
 import "./NodeConsole.css";
 
-/**
- * Live node console (PR 47 — live-node-console-steering, PRD UI-03/UI-04/UI-07/UI-08).
- *
- * The realtime view for one node: its state and mode, the command-receipt timeline (every
- * queued steering command with its delivery lifecycle — queued → sent → acknowledged →
- * applied/failed), any open attention prompt (visually distinct from transcript text per
- * UI-07), the connection-state indicator (never pretend cached state is live — UI-08), and
- * the composer with all 13 steering actions (UI-04). Reached at `/tree/<treeId>/node/<nodeId>`.
- */
 export interface NodeConsoleProps {
   readonly treeId: string;
   readonly nodeId: string;
@@ -133,7 +124,7 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
 
   if (objective.length === 0) {
     return (
-      <div className="mn-node-console" data-testid="node-console">
+      <>
         <NavBar brand="Minions">
           <a className="mn-node-console__back" href={`/tree/${treeId}`}>
             ← Back to tree
@@ -143,17 +134,82 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
             label={`daemon: ${connectionState}`}
           />
         </NavBar>
-        <StateView
-          kind="loading"
-          title="Loading node…"
-          description="Waiting for the node to appear in the event stream."
-        />
-      </div>
+        <main className="mn-node-console" data-testid="node-console">
+          <StateView
+            kind="loading"
+            title="Loading node…"
+            description="Waiting for the node to appear in the event stream."
+          />
+        </main>
+      </>
     );
   }
 
+  const tabItems: TabItem[] = [
+    {
+      value: "console",
+      label: "Console",
+      content: (
+        <>
+          <CommandTimeline commands={commands} />
+          <h2 className="mn-node-console__section">Steer</h2>
+          <Composer
+            openAttention={openAttention}
+            submitting={submitting}
+            error={error}
+            onAction={(action) => {
+              void handleAction(action);
+            }}
+          />
+        </>
+      ),
+    },
+    {
+      value: "context",
+      label: "Context",
+      content: (
+        <div className="mn-node-console__evidence" data-testid="context-panel">
+          {fetchedNode !== undefined ? (
+            <>
+              <Fact>
+                mode: {fetchedNode.mode !== PlanNodeMode.UNSPECIFIED ? "set" : "unspecified"}
+              </Fact>
+              <Fact>check profile: {fetchedNode.checkProfile || "(unset)"}</Fact>
+              <Fact>
+                allowed paths: {fetchedNode.allowedRepositoryPaths.join(", ") || "(none)"}
+              </Fact>
+              {fetchedNode.acceptanceCriteria.length > 0 ? (
+                <div>
+                  <strong>Acceptance criteria</strong>
+                  <ul>
+                    {fetchedNode.acceptanceCriteria.map((criterion, index) => (
+                      <li key={`${String(index)}-${criterion}`}>{criterion}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <Commentary>Node details not yet loaded from GetTree.</Commentary>
+          )}
+          <Commentary>Source: GetTree response. Freshness: {connectionState}.</Commentary>
+        </div>
+      ),
+    },
+    {
+      value: "evidence",
+      label: "Evidence",
+      content: (
+        <EvidencePanel
+          sections={evidenceSections}
+          emptyMessage="No evidence recorded for this node yet."
+        />
+      ),
+    },
+  ];
+
   return (
-    <div className="mn-node-console" data-testid="node-console">
+    <>
       <NavBar brand="Minions">
         <a className="mn-node-console__back" href={`/tree/${treeId}`} data-testid="node-back-link">
           ← Back to tree
@@ -164,114 +220,44 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
           data-testid="connection-state"
         />
       </NavBar>
-
-      <div className="mn-node-console__header">
-        <div className="mn-node-console__title">
-          <h1>{objective || "(untitled node)"}</h1>
-          {state !== undefined ? (
-            <StatusBadge status={nodeStateBadgeKind(state)} label={nodeStateLabel(state)} />
-          ) : null}
+      <main className="mn-node-console" data-testid="node-console">
+        <div className="mn-node-console__header">
+          <div className="mn-node-console__title">
+            <h1>{objective || "(untitled node)"}</h1>
+            {state !== undefined ? (
+              <StatusBadge status={nodeStateBadgeKind(state)} label={nodeStateLabel(state)} />
+            ) : null}
+          </div>
+          <Fact title={nodeId}>node {shortId(nodeId)}</Fact>
         </div>
-        <Fact title={nodeId}>node {shortId(nodeId)}</Fact>
-      </div>
-
-      {connectionState !== "live" ? (
-        <Commentary>
-          Connection is {connectionState}. Displayed state may be stale — the UI never pretends
-          cached data is live.
-        </Commentary>
-      ) : null}
-
-      {openAttention !== undefined ? (
-        <div className="mn-node-console__attention" data-testid="node-attention" role="status">
-          <StatusBadge
-            status={attentionStateBadgeKind(openAttention.state)}
-            label={`${attentionKindLabel(openAttention.kind)} ${attentionStateLabel(openAttention.state)}`}
-          />
-          <Commentary>{openAttention.prompt}</Commentary>
-          {openAttention.choices.length > 0 ? (
-            <ul className="mn-node-console__choices">
-              {openAttention.choices.map((choice, index) => (
-                <li key={`${String(index)}-${choice}`}>{choice}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
-
-      {(() => {
-        const tabItems: TabItem[] = [
-          {
-            value: "console",
-            label: "Console",
-            content: (
-              <>
-                <CommandTimeline commands={commands} />
-                <h2 className="mn-node-console__section">Steer</h2>
-                <Composer
-                  openAttention={openAttention}
-                  submitting={submitting}
-                  error={error}
-                  onAction={(action) => {
-                    void handleAction(action);
-                  }}
-                />
-              </>
-            ),
-          },
-          {
-            value: "context",
-            label: "Context",
-            content: (
-              <div className="mn-node-console__evidence" data-testid="context-panel">
-                {fetchedNode !== undefined ? (
-                  <>
-                    <Fact>
-                      mode: {fetchedNode.mode !== PlanNodeMode.UNSPECIFIED ? "set" : "unspecified"}
-                    </Fact>
-                    <Fact>check profile: {fetchedNode.checkProfile || "(unset)"}</Fact>
-                    <Fact>
-                      allowed paths: {fetchedNode.allowedRepositoryPaths.join(", ") || "(none)"}
-                    </Fact>
-                    {fetchedNode.acceptanceCriteria.length > 0 ? (
-                      <div>
-                        <strong>Acceptance criteria</strong>
-                        <ul>
-                          {fetchedNode.acceptanceCriteria.map((criterion, index) => (
-                            <li key={`${String(index)}-${criterion}`}>{criterion}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <Commentary>Node details not yet loaded from GetTree.</Commentary>
-                )}
-                <Commentary>Source: GetTree response. Freshness: {connectionState}.</Commentary>
-              </div>
-            ),
-          },
-          {
-            value: "evidence",
-            label: "Evidence",
-            content: (
-              <EvidencePanel
-                sections={evidenceSections}
-                emptyMessage="No evidence recorded for this node yet."
-              />
-            ),
-          },
-        ];
-        return <Tabs items={tabItems} defaultValue="console" />;
-      })()}
-    </div>
+        {connectionState !== "live" ? (
+          <Commentary>
+            Connection is {connectionState}. Displayed state may be stale — the UI never pretends
+            cached data is live.
+          </Commentary>
+        ) : null}
+        {openAttention !== undefined ? (
+          <div className="mn-node-console__attention" data-testid="node-attention" role="status">
+            <StatusBadge
+              status={attentionStateBadgeKind(openAttention.state)}
+              label={`${attentionKindLabel(openAttention.kind)} ${attentionStateLabel(openAttention.state)}`}
+            />
+            <Commentary>{openAttention.prompt}</Commentary>
+            {openAttention.choices.length > 0 ? (
+              <ul className="mn-node-console__choices">
+                {openAttention.choices.map((choice, index) => (
+                  <li key={`${String(index)}-${choice}`}>{choice}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        <Tabs items={tabItems} defaultValue="console" />
+      </main>
+    </>
   );
 }
 
-/**
- * Maps a SteeringAction to the protobuf NodeCommandPayload oneof case + inner message.
- * This is the single place where the UI's action vocabulary meets the wire format.
- */
 function buildPayload(action: SteeringAction): NodeCommandPayload {
   switch (action.kind) {
     case "message":

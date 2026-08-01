@@ -1,5 +1,5 @@
 .mn-composer {
-  border-top: 1px solid var(--mn-hairline);
+  border-top: 1px solid var(--mn-color-border);
   padding: 12px 0;
 }
 
@@ -11,11 +11,12 @@
 }
 
 .mn-composer__attention {
-  background: var(--mn-status-warning-bg);
-  border: 1px solid var(--mn-status-warning-fg);
-  border-radius: var(--mn-radius-ctl);
+  background: var(--mn-color-status-warning-bg);
+  border: 1px solid var(--mn-color-status-warning-fg);
+  border-radius: var(--mn-radius-md);
   padding: 8px 12px;
   margin-bottom: 12px;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 4px;

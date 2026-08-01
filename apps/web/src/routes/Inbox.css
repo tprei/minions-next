@@ -36,13 +36,15 @@
   align-items: flex-start;
   gap: 12px;
   padding: 12px 16px;
-  border: 1px solid var(--mn-hairline);
-  border-radius: var(--mn-radius-card);
-  background: var(--mn-surface-bg);
+  border: 1px solid var(--mn-color-border);
+  border-radius: var(--mn-radius-lg);
+  background: var(--mn-color-bg-raised);
 }
 
 .mn-inbox__item-body {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 4px;
