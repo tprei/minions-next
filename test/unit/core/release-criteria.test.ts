@@ -64,8 +64,31 @@ describe("checkReleaseReadiness", () => {
     expect(checkReleaseReadiness(partial).ready).toBe(false);
   });
 
-  it("returns empty input as ready", () => {
-    expect(checkReleaseReadiness([]).ready).toBe(true);
+  it("does not treat empty input as ready (fail closed)", () => {
+    expect(checkReleaseReadiness([]).ready).toBe(false);
+    expect(checkReleaseReadiness([]).pending).toHaveLength(18);
+  });
+
+  it("does not treat partial input as ready — missing criteria count as pending", () => {
+    const partial: ReleaseCriterion[] = RELEASE_CRITERIA_DEFINITIONS.slice(0, 5).map((c) => ({
+      ...c,
+      demonstrated: true,
+      evidenceSha: "abc123",
+    }));
+    const r = checkReleaseReadiness(partial);
+    expect(r.ready).toBe(false);
+    expect(r.pending).toHaveLength(13);
+  });
+
+  it("does not accept an empty-string evidenceSha as evidence", () => {
+    const withEmptySha: ReleaseCriterion[] = RELEASE_CRITERIA_DEFINITIONS.map((c) => ({
+      ...c,
+      demonstrated: true,
+      evidenceSha: "",
+    }));
+    const r = checkReleaseReadiness(withEmptySha);
+    expect(r.ready).toBe(false);
+    expect(r.pending).toHaveLength(18);
   });
 
   it("sorts pending by id", () => {
