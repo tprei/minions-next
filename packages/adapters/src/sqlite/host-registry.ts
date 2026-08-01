@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { hostId, timestampFromEpochMilliseconds, type HostId, type Timestamp } from "@minions/core";
 
 import {
@@ -27,6 +29,16 @@ export type EnsureLocalHostInput = Readonly<{
   observedAt: Timestamp;
 }>;
 
+export type RegisterSshHostInput = Readonly<{
+  id: HostId;
+  displayName: string;
+  hostname: string;
+  port: number;
+  username: string;
+  knownHostKeyFingerprint: string;
+  registeredAt: Timestamp;
+}>;
+
 export type ListExecutionHostsInput = Readonly<{
   afterId: HostId | undefined;
   limit: number;
@@ -34,8 +46,19 @@ export type ListExecutionHostsInput = Readonly<{
 
 export interface SupervisorHostRegistry {
   ensureLocalHost(input: EnsureLocalHostInput): Promise<ExecutionHostRecord>;
+  registerSsh(input: RegisterSshHostInput): Promise<ExecutionHostRecord>;
   find(id: HostId): ExecutionHostRecord | undefined;
+  /**
+   * Fetches a host and asserts it is usable: throws `host_not_found` if no such
+   * host was ever registered, `host_revoked` if it was registered and later
+   * removed. Every future connection-dispatch path MUST call this (or `find` plus
+   * an equivalent check) before attempting to reach a host — this is the guard
+   * that makes host removal actually deny use, not just relabel a row.
+   */
+  requireActive(id: HostId): ExecutionHostRecord;
   markOffline(id: HostId, observedAt: Timestamp): Promise<ExecutionHostRecord>;
+  /** Soft-removes a host: `state` becomes `"removed"`, permanently. Idempotent. */
+  remove(id: HostId, observedAt: Timestamp): Promise<ExecutionHostRecord>;
   list(input: ListExecutionHostsInput): readonly ExecutionHostRecord[];
 }
 
@@ -102,8 +125,54 @@ class DefaultSupervisorHostRegistry implements SupervisorHostRegistry {
     });
   }
 
+  registerSsh(input: RegisterSshHostInput): Promise<ExecutionHostRecord> {
+    validateDisplayName(input.displayName);
+    const registeredAt = timestampFromEpochMilliseconds(input.registeredAt);
+    const endpoint = `${input.hostname}:${String(input.port)}`;
+    return executeManagedSqliteWrite(this.#database, (transaction) => {
+      transaction.run(
+        `INSERT INTO execution_hosts (
+           id, host_kind, display_name, state_kind, endpoint, version,
+           registered_at_ms, last_seen_at_ms, removed_at_ms
+         ) VALUES (?, 'ssh', ?, 'pending', ?, 0, ?, ?, NULL)`,
+        [input.id, input.displayName, endpoint, registeredAt, registeredAt],
+      );
+      // credential_reference has no client-supplied value yet: SshAdapterOptions
+      // authenticates via the host's ambient SSH agent, not an explicit credential
+      // submitted through this RPC. Revisit once a vault-backed credential flows here.
+      transaction.run(
+        `INSERT INTO ssh_profiles (
+           id, host_id, host_kind, hostname, port, username, credential_reference,
+           host_key_fingerprint, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, 'ssh', ?, ?, ?, 'ambient-ssh-agent', ?, ?, ?)`,
+        [
+          randomUUID(),
+          input.id,
+          input.hostname,
+          input.port,
+          input.username,
+          input.knownHostKeyFingerprint,
+          registeredAt,
+          registeredAt,
+        ],
+      );
+      return readHostById(transaction, input.id);
+    });
+  }
+
   find(id: HostId): ExecutionHostRecord | undefined {
     return this.#database.read((reader) => findHostById(reader, id));
+  }
+
+  requireActive(id: HostId): ExecutionHostRecord {
+    const host = this.find(id);
+    if (host === undefined) {
+      throw new HostRegistryError("host_not_found", "execution host does not exist");
+    }
+    if (host.state === "removed") {
+      throw new HostRegistryError("host_revoked", "execution host has been removed");
+    }
+    return host;
   }
 
   markOffline(id: HostId, observedAt: Timestamp): Promise<ExecutionHostRecord> {
@@ -123,6 +192,25 @@ class DefaultSupervisorHostRegistry implements SupervisorHostRegistry {
         `UPDATE execution_hosts
             SET state_kind = 'offline', version = version + 1, last_seen_at_ms = ?
           WHERE id = ? AND host_kind = 'local' AND state_kind <> 'removed'`,
+        [timestamp, id],
+      );
+      return readHostById(transaction, id);
+    });
+  }
+
+  remove(id: HostId, observedAt: Timestamp): Promise<ExecutionHostRecord> {
+    const timestamp = timestampFromEpochMilliseconds(observedAt);
+    return executeManagedSqliteWrite(this.#database, (transaction) => {
+      const current = readHostById(transaction, id);
+      if (current.state === "removed") {
+        // Idempotent: a second removal is a no-op, preserving the original
+        // removed_at_ms rather than advancing it on every repeated call.
+        return current;
+      }
+      transaction.run(
+        `UPDATE execution_hosts
+            SET state_kind = 'removed', version = version + 1, removed_at_ms = ?
+          WHERE id = ?`,
         [timestamp, id],
       );
       return readHostById(transaction, id);
@@ -159,7 +247,11 @@ class DefaultSupervisorHostRegistry implements SupervisorHostRegistry {
 }
 
 export type HostRegistryErrorCode =
-  "host_not_active" | "host_not_found" | "invalid_observation" | "registry_corrupt";
+  | "host_not_active"
+  | "host_not_found"
+  | "host_revoked"
+  | "invalid_observation"
+  | "registry_corrupt";
 
 export class HostRegistryError extends Error {
   readonly code: HostRegistryErrorCode;

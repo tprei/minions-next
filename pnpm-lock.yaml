@@ -200,6 +200,12 @@ importers:
 
   packages/adapters:
     dependencies:
+      '@connectrpc/connect':
+        specifier: 2.1.2
+        version: 2.1.2(@bufbuild/protobuf@2.12.1)
+      '@connectrpc/connect-node':
+        specifier: 2.1.2
+        version: 2.1.2(@bufbuild/protobuf@2.12.1)(@connectrpc/connect@2.1.2(@bufbuild/protobuf@2.12.1))
       '@minions/contracts':
         specifier: workspace:*
         version: link:../contracts
