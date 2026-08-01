@@ -49,3 +49,6 @@ export * from "./value-objects.js";
 export * from "./ssh-profile.js";
 export * from "./wsl-profile.js";
 export * from "./maintenance.js";
+export * from "./recovery-action.js";
+export * from "./pairing.js";
+export * from "./tailscale-capability.js";

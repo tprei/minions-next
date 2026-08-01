@@ -1,33 +1,22 @@
-.mn-maintenance {
+.mn-recovery-audit {
   min-height: calc(100vh - 56px);
   padding: 16px 24px;
 }
 
-.mn-maintenance__header {
+.mn-recovery-audit__header {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
 }
 
-.mn-maintenance__audit-link {
-  margin-left: auto;
-  color: var(--mn-color-fact-fg);
-  text-decoration: none;
-  font-size: 0.875rem;
-}
-
-.mn-maintenance__audit-link:hover {
-  text-decoration: underline;
-}
-
-.mn-maintenance__header h1 {
+.mn-recovery-audit__header h1 {
   font-size: 1.5rem;
   font-weight: 600;
   margin: 0;
 }
 
-.mn-maintenance__list {
+.mn-recovery-audit__list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -36,7 +25,7 @@
   gap: 12px;
 }
 
-.mn-maintenance__item {
+.mn-recovery-audit__item {
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -46,25 +35,25 @@
   background: var(--mn-surface-bg);
 }
 
-.mn-maintenance__item-body {
+.mn-recovery-audit__item-body {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.mn-maintenance__name {
+.mn-recovery-audit__target {
   margin: 0;
   font-weight: 500;
   font-family: var(--mn-font-mono);
 }
 
-.mn-maintenance__back {
+.mn-recovery-audit__back {
   color: var(--mn-color-fact-fg);
   text-decoration: none;
   font-size: 0.875rem;
 }
 
-.mn-maintenance__back:hover {
+.mn-recovery-audit__back:hover {
   text-decoration: underline;
 }

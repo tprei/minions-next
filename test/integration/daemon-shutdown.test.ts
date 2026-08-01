@@ -6,6 +6,7 @@ import {
   createEventCommitWaiter,
   createPlanRegistry,
   createSqliteCommandStore,
+  createSqliteRecoveryStore,
   createSqliteSteeringCommandStore,
   createSqliteVcsChangeBindingStore,
 } from "@minions/adapters";
@@ -26,6 +27,7 @@ import {
   type ArtifactRecord,
   type ArtifactRegistry,
   type ContentBlobStore,
+  type RecoveryGateProfile,
 } from "@minions/core";
 import { SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
@@ -44,6 +46,12 @@ const EVIDENCE_ID = "01900000-0000-7000-8000-000000000007";
 const CONTENT_DIGEST = contentHash(
   "0000000000000000000000000000000000000000000000000000000000000000",
 );
+
+const RECOVERY_TEST_GATE_PROFILE: RecoveryGateProfile = {
+  allowedKinds: ["restart"],
+  requiredApprovals: 1,
+  maxGrantDurationMs: 900_000,
+};
 
 type ShutdownFixture = Readonly<{
   temporary: TemporarySqliteDatabase;
@@ -173,6 +181,10 @@ async function createFixture(): Promise<ShutdownFixture> {
     steeringStore,
     artifactRegistry,
     blobStore,
+    recoveryStore: createSqliteRecoveryStore({ database }),
+    recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+    recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f0"]),
+    recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
     system: {
       serverVersion: "0.0.0",
       health: create(GetHealthResponseSchema, {

@@ -1,0 +1,174 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// Recovery elevation service (PR 56 — maintenance-elevation-recovery).
+//
+// Permits narrowly elevated, human-approved recovery without silent
+// state-table edits or unreviewed deployment. Every mutation names one
+// action, target, expected state, expiry, and human actor.
+service RecoveryService {
+  rpc RequestElevation(RequestElevationRequest) returns (RequestElevationResponse);
+  rpc ExecuteRecoveryAction(ExecuteRecoveryActionRequest) returns (ExecuteRecoveryActionResponse);
+  rpc ListRecoveryActions(ListRecoveryActionsRequest) returns (ListRecoveryActionsResponse);
+}
+
+// A recovery action kind an elevation grant may authorize. A kind absent
+// from a gate profile's allowed_kinds is never grantable under that profile.
+enum RecoveryActionKind {
+  RECOVERY_ACTION_KIND_UNSPECIFIED = 0;
+  RECOVERY_ACTION_KIND_SIGNAL = 1;
+  RECOVERY_ACTION_KIND_RESTART = 2;
+  RECOVERY_ACTION_KIND_QUARANTINE = 3;
+  RECOVERY_ACTION_KIND_RECONCILE = 4;
+  RECOVERY_ACTION_KIND_DEBUG_ATTACH = 5;
+  RECOVERY_ACTION_KIND_SOURCE_PATCH_BRANCH = 6;
+  RECOVERY_ACTION_KIND_SHADOW_VERIFY = 7;
+  RECOVERY_ACTION_KIND_CANDIDATE_ACTIVATE = 8;
+  RECOVERY_ACTION_KIND_FORCE_ROLLBACK = 9;
+}
+
+// Lifecycle of a requested elevation grant.
+enum ElevationGrantState {
+  ELEVATION_GRANT_STATE_UNSPECIFIED = 0;
+  ELEVATION_GRANT_STATE_PENDING = 1;
+  ELEVATION_GRANT_STATE_APPROVED = 2;
+  ELEVATION_GRANT_STATE_DENIED = 3;
+  ELEVATION_GRANT_STATE_EXPIRED = 4;
+  ELEVATION_GRANT_STATE_CONSUMED = 5;
+}
+
+// Lifecycle of an executed recovery action.
+enum RecoveryActionState {
+  RECOVERY_ACTION_STATE_UNSPECIFIED = 0;
+  RECOVERY_ACTION_STATE_PENDING = 1;
+  RECOVERY_ACTION_STATE_EXECUTED = 2;
+  RECOVERY_ACTION_STATE_FAILED = 3;
+  RECOVERY_ACTION_STATE_REJECTED = 4;
+  RECOVERY_ACTION_STATE_EXPIRED = 5;
+}
+
+// Which RecoveryActionKinds an elevation grant may authorize, how many
+// independent human approvals a grant requires, and the longest a single
+// grant may remain valid. Fail-closed: a kind absent from allowed_kinds is
+// never grantable under this profile.
+message RecoveryGateProfile {
+  repeated RecoveryActionKind allowed_kinds = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: 0
+      }
+    }
+  }];
+  uint32 required_approvals = 2 [(buf.validate.field).uint32.gte = 1];
+  uint64 max_grant_duration_ms = 3 [(buf.validate.field).uint64.gte = 1];
+}
+
+// A human-approved grant authorizing one or more RecoveryActionKinds for a
+// bounded duration. Fail-closed: an action kind outside authorized_kinds is
+// never executable under it.
+message ElevationGrant {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string requested_by_session_id = 2 [(buf.validate.field).string.uuid = true];
+  repeated RecoveryActionKind authorized_kinds = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: 0
+      }
+    }
+  }];
+  string justification = 4 [(buf.validate.field).string = {min_len: 1}];
+  ElevationGrantState state = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  uint32 approvals_received = 6;
+  google.protobuf.Timestamp created_at = 7 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp expires_at = 8 [(buf.validate.field).required = true];
+}
+
+message RequestElevationRequest {
+  string requested_by_session_id = 1 [(buf.validate.field).string.uuid = true];
+  repeated RecoveryActionKind requested_kinds = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: 0
+      }
+    }
+  }];
+  string justification = 3 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message RequestElevationResponse {
+  ElevationGrant grant = 1 [(buf.validate.field).required = true];
+}
+
+// A recovery action to execute under a granted elevation: one action, one
+// target, its expected state, and the moment the authorization to run it
+// expires.
+message RecoveryActionRequest {
+  RecoveryActionKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string target = 2 [(buf.validate.field).string = {min_len: 1}];
+  string expected_state = 3 [(buf.validate.field).string = {min_len: 1}];
+  google.protobuf.Timestamp expires_at = 4 [(buf.validate.field).required = true];
+}
+
+// A recovery action after evaluation, naming the human actor who authorized
+// it and the disposition of its execution.
+message RecoveryAction {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  RecoveryActionKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string target = 3 [(buf.validate.field).string = {min_len: 1}];
+  string expected_state = 4 [(buf.validate.field).string = {min_len: 1}];
+  string actor_session_id = 5 [(buf.validate.field).string.uuid = true];
+  google.protobuf.Timestamp expires_at = 6 [(buf.validate.field).required = true];
+  RecoveryActionState state = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  google.protobuf.Timestamp created_at = 8 [(buf.validate.field).required = true];
+  optional google.protobuf.Timestamp executed_at = 9;
+  optional string failure = 10 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message ExecuteRecoveryActionRequest {
+  string grant_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  RecoveryActionRequest action = 3 [(buf.validate.field).required = true];
+}
+
+message ExecuteRecoveryActionResponse {
+  RecoveryAction action = 1 [(buf.validate.field).required = true];
+}
+
+message ListRecoveryActionsRequest {
+  optional string target = 1 [(buf.validate.field).string = {min_len: 1}];
+  uint32 page_size = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 200
+  }];
+  optional string page_token = 3 [(buf.validate.field).string.uuid = true];
+}
+
+message ListRecoveryActionsResponse {
+  repeated RecoveryAction actions = 1;
+  optional string next_page_token = 2 [(buf.validate.field).string.uuid = true];
+}

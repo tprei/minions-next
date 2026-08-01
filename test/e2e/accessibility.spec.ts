@@ -33,4 +33,12 @@ test.describe("accessibility", () => {
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
   });
+
+  test("recovery audit route passes axe scan", async ({ page }) => {
+    await page.goto("/recovery-audit");
+    await expect(page.getByTestId("recovery-audit")).toBeVisible();
+
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+  });
 });

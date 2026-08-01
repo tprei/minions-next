@@ -20,6 +20,7 @@ import {
   createSqliteArtifactRegistry,
   createSqliteCheckpointStore,
   createSqliteCommandStore,
+  createSqliteRecoveryStore,
   createSqliteSteeringCommandStore,
   createSqliteTranscriptStore,
   createSqliteVcsChangeBindingStore,
@@ -77,6 +78,8 @@ import {
   type HarnessAdapter,
   type HostId,
   type IdGenerator,
+  type RecoveryGateProfile,
+  type RecoveryStore,
   type SandboxLifecycle,
   type SchedulerStore,
   type SteeringCommandStore,
@@ -87,6 +90,21 @@ import {
 import type { StructuredLogger } from "./logger.js";
 import { startDaemonServer, type RunningDaemonServer } from "./server.js";
 import type { TreeServiceRevsetOptions } from "./tree-service.js";
+import { createDeviceSessionStore } from "./device-session-store.js";
+import { createSystemRecoveryRestarter, type RecoveryRestarter } from "./recovery-restart.js";
+
+/**
+ * Default gate profile for the `restart` recovery-action kind (PR 56 —
+ * maintenance-elevation-recovery). Fail-closed: only `restart` is grantable — every
+ * other {@link RecoveryActionKind} is honestly rejected by the service as having no
+ * adapter in this revision (spec-sanctioned incremental delivery). A single human
+ * approval is sufficient, and a grant is valid for 15 minutes.
+ */
+const RECOVERY_GATE_PROFILE: RecoveryGateProfile = Object.freeze({
+  allowedKinds: ["restart"] as const,
+  requiredApprovals: 1,
+  maxGrantDurationMs: 900_000,
+});
 
 export type DaemonStartupErrorCode = "blob_reconciliation_failed" | "auth_runtime_failed";
 
@@ -178,6 +196,21 @@ export type DaemonRuntimeOptions = Readonly<{
    * directory for non-RPC GET requests, making the PWA and RPC API same-origin.
    */
   webDistDir?: string;
+  /**
+   * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing). When
+   * enabled, the daemon constructs a process-lifetime {@link DeviceSessionStore},
+   * shares it between the pairing RPCs and the remote-access interceptor, and starts
+   * a second loopback listener for phones (see `server.ts`'s `remoteAccess` doc for the
+   * full security model — trust derives from the listener, not the peer
+   * address). Only meaningful for "local"/"host" mode, which is where
+   * the mutation RPCs a phone session gates actually live; ignored for "supervisor"
+   * mode. Omitted, daemon behaviour is unchanged (REMOTE-01's loopback-only default).
+   */
+  remoteAccess?: RemoteAccessRuntimeOptions;
+}>;
+
+export type RemoteAccessRuntimeOptions = Readonly<{
+  enabled: true;
 }>;
 
 export type ProviderAdmissionRuntimeOptions = Readonly<{
@@ -278,6 +311,8 @@ export async function startDaemonRuntime(
   let artifactRegistry: ArtifactRegistry | undefined;
   let vcsChangeBindingStore: VcsChangeBindingStore | undefined;
   let blobStore: ContentBlobStore | undefined;
+  let recoveryStore: RecoveryStore | undefined;
+  let recoveryRestart: RecoveryRestarter | undefined;
   let localHostId: HostId | undefined;
   let server: RunningDaemonServer | undefined;
   let authRuntime: RunningAuthRuntime | undefined;
@@ -356,6 +391,8 @@ export async function startDaemonRuntime(
         hostId: activeHostId,
       });
       vcsChangeBindingStore = createSqliteVcsChangeBindingStore({ database: hostDatabase });
+      recoveryStore = createSqliteRecoveryStore({ database: hostDatabase });
+      recoveryRestart = createSystemRecoveryRestarter({ logger: options.logger });
       if (options.nodeExecution?.enabled) {
         const nodeExecution = options.nodeExecution;
         executionCoordinator = createExecutionCoordinator({
@@ -573,6 +610,10 @@ export async function startDaemonRuntime(
         jj_version: probe.version,
       });
     }
+    const remoteAccess =
+      options.remoteAccess?.enabled === true
+        ? { sessionStore: createDeviceSessionStore() }
+        : undefined;
 
     if (options.mode === "local") {
       server = await startDaemonServer({
@@ -588,6 +629,10 @@ export async function startDaemonRuntime(
         steeringStore: requireSteeringStore(steeringStore),
         artifactRegistry: requireArtifactRegistry(artifactRegistry),
         blobStore: requireBlobStore(blobStore),
+        recoveryStore: requireRecoveryStore(recoveryStore),
+        recoveryGateProfile: RECOVERY_GATE_PROFILE,
+        recoveryIds: options.ids,
+        recoveryRestart: requireRecoveryRestart(recoveryRestart),
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -597,6 +642,7 @@ export async function startDaemonRuntime(
         hostRegistry: requireRegistry(hostRegistry),
         ...(revset !== undefined ? { revset } : {}),
         ...(options.webDistDir !== undefined ? { webDistDir: options.webDistDir } : {}),
+        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else if (options.mode === "host") {
       server = await startDaemonServer({
@@ -612,6 +658,10 @@ export async function startDaemonRuntime(
         steeringStore: requireSteeringStore(steeringStore),
         artifactRegistry: requireArtifactRegistry(artifactRegistry),
         blobStore: requireBlobStore(blobStore),
+        recoveryStore: requireRecoveryStore(recoveryStore),
+        recoveryGateProfile: RECOVERY_GATE_PROFILE,
+        recoveryIds: options.ids,
+        recoveryRestart: requireRecoveryRestart(recoveryRestart),
         repository: {
           registry: requireRepositoryRegistry(repositoryRegistry),
           home,
@@ -619,6 +669,7 @@ export async function startDaemonRuntime(
           ...(jjCentralRepo !== undefined ? { jjCentralRepo } : {}),
         },
         ...(revset !== undefined ? { revset } : {}),
+        ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else {
       server = await startDaemonServer({
@@ -635,6 +686,7 @@ export async function startDaemonRuntime(
       mode: lifecycle.mode,
       host_id: localHostId,
       port: server.port,
+      ...(server.remotePort === undefined ? {} : { remote_port: server.remotePort }),
     });
 
     let closePromise: Promise<void> | undefined;
@@ -701,6 +753,7 @@ export function defaultRuntimeOptions(
     hostId?: HostId;
     signal?: AbortSignal;
     jjCapability?: JjCapabilityRuntimeOptions;
+    remoteAccess?: RemoteAccessRuntimeOptions;
   }>,
 ): DaemonRuntimeOptions {
   const clock: Clock = { now: () => timestampFromEpochMilliseconds(Date.now()) };
@@ -1283,6 +1336,20 @@ function requireVcsChangeBindingStore(
 function requireBlobStore(value: ContentBlobStore | undefined): ContentBlobStore {
   if (value === undefined) {
     throw new Error("content blob store is not initialized");
+  }
+  return value;
+}
+
+function requireRecoveryStore(value: RecoveryStore | undefined): RecoveryStore {
+  if (value === undefined) {
+    throw new Error("recovery store is not initialized");
+  }
+  return value;
+}
+
+function requireRecoveryRestart(value: RecoveryRestarter | undefined): RecoveryRestarter {
+  if (value === undefined) {
+    throw new Error("recovery restarter is not initialized");
   }
   return value;
 }
