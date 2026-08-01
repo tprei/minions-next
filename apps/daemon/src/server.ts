@@ -1,4 +1,6 @@
-import { createServer, type IncomingMessage } from "node:http";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { extname, join, normalize, sep } from "node:path";
 import type { AddressInfo } from "node:net";
 
 import {
@@ -49,6 +51,8 @@ type DaemonRepositoryOptions = Readonly<{
 type BaseDaemonServerOptions = Readonly<{
   port: number;
   system: DaemonSystemOptions;
+  /** PR 52: when set, serve the built web app from this directory for non-RPC paths. */
+  webDistDir?: string;
 }>;
 
 export type DaemonServerOptions =
@@ -156,6 +160,11 @@ export async function startDaemonServer(
       return;
     }
     trackPendingBodyRequest(request, pendingBodyRequests);
+    const path = request.url?.split("?")[0] ?? "/";
+    if (options.webDistDir !== undefined && !path.startsWith("/minions.")) {
+      serveStaticWeb(request, response, options.webDistDir);
+      return;
+    }
     handler(request, response);
   });
 
@@ -282,4 +291,62 @@ function closeEventWaiter(options: DaemonServerOptions): void {
 
 function toBaseUrl(address: AddressInfo): string {
   return `http://127.0.0.1:${String(address.port)}`;
+}
+
+const STATIC_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+};
+
+/**
+ * PR 52 — distribution-service-lifecycle. Serves the built web app (apps/web/dist)
+ * from the daemon's own origin so the PWA and the RPC API are same-origin. Non-RPC
+ * GET requests fall through to static file serving with SPA fallback to index.html.
+ */
+function serveStaticWeb(req: IncomingMessage, res: ServerResponse, distDir: string): void {
+  if (req.method !== "GET") {
+    res.writeHead(405);
+    res.end();
+    return;
+  }
+  const rawUrl = req.url ?? "/";
+  const pathOnly = rawUrl.split("?")[0] ?? "/";
+  const decodedPath = decodeURIComponent(pathOnly);
+  const relativePath = decodedPath === "/" ? "index.html" : decodedPath.replace(/^\/+/, "");
+  const resolvedDist = normalize(distDir);
+  const candidate = normalize(join(resolvedDist, relativePath));
+
+  if (
+    (candidate === resolvedDist || candidate.startsWith(resolvedDist + sep)) &&
+    existsSync(candidate) &&
+    statSync(candidate).isFile()
+  ) {
+    res.writeHead(200, {
+      "content-type": STATIC_CONTENT_TYPES[extname(candidate)] ?? "application/octet-stream",
+    });
+    createReadStream(candidate).pipe(res);
+    return;
+  }
+
+  // SPA fallback: serve index.html for client-side routes.
+  const lastSegment = decodedPath.split("/").pop() ?? "";
+  if (!lastSegment.includes(".")) {
+    const indexPath = join(resolvedDist, "index.html");
+    if (existsSync(indexPath)) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      createReadStream(indexPath).pipe(res);
+      return;
+    }
+  }
+
+  res.writeHead(404);
+  res.end();
 }

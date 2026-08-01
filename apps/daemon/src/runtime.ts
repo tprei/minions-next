@@ -173,6 +173,11 @@ export type DaemonRuntimeOptions = Readonly<{
    * exposure is deferred — callers drive {@link ExecutionCoordinator.runNode}.
    */
   nodeExecution?: NodeExecutionRuntimeOptions;
+  /**
+   * PR 52: when set, the daemon serves the built web app (apps/web/dist) from this
+   * directory for non-RPC GET requests, making the PWA and RPC API same-origin.
+   */
+  webDistDir?: string;
 }>;
 
 export type ProviderAdmissionRuntimeOptions = Readonly<{
@@ -591,6 +596,7 @@ export async function startDaemonRuntime(
         },
         hostRegistry: requireRegistry(hostRegistry),
         ...(revset !== undefined ? { revset } : {}),
+        ...(options.webDistDir !== undefined ? { webDistDir: options.webDistDir } : {}),
       });
     } else if (options.mode === "host") {
       server = await startDaemonServer({
