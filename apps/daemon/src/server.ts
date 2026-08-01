@@ -30,6 +30,7 @@ import { createErrorDetailInterceptor } from "./error-detail-interceptor.js";
 import { registerArtifactService } from "./artifact-service.js";
 import { registerEventService } from "./event-service.js";
 import { registerHostService } from "./host-service.js";
+import { registerMaintenanceService } from "./maintenance-service.js";
 import { registerRepositoryService } from "./repository-service.js";
 import { registerSteeringService } from "./steering-service.js";
 import { registerSystemService } from "./system-service.js";
@@ -143,6 +144,7 @@ export async function startDaemonServer(
         if (options.repository !== undefined) {
           registerRepositoryService(router, options.repository);
         }
+        registerMaintenanceService(router, { database: options.database });
         registerWslHostService(router, {});
       }
       if (options.mode !== "host") {

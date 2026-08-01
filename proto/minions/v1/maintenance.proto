@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// Maintenance plane (PR 55 — maintenance-plane-readonly).
+//
+// Starts an OMP diagnostic session even when the primary host API, scheduler,
+// or projections are unhealthy. Uses a SEPARATE supervisor maintenance DB and
+// event stream — never the primary host.db. Default tools are read-only.
+service MaintenanceService {
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc RunTool(RunToolRequest) returns (RunToolResponse);
+  rpc GetJournal(GetJournalRequest) returns (GetJournalResponse);
+}
+
+// The terminal outcome of a maintenance session. Unset while the session is
+// still running.
+enum MaintenanceSessionResult {
+  MAINTENANCE_SESSION_RESULT_UNSPECIFIED = 0;
+  MAINTENANCE_SESSION_RESULT_SUCCEEDED = 1;
+  MAINTENANCE_SESSION_RESULT_FAILED = 2;
+  MAINTENANCE_SESSION_RESULT_CANCELLED = 3;
+}
+
+// A single maintenance-tool invocation. `ended_at`/`result` are unset while
+// the session is still running and set together when it closes.
+message MaintenanceSession {
+  string session_id = 1 [(buf.validate.field).string.uuid = true];
+  string tool_name = 2 [(buf.validate.field).string = {min_len: 1}];
+  google.protobuf.Timestamp started_at = 3 [(buf.validate.field).required = true];
+  optional google.protobuf.Timestamp ended_at = 4;
+  optional MaintenanceSessionResult result = 5;
+}
+
+message StartSessionRequest {
+  optional string node_id = 1 [(buf.validate.field).string.uuid = true];
+  string tool_name = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+message StartSessionResponse {
+  MaintenanceSession session = 1 [(buf.validate.field).required = true];
+}
+
+message EndSessionRequest {
+  string session_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message EndSessionResponse {
+  MaintenanceSession session = 1 [(buf.validate.field).required = true];
+}
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated MaintenanceSession sessions = 1;
+}
+
+// Runs a registered maintenance tool inside an open session. The tool's
+// mutating flag is enforced server-side; this plane is read-only by default.
+message RunToolRequest {
+  string session_id = 1 [(buf.validate.field).string.uuid = true];
+  string tool_name = 2 [(buf.validate.field).string = {min_len: 1}];
+  repeated string args = 3 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message RunToolResponse {
+  string output = 1;
+  int32 exit_code = 2;
+}
+
+// `session_id` unset lists journal entries across every maintenance session.
+message GetJournalRequest {
+  optional string session_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// A recorded transcript line for a maintenance session.
+message MaintenanceTranscriptEntry {
+  string text = 1 [(buf.validate.field).string = {min_len: 1}];
+}
+
+// A recorded tool invocation for a maintenance session.
+message MaintenanceActionEntry {
+  string tool_name = 1 [(buf.validate.field).string = {min_len: 1}];
+  bool mutating = 2;
+}
+
+// A separately journaled transcript/action entry for a maintenance session.
+// The journal store is a fixed name distinct from the primary host database.
+message MaintenanceJournalEntry {
+  string session_id = 1 [(buf.validate.field).string.uuid = true];
+  uint64 sequence = 2 [(buf.validate.field).uint64.gte = 1];
+  google.protobuf.Timestamp recorded_at = 3 [(buf.validate.field).required = true];
+
+  oneof detail {
+    option (buf.validate.oneof).required = true;
+
+    MaintenanceTranscriptEntry transcript = 4;
+    MaintenanceActionEntry action = 5;
+  }
+}
+
+message GetJournalResponse {
+  repeated MaintenanceJournalEntry entries = 1;
+}
