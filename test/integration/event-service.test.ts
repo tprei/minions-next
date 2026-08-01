@@ -9,6 +9,7 @@ import {
   createRepositoryRegistry,
   createSqliteArtifactRegistry,
   createSqliteCommandStore,
+  createSqliteRecoveryStore,
   createSqliteSteeringCommandStore,
   createSqliteVcsChangeBindingStore,
   openHostDatabase,
@@ -59,6 +60,7 @@ import {
   timestampFromEpochMilliseconds,
   type CommandRequest,
   type DomainPorts,
+  type RecoveryGateProfile,
 } from "@minions/core";
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
@@ -107,6 +109,12 @@ const snapshotArtifactCommandIdentifier = uuid(44);
 const snapshotOutcomeCommandIdentifier = uuid(45);
 const planScope = ".";
 const planProfile = "event-plan";
+
+const RECOVERY_TEST_GATE_PROFILE: RecoveryGateProfile = {
+  allowedKinds: ["restart"],
+  requiredApprovals: 1,
+  maxGrantDurationMs: 900_000,
+};
 
 const health = create(GetHealthResponseSchema, {
   instanceId: uuid(100),
@@ -452,6 +460,10 @@ describe("EventService integration", () => {
         }),
         artifactRegistry,
         blobStore,
+        recoveryStore: createSqliteRecoveryStore({ database: temporary.database }),
+        recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+        recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f0"]),
+        recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
         system: { serverVersion: "0.0.0", health, runDoctor: () => Promise.resolve(doctor) },
       }).then(
         (server) => ({ case: "started", server }) as const,
@@ -802,6 +814,10 @@ async function startEventFixture(
     }),
     artifactRegistry,
     blobStore,
+    recoveryStore: createSqliteRecoveryStore({ database }),
+    recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+    recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f1"]),
+    recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
     repository: {
       registry: repositoryRegistry,
       home: dirname(database.path),

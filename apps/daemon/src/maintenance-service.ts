@@ -227,7 +227,6 @@ function runMaintenanceTool(
       throw new ConnectError(`unknown maintenance tool: ${toolName}`, Code.InvalidArgument);
   }
 }
-
 export function registerMaintenanceService(
   router: ConnectRouter,
   options: MaintenanceServiceOptions,

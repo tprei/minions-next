@@ -518,6 +518,30 @@ export type {
   GateValidation,
   GateValidationProblem,
 } from "@minions/core";
+export { createSqliteRecoveryStore } from "./sqlite/recovery-store.js";
+export type { CreateSqliteRecoveryStoreOptions } from "./sqlite/recovery-store.js";
+export {
+  createAuditEntry,
+  RecoveryStoreError,
+  resolveGrantApproval,
+  validateActionAgainstGrant,
+  validateElevationRequest,
+  validateRecoveryAction,
+} from "@minions/core";
+export type {
+  ElevationGrant,
+  ElevationGrantState,
+  ElevationRequestVerdict,
+  RecordedRecoveryAction,
+  RecoveryAction,
+  RecoveryActionKind,
+  RecoveryActionState,
+  RecoveryActionVerdict,
+  RecoveryAuditEntry,
+  RecoveryGateProfile,
+  RecoveryStore,
+  RecoveryStoreErrorCode,
+} from "@minions/core";
 export { GitHubClientError, appBotLogin, createGitHubClient } from "./github-client.js";
 export type {
   GitHubAppInfo,

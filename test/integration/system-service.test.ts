@@ -11,6 +11,7 @@ import {
   createPlanRegistry,
   createSqliteArtifactRegistry,
   createSqliteCommandStore,
+  createSqliteRecoveryStore,
   createSqliteSteeringCommandStore,
   createSqliteVcsChangeBindingStore,
   type EventCommitWaiter,
@@ -31,7 +32,7 @@ import {
   RunDoctorResponseSchema,
   type ValidationError,
 } from "@minions/contracts";
-import { hostId, timestampFromEpochMilliseconds } from "@minions/core";
+import { hostId, timestampFromEpochMilliseconds, type RecoveryGateProfile } from "@minions/core";
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { dirname, join } from "node:path";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
@@ -60,6 +61,11 @@ const doctor = create(RunDoctorResponseSchema, {
 });
 const fixtureNow = timestampFromEpochMilliseconds(1_700_000_000_000);
 const trustedHostId = hostId(hostIdentifier);
+const RECOVERY_TEST_GATE_PROFILE: RecoveryGateProfile = {
+  allowedKinds: ["restart"],
+  requiredApprovals: 1,
+  maxGrantDurationMs: 900_000,
+};
 
 function createHostServices(
   database: ManagedSqliteDatabase,
@@ -90,6 +96,7 @@ function createHostServices(
     }),
     steeringStore: createSqliteSteeringCommandStore({ database, commandStore, ports }),
     vcsChangeBindingStore: createSqliteVcsChangeBindingStore({ database }),
+    recoveryStore: createSqliteRecoveryStore({ database }),
   };
 }
 
@@ -153,8 +160,14 @@ describe("SystemService integration", () => {
     const clock = new FixedClock(fixtureNow);
     temporaryDatabase = await TemporarySqliteDatabase.create("host", clock);
     const eventWaiter = createEventCommitWaiter();
-    const { planRegistry, steeringStore, artifactRegistry, blobStore, vcsChangeBindingStore } =
-      createHostServices(temporaryDatabase.database, eventWaiter, clock);
+    const {
+      planRegistry,
+      steeringStore,
+      artifactRegistry,
+      blobStore,
+      vcsChangeBindingStore,
+      recoveryStore,
+    } = createHostServices(temporaryDatabase.database, eventWaiter, clock);
     systemServer = await startDaemonServer({
       mode: "host",
       port: 0,
@@ -164,6 +177,10 @@ describe("SystemService integration", () => {
       planRegistry,
       artifactRegistry,
       blobStore,
+      recoveryStore,
+      recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+      recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f1"]),
+      recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
       clock,
       vcsChangeBindingStore,
       steeringStore,
@@ -341,8 +358,14 @@ describe("SystemService integration", () => {
 
     const eventWaiter = createEventCommitWaiter();
     const clock = new FixedClock(fixtureNow);
-    const { planRegistry, steeringStore, artifactRegistry, blobStore, vcsChangeBindingStore } =
-      createHostServices(getTemporaryDatabase().database, eventWaiter, clock);
+    const {
+      planRegistry,
+      steeringStore,
+      artifactRegistry,
+      blobStore,
+      vcsChangeBindingStore,
+      recoveryStore,
+    } = createHostServices(getTemporaryDatabase().database, eventWaiter, clock);
     const startup = await startDaemonServer({
       mode: "host",
       port,
@@ -355,6 +378,10 @@ describe("SystemService integration", () => {
       steeringStore,
       artifactRegistry,
       blobStore,
+      recoveryStore,
+      recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+      recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f2"]),
+      recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
       system: {
         serverVersion: "not-a-semantic-version",
         health,

@@ -176,3 +176,10 @@ if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).hr
   process.exitCode = await main(process.argv.slice(2));
 }
 export { registerWslHostService, type WslHostServiceOptions } from "./wsl-service.js";
+export { registerRecoveryService, type RecoveryServiceOptions } from "./recovery-service.js";
+export type {
+  RecoveryRestarter,
+  RecoveryRestartTarget,
+  CreateSystemRecoveryRestarterOptions,
+} from "./recovery-restart.js";
+export { createSystemRecoveryRestarter } from "./recovery-restart.js";

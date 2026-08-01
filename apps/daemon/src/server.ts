@@ -24,6 +24,9 @@ import type {
   ArtifactRegistry,
   Clock,
   ContentBlobStore,
+  IdGenerator,
+  RecoveryGateProfile,
+  RecoveryStore,
   SteeringCommandStore,
 } from "@minions/core";
 import { createErrorDetailInterceptor } from "./error-detail-interceptor.js";
@@ -36,7 +39,9 @@ import { registerSteeringService } from "./steering-service.js";
 import { registerSystemService } from "./system-service.js";
 import { registerTreeService, type TreeServiceRevsetOptions } from "./tree-service.js";
 import { registerWslHostService } from "./wsl-service.js";
+import { registerRecoveryService } from "./recovery-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
+import type { RecoveryRestarter } from "./recovery-restart.js";
 
 type DaemonSystemOptions = Readonly<{
   serverVersion: string;
@@ -70,6 +75,10 @@ export type DaemonServerOptions =
         steeringStore: SteeringCommandStore;
         artifactRegistry: ArtifactRegistry;
         blobStore: ContentBlobStore;
+        recoveryStore: RecoveryStore;
+        recoveryGateProfile: RecoveryGateProfile;
+        recoveryIds: IdGenerator;
+        recoveryRestart: RecoveryRestarter;
         repository?: DaemonRepositoryOptions;
         revset?: TreeServiceRevsetOptions;
       }>)
@@ -90,6 +99,10 @@ export type DaemonServerOptions =
         steeringStore: SteeringCommandStore;
         artifactRegistry: ArtifactRegistry;
         blobStore: ContentBlobStore;
+        recoveryStore: RecoveryStore;
+        recoveryGateProfile: RecoveryGateProfile;
+        recoveryIds: IdGenerator;
+        recoveryRestart: RecoveryRestarter;
         repository?: DaemonRepositoryOptions;
         revset?: TreeServiceRevsetOptions;
         hostRegistry: SupervisorHostRegistry;
@@ -146,6 +159,13 @@ export async function startDaemonServer(
         }
         registerMaintenanceService(router, { database: options.database });
         registerWslHostService(router, {});
+        registerRecoveryService(router, {
+          store: options.recoveryStore,
+          gateProfile: options.recoveryGateProfile,
+          clock: options.clock,
+          ids: options.recoveryIds,
+          restart: options.recoveryRestart,
+        });
       }
       if (options.mode !== "host") {
         registerHostService(router, options.hostRegistry);

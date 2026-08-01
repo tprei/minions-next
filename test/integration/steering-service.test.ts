@@ -45,6 +45,7 @@ import {
   type DomainPorts,
   type NodeCommandRecord,
   type SteeringCommandStore,
+  type RecoveryGateProfile,
 } from "@minions/core";
 import {
   createEventCommitWaiter,
@@ -59,6 +60,7 @@ import {
   type ManagedSqliteDatabase,
   type RepositoryInspection,
   type SqliteCommandStore,
+  createSqliteRecoveryStore,
 } from "@minions/adapters";
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { TemporarySqliteDatabase } from "@minions/testkit/sqlite";
@@ -94,6 +96,11 @@ const commandCreateIdentifier = commandId("01900000-0000-7000-8000-00000000000b"
 const commandProposeIdentifier = commandId("01900000-0000-7000-8000-00000000000c");
 const commandApproveIdentifier = commandId("01900000-0000-7000-8000-00000000000d");
 const attentionIdentifier = nodeAttentionId("01900000-0000-7000-8000-00000000000e");
+const RECOVERY_TEST_GATE_PROFILE: RecoveryGateProfile = {
+  allowedKinds: ["restart"],
+  requiredApprovals: 1,
+  maxGrantDurationMs: 900_000,
+};
 
 function deterministicId(index: number): string {
   return `01900000-0000-7000-8000-${index.toString(16).padStart(12, "0")}`;
@@ -280,6 +287,10 @@ async function createFixture(): Promise<SteeringServiceFixture> {
     steeringStore,
     artifactRegistry,
     blobStore,
+    recoveryStore: createSqliteRecoveryStore({ database }),
+    recoveryGateProfile: RECOVERY_TEST_GATE_PROFILE,
+    recoveryIds: new SequenceIdGenerator(["01900000-0000-7000-8000-0000000000f0"]),
+    recoveryRestart: { restart: () => Promise.reject(new Error("not used")) },
     system: {
       serverVersion: "0.0.0",
       health,
