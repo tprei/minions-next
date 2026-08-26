@@ -652,12 +652,13 @@ async function ensureProtectedSessionDirectory(sessionDirectory: string): Promis
  * `../../etc/passwd` (or any other traversal payload) escapes the
  * protected session directory for both reads and writes. durableHarnessId
  * is caller-supplied (it flows in from request.durableHarnessId with no
- * upstream format check), so validate it here, at the sole place both
- * manifest operations construct a path from it.
+ * upstream format check), so assertSafeDurableHarnessId runs in start()
+ * before the process spawns and again in manifestPath, the sole place
+ * both manifest operations construct a path from it.
  */
 const durableHarnessIdPattern = /^[A-Za-z0-9_-]{1,128}$/u;
 
-function manifestPath(sessionDirectory: string, durableHarnessId: string): string {
+function assertSafeDurableHarnessId(durableHarnessId: string): void {
   if (!durableHarnessIdPattern.test(durableHarnessId)) {
     throw new OmpAcpAdapterError(
       "invalid_configuration",
@@ -665,6 +666,10 @@ function manifestPath(sessionDirectory: string, durableHarnessId: string): strin
       "Use an alphanumeric durable harness id (letters, digits, '-', '_' only).",
     );
   }
+}
+
+function manifestPath(sessionDirectory: string, durableHarnessId: string): string {
+  assertSafeDurableHarnessId(durableHarnessId);
   return join(sessionDirectory, `${durableHarnessId}.json`);
 }
 
@@ -1549,6 +1554,7 @@ export function createOmpAcpHarnessAdapter(options: OmpAcpAdapterOptions): Harne
   }
 
   async function start(request: StartHarnessSessionRequest): Promise<HarnessSession> {
+    assertSafeDurableHarnessId(request.durableHarnessId);
     if (activeIdentities.has(request.durableHarnessId)) {
       throw new OmpAcpAdapterError(
         "session_conflict",
