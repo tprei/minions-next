@@ -111,6 +111,7 @@ export interface HarnessSession {
   interrupt(): Promise<void>;
   abort(): Promise<void>;
   snapshot(): Promise<HarnessSessionSnapshot>;
+  dispose(): void;
 }
 
 export interface HarnessAdapter {

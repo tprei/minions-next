@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -255,6 +255,51 @@ describe("defaultRuntimeOptions auth-broker wiring (PR 19)", () => {
       }
     },
   );
+});
+
+describe("daemon static web serving URI resilience", () => {
+  it("returns 400 on malformed URI paths and remains alive for subsequent requests", async () => {
+    const home = makeHome();
+    const webDistDir = join(home, "web-dist");
+    mkdirSync(webDistDir, { recursive: true });
+    writeFileSync(
+      join(webDistDir, "index.html"),
+      "<!DOCTYPE html><html><body>ok</body></html>\n",
+      "utf8",
+    );
+
+    const clock = new FixedClock(timestampFromEpochMilliseconds(STARTED_AT_MS));
+    const ids = createSecureIdGenerator({
+      now: () => timestampFromEpochMilliseconds(STARTED_AT_MS),
+    });
+    const port = await reserveLoopbackPort();
+    const runtime = await startDaemonRuntime({
+      home,
+      mode: "local",
+      port,
+      serverVersion: "0.0.0",
+      clock,
+      ids,
+      logger: captureLogger(),
+      displayName: "static-web-resilience-host",
+      webDistDir,
+    });
+    try {
+      const malformedOne = await fetch(`http://127.0.0.1:${String(port)}/%`);
+      expect(malformedOne.status).toBe(400);
+
+      const malformedTwo = await fetch(`http://127.0.0.1:${String(port)}/%zz`);
+      expect(malformedTwo.status).toBe(400);
+
+      const valid = await fetch(`http://127.0.0.1:${String(port)}/`);
+      expect(valid.status).toBe(200);
+      const text = await valid.text();
+      expect(text).toContain("ok");
+    } finally {
+      await runtime.close();
+      cleanup(home);
+    }
+  }, 30_000);
 });
 
 // Reference the symbols used above so type-only imports survive bundling.

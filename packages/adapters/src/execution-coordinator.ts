@@ -292,7 +292,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     const lease = await this.#claimForNode(request);
     let createdInstance: SandboxInstance | undefined;
     let sandbox: SandboxHandle;
-    let session: HarnessSession;
+    let session: HarnessSession | undefined;
     let handshake: HarnessHandshake;
     try {
       if (resumeFrom === undefined) {
@@ -338,6 +338,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       // and destroy a sandbox created during THIS setup (never the retained resume
       // sandbox — HAR-01 keeps it for rebind). Mid-stream failures are handled by
       // #failClosed, which retains the sandbox for resume.
+      session?.dispose();
       if (createdInstance !== undefined) {
         await this.#destroySandbox(sandboxHandle(createdInstance));
       }
@@ -603,11 +604,15 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       stream.lastSequence,
       "finalizing",
     );
-    await this.#checkpoints.record(finalCheckpoint);
-    if (!options?.deferOutcomeRecording) {
-      await this.#recordOutcome(request, resolved);
+    try {
+      await this.#checkpoints.record(finalCheckpoint);
+      if (!options?.deferOutcomeRecording) {
+        await this.#recordOutcome(request, resolved);
+      }
+      await this.#releaseLease(setup.lease);
+    } finally {
+      setup.session.dispose();
     }
-    await this.#releaseLease(setup.lease);
     await this.#destroySandbox(setup.sandbox);
     const transcript = await this.#transcriptSummary(attemptIdValue);
     this.#logger.log("info", "node_execution_completed", {
@@ -840,10 +845,14 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     const attemptIdValue = request.context.attemptId;
     const streamingStarted = setup !== undefined && phase !== "claimed";
     if (setup !== undefined) {
-      if (streamingStarted) {
-        await this.#recordFailureCheckpoint(setup, request);
+      try {
+        if (streamingStarted) {
+          await this.#recordFailureCheckpoint(setup, request);
+        }
+        await this.#releaseLease(setup.lease);
+      } finally {
+        setup.session.dispose();
       }
-      await this.#releaseLease(setup.lease);
       // Retain the sandbox on mid-stream harness death so resume can rebind it
       // (HAR-01); destroy on setup-phase failures (no leaked sandbox/process).
       if (!streamingStarted) {
