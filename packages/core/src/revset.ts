@@ -70,12 +70,12 @@ export type RevsetResult = Readonly<{
 // -------------------------------------------------------------------------------------------------
 
 /**
- * Context for {@link buildRevsetExpression}. Carries the change-id tokens that
+ * Context for {@link buildRevsetExpression}. Carries the revision tokens that
  * define the registered tree (and, for descendants/ancestors, the scope node's
- * change id). The tokens are opaque to this pure layer: the adapter supplies
- * them in whatever form the underlying `jj` revset accepts (jj-native change
- * ids in production), and the binding table uses the same tokens for its
- * cross-check.
+ * revision token). The tokens are opaque to this pure layer: they must be
+ * revision ids the underlying `jj` revset can resolve. The production adapter
+ * supplies commit ids from `VcsChangeBinding.currentCommitId`, and the
+ * caller's cross-check must use the same token space.
  */
 export type RevsetExpressionScope = Readonly<{
   /** Change-id tokens that constitute the registered tree. May be empty. */

@@ -69,14 +69,8 @@ const LEAF_CHANGE = change(4);
 const SIBLING_CHANGE = change(5);
 const OTHER_TREE_CHANGE = change(6);
 
-// All TREE_A change ids; the double returns these for a "fully confirming" jj.
-const TREE_A_CHANGES: readonly string[] = [
-  ROOT_CHANGE,
-  CHILD_CHANGE,
-  GRANDCHILD_CHANGE,
-  LEAF_CHANGE,
-  SIBLING_CHANGE,
-];
+// All TREE_A commit ids; the double returns these for a "fully confirming" jj.
+const TREE_A_COMMITS: readonly string[] = [commit(1), commit(2), commit(31), commit(4), commit(5)];
 
 /*
  * Topology under test:
@@ -188,16 +182,16 @@ afterEach(async () => {
   temporary = undefined;
 });
 
-/** A double that returns the seeded change ids for any `jj log` revset. */
-function fakeRunner(changeIds: readonly string[]): RevsetJjRunner {
+/** A double that returns the seeded commit ids for any `jj log` revset. */
+function fakeRunner(commitIds: readonly string[]): RevsetJjRunner {
   return () =>
     Promise.resolve<RevsetJjRunResult>({
       exitCode: 0,
-      stdout: `${changeIds.join("\n")}\n`,
+      stdout: `${commitIds.join("\n")}\n`,
       stderr: "",
     });
 }
-function manager(changeIds: readonly string[] = TREE_A_CHANGES) {
+function manager(commitIds: readonly string[] = TREE_A_COMMITS) {
   if (temporary === undefined) {
     throw new Error("test database not initialized");
   }
@@ -205,7 +199,7 @@ function manager(changeIds: readonly string[] = TREE_A_CHANGES) {
     jjBinaryPath: "/nonexistent/jj",
     workingCopyPath: "/nonexistent/repo",
     bindingStore: createSqliteVcsChangeBindingStore({ database: temporary.database }),
-    runJj: fakeRunner(changeIds),
+    runJj: fakeRunner(commitIds),
   });
 }
 
@@ -285,9 +279,9 @@ describe("revset manager: bookmarked query", () => {
 
 describe("revset manager: scoping (queries cannot escape the registered tree)", () => {
   it("never returns another tree's bindings", async () => {
-    // Even a double that "confirms" every change id (including the other tree)
+    // Even a double that "confirms" every commit id (including the other tree)
     // cannot surface TREE_B: listForTree(TREE_A) excludes it.
-    const result = await manager([...TREE_A_CHANGES, OTHER_TREE_CHANGE]).execute({
+    const result = await manager([...TREE_A_COMMITS, commit(6)]).execute({
       treeId: TREE_A,
       kind: "descendants",
       scopeNodeId: ROOT_NODE,
@@ -307,7 +301,7 @@ describe("revset manager: scoping (queries cannot escape the registered tree)", 
   });
 
   it("a cross-tree query lists only that tree's bindings", async () => {
-    const result = await manager([OTHER_TREE_CHANGE]).execute({
+    const result = await manager([commit(6)]).execute({
       treeId: TREE_B,
       kind: "heads",
     });
@@ -316,9 +310,9 @@ describe("revset manager: scoping (queries cannot escape the registered tree)", 
 });
 
 describe("revset manager: results match the binding table", () => {
-  it("drops jj change ids that have no binding in the tree (cross-check)", async () => {
-    const foreign = change(99);
-    const result = await manager([...TREE_A_CHANGES, foreign]).execute({
+  it("drops jj commit ids that have no binding in the tree (cross-check)", async () => {
+    const foreign = commit(99);
+    const result = await manager([...TREE_A_COMMITS, foreign]).execute({
       treeId: TREE_A,
       kind: "heads",
     });
@@ -329,9 +323,53 @@ describe("revset manager: results match the binding table", () => {
   it("drops bindings the live jj answer did not confirm", async () => {
     // Double confirms only ROOT + CHILD; the heads filter {LEAF, SIBLING} is
     // therefore empty after the cross-check.
-    const result = await manager([ROOT_CHANGE, CHILD_CHANGE]).execute({
+    const result = await manager([commit(1), commit(2)]).execute({
       treeId: TREE_A,
       kind: "heads",
+    });
+    expect(result.bindings).toEqual([]);
+    expect(result.changeIds).toEqual([]);
+  });
+
+  it("requests commit_id template from jj log", async () => {
+    const capturedArgs: string[][] = [];
+    const runner: RevsetJjRunner = (args) => {
+      capturedArgs.push([...args]);
+      return Promise.resolve<RevsetJjRunResult>({
+        exitCode: 0,
+        stdout: `${TREE_A_COMMITS.join("\n")}\n`,
+        stderr: "",
+      });
+    };
+    if (temporary === undefined) {
+      throw new Error("test database not initialized");
+    }
+    const mgr = createRevsetManager({
+      jjBinaryPath: "/nonexistent/jj",
+      workingCopyPath: "/nonexistent/repo",
+      bindingStore: createSqliteVcsChangeBindingStore({ database: temporary.database }),
+      runJj: runner,
+    });
+    await mgr.execute({ treeId: TREE_A, kind: "heads" });
+    const logCall = capturedArgs.find((args) => args[0] === "log");
+    expect(logCall).toBeDefined();
+    if (logCall === undefined) throw new Error("expected jj log call");
+    const templateIndex = logCall.indexOf("-T");
+    expect(templateIndex).toBeGreaterThan(-1);
+    expect(logCall[templateIndex + 1]).toBe('commit_id ++ "\\n"');
+  });
+  it("yields zero bindings when the runner returns z-base-32 change ids instead of commit ids", async () => {
+    const zBase32ChangeIds = [
+      "kkmrssonomvr",
+      "qpvuntsmwlqt",
+      "zsuskulnlkno",
+      "mpvwkrmkltno",
+      "vrstkwonlqpm",
+    ];
+    const result = await manager(zBase32ChangeIds).execute({
+      treeId: TREE_A,
+      kind: "descendants",
+      scopeNodeId: ROOT_NODE,
     });
     expect(result.bindings).toEqual([]);
     expect(result.changeIds).toEqual([]);
@@ -477,12 +515,12 @@ describe("revset domain: filterBindings topology", () => {
 
 describe("revset manager: reviewHeaders", () => {
   /**
-   * A runner that returns change ids for `log` and configurable interdiff output.
+   * A runner that returns commit ids for `log` and configurable interdiff output.
    * `capturedArgs`, when supplied, records every `interdiff` invocation's argv so tests
    * can assert on exactly what was passed to jj (e.g. that `--summary` is no longer used).
    */
   function reviewRunner(
-    changeIds: readonly string[],
+    commitIds: readonly string[],
     interdiffOutput = "",
     capturedArgs?: string[][],
   ): RevsetJjRunner {
@@ -497,7 +535,7 @@ describe("revset manager: reviewHeaders", () => {
       }
       return Promise.resolve<RevsetJjRunResult>({
         exitCode: 0,
-        stdout: `${changeIds.join("\n")}\n`,
+        stdout: `${commitIds.join("\n")}\n`,
         stderr: "",
       });
     };
@@ -529,7 +567,7 @@ describe("revset manager: reviewHeaders", () => {
       jjBinaryPath: "/nonexistent/jj",
       workingCopyPath: "/nonexistent/repo",
       bindingStore: createSqliteVcsChangeBindingStore({ database: temporary.database }),
-      runJj: reviewRunner(TREE_A_CHANGES, interdiffOutput, capturedArgs),
+      runJj: reviewRunner(TREE_A_COMMITS, interdiffOutput, capturedArgs),
     });
   }
 

@@ -235,7 +235,7 @@ export function createRevsetManager(options: RevsetManagerOptions): RevsetManage
 
     // Resolve the scope change token (tree-scoped). A scope node that is not
     // bound in THIS tree yields an empty result rather than escaping the tree.
-    const treeChangeIds = treeBindings.map((binding) => binding.jjChangeId);
+    const treeCommitIds = treeBindings.map((binding) => binding.currentCommitId);
     let scopeBinding: VcsChangeBinding | undefined;
     if (query.scopeNodeId !== undefined) {
       scopeBinding = await bindingStore.getBinding(query.treeId, query.scopeNodeId);
@@ -246,22 +246,21 @@ export function createRevsetManager(options: RevsetManagerOptions): RevsetManage
     const expression = buildRevsetExpression(
       query,
       scopeBinding === undefined
-        ? { treeChangeIds }
-        : { treeChangeIds, scopeChangeId: scopeBinding.jjChangeId },
+        ? { treeChangeIds: treeCommitIds }
+        : { treeChangeIds: treeCommitIds, scopeChangeId: scopeBinding.currentCommitId },
     );
 
-    const args = ["log", "--no-graph", "-r", expression, "-T", 'change_id ++ "\\n"'];
+    const args = ["log", "--no-graph", "-r", expression, "-T", 'commit_id ++ "\\n"'];
     const result = await run(args);
-    const jjChangeIds = parseChangeIds(result.stdout);
-    const jjConfirmed = new Set<string>(jjChangeIds);
+    const jjCommitIds = parseChangeIds(result.stdout);
+    const jjConfirmed = new Set<string>(jjCommitIds);
 
     // The binding table is the topology authority; filterBindings recovers the
-    // answer from parentChangeId. The live jj answer then confirms each binding
-    // is currently in the revset, and any jj change id without a binding is
-    // dropped (scoped, fail-closed). The two projections agree on a consistent
-    // tree; drift would drop the binding here.
+    // answer from parentChangeId. The live layer is keyed on commit ids, the
+    // binding table on fingerprints, and a binding whose currentCommitId is no
+    // longer in the revset is dropped as drift.
     const filtered = filterBindings(treeBindings, query);
-    const finalBindings = filtered.filter((binding) => jjConfirmed.has(binding.jjChangeId));
+    const finalBindings = filtered.filter((binding) => jjConfirmed.has(binding.currentCommitId));
     return Object.freeze({
       changeIds: finalBindings.map((binding) => binding.jjChangeId),
       bindings: finalBindings,
