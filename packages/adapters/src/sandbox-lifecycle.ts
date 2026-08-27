@@ -624,20 +624,20 @@ function validateExecutionResult(
   maxOutputBytes: number,
 ): SandboxExecutionResult {
   const record = asRecord(candidate);
+  const exitCode = record?.["exitCode"];
+  const stdout = record?.["stdout"];
+  const stderr = record?.["stderr"];
   if (
-    record === undefined ||
-    typeof record["exitCode"] !== "number" ||
-    !Number.isSafeInteger(record["exitCode"]) ||
-    !(record["stdout"] instanceof Uint8Array) ||
-    !(record["stderr"] instanceof Uint8Array)
+    typeof exitCode !== "number" ||
+    !Number.isSafeInteger(exitCode) ||
+    !(stdout instanceof Uint8Array) ||
+    !(stderr instanceof Uint8Array)
   ) {
     throw new ProductionSandboxLifecycleError(
       "backend_result_invalid",
       "sandbox backend returned an invalid execution result",
     );
   }
-  const stdout = record["stdout"];
-  const stderr = record["stderr"];
   const combinedOutputBytes = stdout.byteLength + stderr.byteLength;
   if (!Number.isSafeInteger(combinedOutputBytes) || combinedOutputBytes > maxOutputBytes) {
     throw new ProductionSandboxLifecycleError(
@@ -645,7 +645,7 @@ function validateExecutionResult(
       "sandbox backend execution output exceeds the requested limit",
     );
   }
-  return record as unknown as SandboxExecutionResult;
+  return Object.freeze({ exitCode, stdout, stderr });
 }
 
 function assertMatchingPolicyFingerprint(
