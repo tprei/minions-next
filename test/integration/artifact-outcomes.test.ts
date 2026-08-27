@@ -151,7 +151,6 @@ async function createFixture(
       }),
       attentionId: id(0x118),
       rootAllowedRepositoryPaths: ["."],
-      rootCheckProfile: "root-checks",
     }),
     at: at(0),
   });
@@ -175,7 +174,6 @@ async function createFixture(
             value: create(ImplementationOutputContractSchema, {}),
           },
           allowedRepositoryPaths: ["."],
-          checkProfile: "implementation-checks",
         }),
         create(ProposedNodeSchema, {
           nodeId: childNodeId,
@@ -198,7 +196,6 @@ async function createFixture(
                   value: create(ImplementationOutputContractSchema, {}),
                 },
           allowedRepositoryPaths: ["."],
-          checkProfile: "child-checks",
         }),
         ...(includeSecondArtifact
           ? [
@@ -217,7 +214,6 @@ async function createFixture(
                   }),
                 },
                 allowedRepositoryPaths: ["."],
-                checkProfile: "child-checks",
               }),
             ]
           : []),

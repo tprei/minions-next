@@ -68,9 +68,6 @@ test.describe("new task", () => {
     await tabUntilFocused(page, "new-task-base-commit");
     await tabUntilFocused(page, "new-task-root-allowed-path");
 
-    await tabUntilFocused(page, "new-task-root-check-profile");
-    await page.keyboard.type("lint");
-
     // Budget fields already carry sane defaults; tab through every one of them so the whole
     // form's tab order is exercised end to end, not just the fields that need typing.
     await tabUntilFocused(page, "new-task-max-depth");

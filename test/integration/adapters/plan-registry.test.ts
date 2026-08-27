@@ -201,7 +201,6 @@ function createRequest() {
     budget: budget(),
     attentionId: ATTENTION_ID,
     rootAllowedRepositoryPaths: [".", "src"],
-    rootCheckProfile: "root-checks",
   });
 }
 
@@ -218,7 +217,6 @@ function proposedNode() {
       value: create(ImplementationOutputContractSchema, {}),
     },
     allowedRepositoryPaths: [".", "src"],
-    checkProfile: "implementation-checks",
   });
 }
 
@@ -489,7 +487,7 @@ describe("SQLite plan registry", () => {
           "SELECT node_id, ordinal, repository_path FROM node_repository_scope ORDER BY node_id, ordinal",
         ),
         policies: reader.all(
-          "SELECT node_id, check_profile, max_attempts FROM node_plan_policies ORDER BY node_id",
+          "SELECT node_id, max_attempts FROM node_plan_policies ORDER BY node_id",
         ),
         commands: reader.all("SELECT * FROM operator_commands"),
         idempotency: reader.all("SELECT * FROM idempotency_records"),
@@ -504,8 +502,8 @@ describe("SQLite plan registry", () => {
         { node_id: CHILD_NODE_ID, ordinal: 1n, repository_path: "src" },
       ]);
       expect(rows.policies).toEqual([
-        { node_id: ROOT_NODE_ID, check_profile: "root-checks", max_attempts: 2n },
-        { node_id: CHILD_NODE_ID, check_profile: "implementation-checks", max_attempts: 2n },
+        { node_id: ROOT_NODE_ID, max_attempts: 2n },
+        { node_id: CHILD_NODE_ID, max_attempts: 2n },
       ]);
       expect(rows.commands).toHaveLength(4);
       expect(rows.idempotency).toHaveLength(4);
@@ -603,7 +601,7 @@ describe("SQLite plan registry", () => {
       }
       const changedRoot = create(TaskNodeSchema, {
         ...root,
-        checkProfile: "changed",
+        objective: "changed",
       });
       const changedCreateTree = create(TaskTreeSchema, {
         ...createResult.tree,
@@ -615,7 +613,7 @@ describe("SQLite plan registry", () => {
       });
       const changedCreateBytes = toBinary(CreateTreeResponseSchema, changedCreateResult);
       expect(
-        fromBinary(CreateTreeResponseSchema, changedCreateBytes).tree?.nodes[0]?.checkProfile,
+        fromBinary(CreateTreeResponseSchema, changedCreateBytes).tree?.nodes[0]?.objective,
       ).toBe("changed");
       const corruptCreateDatabase = new DatabaseSync(temporary.path);
       try {

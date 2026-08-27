@@ -298,7 +298,6 @@ function toTaskNodeMessage(node: TaskNodeRecord, binding: VcsChangeBinding | und
     inputs: node.inputs.map((input) => create(ArtifactInputSchema, input)),
     outputContract,
     allowedRepositoryPaths: [...node.allowedRepositoryPaths],
-    checkProfile: node.checkProfile,
     budget: create(NodeBudgetSchema, { maxAttempts: node.budget.maxAttempts }),
     state: node.state,
     version: BigInt(node.version),

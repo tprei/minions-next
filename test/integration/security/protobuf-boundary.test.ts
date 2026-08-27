@@ -67,7 +67,6 @@ describe("protobuf boundary security", () => {
         maxAttemptsPerNode: 3,
       },
       rootAllowedRepositoryPaths: ["."],
-      rootCheckProfile: "lint",
     });
     // The create() function accepts any string; server-side validation rejects it.
     expect(req.baseCommit).toBe("invalid-not-a-sha");

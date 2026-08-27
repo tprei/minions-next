@@ -149,12 +149,8 @@ const CONNECT_REPAIR_NODE_ID = "01900000-0000-7000-8000-000000000412";
 
 const CONNECT_SCOPE_ROOT = ".";
 const CONNECT_SCOPE_IMPLEMENTATION = ["src", "tests"] as const;
-const CONNECT_CHECK_PROFILE_ROOT = "connect-root";
-const CONNECT_CHECK_PROFILE_IMPLEMENTATION = "connect-implementation";
 const CLI_SCOPE_ROOT = ".";
 const CLI_SCOPE_IMPLEMENTATION = ["src", "tests"] as const;
-const CLI_CHECK_PROFILE_ROOT = "cli-root";
-const CLI_CHECK_PROFILE_IMPLEMENTATION = "cli-implementation";
 
 const CLI_REPAIR_INSTANCE_ID = "01900000-0000-7000-8000-000000000501";
 const CLI_REPAIR_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000502";
@@ -290,7 +286,6 @@ type JsonNode = Readonly<{
   created_at: JsonTimestamp;
   updated_at: JsonTimestamp;
   allowed_repository_paths: readonly string[];
-  check_profile: string;
   budget: JsonNodeBudget;
   artifact?: JsonArtifact;
   implementation?: Readonly<Record<string, never>>;
@@ -486,7 +481,6 @@ function parseJsonNode(value: unknown, index: number): JsonNode {
       "created_at",
       "updated_at",
       "allowed_repository_paths",
-      "check_profile",
       "budget",
     ],
     ["parent_node_id", "artifact", "implementation"],
@@ -524,7 +518,6 @@ function parseJsonNode(value: unknown, index: number): JsonNode {
     created_at: parseJsonTimestamp(node["created_at"], `${field}.created_at`),
     updated_at: parseJsonTimestamp(node["updated_at"], `${field}.updated_at`),
     allowed_repository_paths: requireStringArray(node, "allowed_repository_paths"),
-    check_profile: requireString(node, "check_profile"),
     budget: parseJsonNodeBudget(node["budget"], `${field}.budget`),
     ...output,
   };
@@ -817,7 +810,6 @@ function createTreeRequest(
     baseCommit,
     budget,
     rootAllowedRepositoryPaths: [CONNECT_SCOPE_ROOT],
-    rootCheckProfile: CONNECT_CHECK_PROFILE_ROOT,
     attentionId,
   });
 }
@@ -840,7 +832,6 @@ function proposedImplementationNode(
       value: create(ImplementationOutputContractSchema, {}),
     },
     allowedRepositoryPaths: [...CONNECT_SCOPE_IMPLEMENTATION],
-    checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
   });
 }
 
@@ -871,7 +862,6 @@ function proposedResearchNode(
       }),
     },
     allowedRepositoryPaths: [...CONNECT_SCOPE_IMPLEMENTATION],
-    checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
   });
 }
 
@@ -892,7 +882,6 @@ function proposedResearchNodeForCli(
     acceptanceCriteria: [...acceptanceCriteria],
     inputs: [{ artifactId: rootArtifactId, sourceNodeId: rootNodeId }],
     allowedRepositoryPaths: [...CLI_SCOPE_IMPLEMENTATION],
-    checkProfile: CLI_CHECK_PROFILE_IMPLEMENTATION,
     artifact: { artifactId, artifactType: "research/notes" },
   };
 }
@@ -965,10 +954,6 @@ function expectedArtifactNode(
     state,
     allowedRepositoryPaths:
       mode === PlanNodeMode.PLAN ? [CONNECT_SCOPE_ROOT] : [...CONNECT_SCOPE_IMPLEMENTATION],
-    checkProfile:
-      mode === PlanNodeMode.PLAN
-        ? CONNECT_CHECK_PROFILE_ROOT
-        : CONNECT_CHECK_PROFILE_IMPLEMENTATION,
     budget: create(NodeBudgetSchema, { maxAttempts: 2 }),
     version,
     createdAt: timestampMessage(createdAtMs),
@@ -1007,7 +992,6 @@ function expectedImplementationNode(
     },
     state,
     allowedRepositoryPaths: [...CONNECT_SCOPE_IMPLEMENTATION],
-    checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
     budget: create(NodeBudgetSchema, { maxAttempts: 2 }),
     version,
     createdAt: timestampMessage(createdAtMs),
@@ -1325,10 +1309,6 @@ function jsonArtifactNode(
     state: input.state,
     allowed_repository_paths:
       input.mode === "PLAN_NODE_MODE_PLAN" ? [CLI_SCOPE_ROOT] : [...CLI_SCOPE_IMPLEMENTATION],
-    check_profile:
-      input.mode === "PLAN_NODE_MODE_PLAN"
-        ? CLI_CHECK_PROFILE_ROOT
-        : CLI_CHECK_PROFILE_IMPLEMENTATION,
     budget: { max_attempts: 2 },
     version: String(input.version),
     created_at: jsonTimestamp(input.createdAtMs),
@@ -1366,7 +1346,6 @@ function jsonImplementationNode(
     inputs: [],
     state: input.state,
     allowed_repository_paths: [...CLI_SCOPE_IMPLEMENTATION],
-    check_profile: CLI_CHECK_PROFILE_IMPLEMENTATION,
     budget: { max_attempts: 2 },
     version: String(input.version),
     created_at: jsonTimestamp(input.createdAtMs),
@@ -1582,7 +1561,6 @@ describe("tree service integration", () => {
               value: create(ImplementationOutputContractSchema, {}),
             },
             allowedRepositoryPaths: [...CONNECT_SCOPE_IMPLEMENTATION],
-            checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
           }),
         ],
       });
@@ -2538,7 +2516,6 @@ describe("tree service integration", () => {
       expect(missingRootScope.code).toBe(2);
       expect(missingRootScope.stdout).toBe("");
       expect(missingRootScope.stderr).toContain("--root-allowed-path");
-      expect(missingRootScope.stderr).toContain("--root-check-profile");
 
       const created = await captureCliJson(
         () =>
@@ -2560,8 +2537,6 @@ describe("tree service integration", () => {
             "2",
             "--root-allowed-path",
             CLI_SCOPE_ROOT,
-            "--root-check-profile",
-            CLI_CHECK_PROFILE_ROOT,
             "--home",
             home,
           ]),
@@ -2706,7 +2681,6 @@ describe("tree service integration", () => {
               inputs: [],
               implementation: {},
               allowedRepositoryPaths: [...CLI_SCOPE_IMPLEMENTATION],
-              checkProfile: CLI_CHECK_PROFILE_IMPLEMENTATION,
             },
             proposedResearchNodeForCli(
               CLI_DEEP_NODE_ID,
@@ -3060,7 +3034,6 @@ describe("tree service integration", () => {
               value: create(ImplementationOutputContractSchema, {}),
             },
             allowedRepositoryPaths: ["../escape"],
-            checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
           }),
         ],
       });
@@ -3291,8 +3264,6 @@ describe("tree service integration", () => {
             "2",
             "--root-allowed-path",
             CLI_SCOPE_ROOT,
-            "--root-check-profile",
-            CLI_CHECK_PROFILE_ROOT,
             "--home",
             home,
           ]),
@@ -3319,7 +3290,6 @@ describe("tree service integration", () => {
               acceptanceCriteria: ["the repaired cli child is implementable"],
               inputs: [],
               allowedRepositoryPaths: ["../escape"],
-              checkProfile: CLI_CHECK_PROFILE_IMPLEMENTATION,
               implementation: {},
             },
           ],
@@ -3365,7 +3335,6 @@ describe("tree service integration", () => {
               acceptanceCriteria: ["the repaired cli child is implementable"],
               inputs: [],
               allowedRepositoryPaths: [...CLI_SCOPE_IMPLEMENTATION],
-              checkProfile: CLI_CHECK_PROFILE_IMPLEMENTATION,
               implementation: {},
             },
           ],

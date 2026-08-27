@@ -2651,6 +2651,23 @@ BEGIN
 END;
 ```
 
+### 0015 drop_plan_policy_check_profile
+
+SHA-256: `5a798566f8409206182cab9cafff02950d0b25206561b79bde4e8bb02a4d37c5`
+
+```sql
+DROP TRIGGER node_plan_policy_definition_is_immutable;
+
+ALTER TABLE node_plan_policies DROP COLUMN check_profile;
+
+CREATE TRIGGER node_plan_policy_definition_is_immutable
+BEFORE UPDATE OF node_id, max_attempts
+ON node_plan_policies
+BEGIN
+  SELECT RAISE(ABORT, 'node plan policy definition is immutable');
+END;
+```
+
 ## Supervisor database
 
 ### 0001 execution_hosts

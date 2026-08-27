@@ -147,7 +147,6 @@ export type TaskNodeRecord = Readonly<{
   inputs: readonly ArtifactInputRecord[];
   outputContract: TaskNodeOutputRecord;
   allowedRepositoryPaths: readonly NonEmptyText[];
-  checkProfile: NonEmptyText;
   budget: NodeBudgetRecord;
   state: NodeState;
   version: number;
@@ -243,11 +242,9 @@ type ProposedNodeRecord = Readonly<{
   inputs: readonly ArtifactInputRecord[];
   outputContract: TaskNodeOutputRecord;
   allowedRepositoryPaths: readonly NonEmptyText[];
-  checkProfile: NonEmptyText;
 }>;
 
 type NodePolicyRecord = Readonly<{
-  checkProfile: NonEmptyText;
   maxAttempts: number;
 }>;
 
@@ -265,7 +262,6 @@ type CreateSnapshot = Readonly<{
   baseCommit: GitSha;
   budget: TreeBudgetRecord;
   rootAllowedRepositoryPaths: readonly NonEmptyText[];
-  rootCheckProfile: NonEmptyText;
   attentionId: string;
   at: Timestamp;
 }>;
@@ -685,9 +681,9 @@ function applyCreate(
     );
   }
   transaction.run(
-    `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
-     VALUES (?, ?, ?)`,
-    [snapshot.rootNodeId, snapshot.rootCheckProfile, snapshot.budget.maxAttemptsPerNode],
+    `INSERT INTO node_plan_policies (node_id, max_attempts)
+     VALUES (?, ?)`,
+    [snapshot.rootNodeId, snapshot.budget.maxAttemptsPerNode],
   );
   transaction.run(
     `INSERT INTO tree_budgets (
@@ -852,9 +848,9 @@ function applyPlan(
       );
     }
     transaction.run(
-      `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
-       VALUES (?, ?, ?)`,
-      [node.id, node.checkProfile, current.budget.maxAttemptsPerNode],
+      `INSERT INTO node_plan_policies (node_id, max_attempts)
+       VALUES (?, ?)`,
+      [node.id, current.budget.maxAttemptsPerNode],
     );
   }
   if (
@@ -1092,7 +1088,6 @@ function treeMessage(tree: TreeRecord) {
       createdAt: timestampMessage(node.createdAt),
       updatedAt: timestampMessage(node.updatedAt),
       allowedRepositoryPaths: [...node.allowedRepositoryPaths],
-      checkProfile: node.checkProfile,
       budget: create(NodeBudgetSchema, node.budget),
     }),
   );
@@ -1159,7 +1154,6 @@ function snapshotCreateInput(input: CreateTreeInput): CreateSnapshot {
         message.rootAllowedRepositoryPaths,
         "root allowed repository paths",
       ),
-      rootCheckProfile: snapshotCheckProfile(message.rootCheckProfile, "root check profile"),
       attentionId: parseUuid(message.attentionId, "attention ID"),
       at: timestampFromEpochMilliseconds(input.at),
     });
@@ -1325,12 +1319,6 @@ function repositoryPath(value: string, fieldName: string): NonEmptyText {
   return path;
 }
 
-function snapshotCheckProfile(value: string, fieldName: string): NonEmptyText {
-  const profile = nonEmptyText(value, fieldName);
-  if (profile.length > 512) throw new TypeError(`${fieldName} exceeds 512 characters`);
-  return profile;
-}
-
 function snapshotProposedNodes(values: readonly ProposedNode[]): readonly ProposedNodeRecord[] {
   if (values.length < 1) {
     throw new TypeError("a plan must contain at least one proposed node");
@@ -1371,7 +1359,6 @@ function snapshotProposedNodes(values: readonly ProposedNode[]): readonly Propos
         value.allowedRepositoryPaths,
         `node ${String(index)} allowed repository paths`,
       ),
-      checkProfile: snapshotCheckProfile(value.checkProfile, `node ${String(index)} check profile`),
     });
   });
   const ids = new Set<string>();
@@ -1748,7 +1735,7 @@ function readTreeRecord(reader: SqliteReader, treeId: TaskTreeId): TreeRecord {
       scopes.set(nodeId, values);
     }
     const policyRows = reader.all(
-      `SELECT node_id, check_profile, max_attempts
+      `SELECT node_id, max_attempts
          FROM node_plan_policies
         WHERE node_id IN (SELECT id FROM nodes WHERE tree_id = ?)
         ORDER BY node_id`,
@@ -1765,10 +1752,6 @@ function readTreeRecord(reader: SqliteReader, treeId: TaskTreeId): TreeRecord {
       policies.set(
         nodeId,
         Object.freeze({
-          checkProfile: snapshotCheckProfile(
-            requiredString(row, "check_profile"),
-            "node check profile",
-          ),
           maxAttempts,
         }),
       );
@@ -1905,7 +1888,6 @@ function nodeFromRow(
     inputs: Object.freeze([...nodeInputs]),
     outputContract: output,
     allowedRepositoryPaths: Object.freeze([...nodeScope]),
-    checkProfile: nodePolicy.checkProfile,
     budget: Object.freeze({ maxAttempts: nodePolicy.maxAttempts }),
     state,
     version,
@@ -2224,7 +2206,6 @@ function validateTreeRecord(tree: TreeRecord): void {
     )
       throw new TypeError("node acceptance criteria are invalid");
     snapshotRepositoryPaths(node.allowedRepositoryPaths, "node allowed repository paths");
-    snapshotCheckProfile(node.checkProfile, "node check profile");
     if (
       !Number.isSafeInteger(node.budget.maxAttempts) ||
       node.budget.maxAttempts < 1 ||
@@ -2446,10 +2427,6 @@ function nodeFromMessage(value: unknown): TaskNodeRecord {
       pathsValue.map((path) => assertString(path, "repository path")),
       "node allowed repository paths",
     ),
-    checkProfile: snapshotCheckProfile(
-      requiredObjectString(message, "checkProfile"),
-      "node check profile",
-    ),
     budget: nodeBudgetFromMessage(message["budget"]),
     state: nodeStateFromValue(message["state"]),
     version: safeBigIntNumber(requiredObjectBigInt(message, "version"), "node version"),
@@ -2553,7 +2530,6 @@ function assertRequestFacts(
       root.outputContract.value.artifactId !== snapshot.rootArtifactId ||
       root.outputContract.value.artifactType !== "plan" ||
       !sameStrings(root.allowedRepositoryPaths, snapshot.rootAllowedRepositoryPaths) ||
-      root.checkProfile !== snapshot.rootCheckProfile ||
       root.budget.maxAttempts !== snapshot.budget.maxAttemptsPerNode ||
       !sameAttentionFacts(
         attention,
@@ -2670,7 +2646,6 @@ function assertRequestFacts(
       !sameInputs(node.inputs, candidate.inputs) ||
       !sameOutput(node.outputContract, candidate.outputContract) ||
       !sameStrings(node.allowedRepositoryPaths, candidate.allowedRepositoryPaths) ||
-      node.checkProfile !== candidate.checkProfile ||
       node.budget.maxAttempts !== tree.budget.maxAttemptsPerNode ||
       node.state !== NodeState.PLANNED ||
       node.version !== 0 ||
@@ -2781,7 +2756,6 @@ function assertImmutableReplayFacts(result: TreeRecord, persisted: TreeRecord): 
       !sameInputs(node.inputs, current.inputs) ||
       !sameOutput(node.outputContract, current.outputContract) ||
       !sameStrings(node.allowedRepositoryPaths, current.allowedRepositoryPaths) ||
-      node.checkProfile !== current.checkProfile ||
       node.budget.maxAttempts !== current.budget.maxAttempts ||
       node.createdAt !== current.createdAt ||
       node.version > current.version ||

@@ -69,7 +69,6 @@ interface LockedNode {
   readonly inputs: readonly ArtifactInput[];
   readonly outputContract: OutputContractView;
   readonly allowedRepositoryPaths: readonly string[];
-  readonly checkProfile: string;
   readonly state: NodeState;
   readonly maxAttempts: number;
   readonly vcsChangeBinding: VcsChangeBinding | undefined;
@@ -160,7 +159,6 @@ interface WorkingNode {
   readonly inputs: readonly ArtifactInputDraft[];
   readonly outputContract: OutputContractDraft;
   readonly allowedRepositoryPaths: readonly string[];
-  readonly checkProfile: string;
 }
 
 export interface WorkingTree {
@@ -195,7 +193,6 @@ export function seedWorkingTree(tree: TaskTree): WorkingTree {
         inputs: node.inputs,
         outputContract: outputContractView(node.outputContract),
         allowedRepositoryPaths: node.allowedRepositoryPaths,
-        checkProfile: node.checkProfile,
         state: node.state,
         maxAttempts: node.budget?.maxAttempts ?? 0,
         vcsChangeBinding: node.vcsChangeBinding,
@@ -216,7 +213,6 @@ export function seedWorkingTree(tree: TaskTree): WorkingTree {
         })),
         outputContract: outputContractDraft(node.outputContract),
         allowedRepositoryPaths: [...node.allowedRepositoryPaths],
-        checkProfile: node.checkProfile,
       });
     }
   }
@@ -500,9 +496,6 @@ export function validateWorkingTree(
       const error = validateCanonicalRelativePath(path, "Allowed repository path");
       if (error !== undefined) issues.push({ key: node.key, message: error });
     }
-    if (node.checkProfile.trim().length === 0) {
-      issues.push({ key: node.key, message: "Check profile must not be empty." });
-    }
     if (node.outputContract.case === "artifact") {
       if (node.outputContract.artifactType.trim().length === 0) {
         issues.push({ key: node.key, message: "Artifact type must not be empty." });
@@ -576,7 +569,6 @@ export function addWorkingNode(
     inputs: [],
     outputContract: { case: "implementation" },
     allowedRepositoryPaths: [DEFAULT_ALLOWED_PATH],
-    checkProfile: "",
   };
   return { tree: { ...tree, working: [...tree.working, node] }, key };
 }
@@ -590,7 +582,6 @@ export type WorkingNodePatch = Partial<
     | "inputs"
     | "outputContract"
     | "allowedRepositoryPaths"
-    | "checkProfile"
   >
 >;
 
@@ -665,7 +656,6 @@ function describeFieldChanges(
   if (!sameStringArray(original.allowedRepositoryPaths, working.allowedRepositoryPaths)) {
     changes.push("allowed paths");
   }
-  if (original.checkProfile !== working.checkProfile) changes.push("check profile");
   const originalCase = original.outputContract.case;
   if (originalCase !== working.outputContract.case) {
     changes.push("output contract");
@@ -784,7 +774,6 @@ export function buildProposedNodes(tree: WorkingTree): ProposedNode[] {
         }),
       ),
       allowedRepositoryPaths: [...node.allowedRepositoryPaths],
-      checkProfile: node.checkProfile,
     };
     if (node.outputContract.case === "artifact") {
       return create(ProposedNodeSchema, {
@@ -822,7 +811,6 @@ export interface OutlineRow {
   readonly state: NodeState | undefined;
   readonly mode: PlanNodeMode;
   readonly objective: string;
-  readonly checkProfile: string;
   readonly stale: boolean;
 }
 
@@ -842,7 +830,6 @@ export function flattenOutline(
         state: locked.state,
         mode: locked.mode,
         objective: locked.objective,
-        checkProfile: locked.checkProfile,
         stale: staleNodeKeys.has(key),
       });
     } else {
@@ -856,7 +843,6 @@ export function flattenOutline(
         state: undefined,
         mode: working.mode,
         objective: working.objective,
-        checkProfile: working.checkProfile,
         stale: staleNodeKeys.has(key),
       });
     }

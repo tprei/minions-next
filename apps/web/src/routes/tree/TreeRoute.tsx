@@ -63,7 +63,7 @@ import "./TreeRoute.css";
  * `CreateTree` (see NewTaskDialog's "Open tree" link) or by following a task link from the
  * host/repository home screen (RepositoryCard). Loads the FULL `TaskTree` once via `GetTree`
  * (the lightweight `TreeSummary`/`NodeSummary` projection PR 45 uses for the fleet overview
- * doesn't carry acceptance criteria, output contracts, check profiles, or allowed paths); every
+ * doesn't carry acceptance criteria, output contracts, or allowed paths); every
  * `ProposePlan`/`RepairPlan`/`ApprovePlan` call returns the complete updated `TaskTree` in its
  * own response, so the editor re-seeds directly from that rather than issuing a second
  * `GetTree` round-trip after every mutation. It still watches the live event projection's

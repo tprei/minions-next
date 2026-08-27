@@ -108,7 +108,6 @@ const snapshotRepositoryCommandIdentifier = uuid(43);
 const snapshotArtifactCommandIdentifier = uuid(44);
 const snapshotOutcomeCommandIdentifier = uuid(45);
 const planScope = ".";
-const planProfile = "event-plan";
 
 const RECOVERY_TEST_GATE_PROFILE: RecoveryGateProfile = {
   allowedKinds: ["restart"],
@@ -581,7 +580,6 @@ describe("EventService integration", () => {
           budget,
           attentionId: planAttentionOneIdentifier,
           rootAllowedRepositoryPaths: [planScope],
-          rootCheckProfile: planProfile,
         }),
       );
       expect((await running.client.getSnapshot({})).attention).toEqual([
@@ -611,7 +609,6 @@ describe("EventService integration", () => {
                 value: create(ImplementationOutputContractSchema, {}),
               },
               allowedRepositoryPaths: [planScope],
-              checkProfile: planProfile,
             }),
             create(ProposedNodeSchema, {
               nodeId: planChildOneIdentifier,
@@ -625,7 +622,6 @@ describe("EventService integration", () => {
                 value: create(ImplementationOutputContractSchema, {}),
               },
               allowedRepositoryPaths: [planScope],
-              checkProfile: planProfile,
             }),
           ],
         }),
@@ -646,7 +642,6 @@ describe("EventService integration", () => {
           budget,
           attentionId: planAttentionTwoIdentifier,
           rootAllowedRepositoryPaths: [planScope],
-          rootCheckProfile: planProfile,
         }),
       );
       expect((await running.client.getSnapshot({})).attention).toEqual([
@@ -677,7 +672,6 @@ describe("EventService integration", () => {
                 value: create(ImplementationOutputContractSchema, {}),
               },
               allowedRepositoryPaths: [planScope],
-              checkProfile: planProfile,
             }),
           ],
         }),

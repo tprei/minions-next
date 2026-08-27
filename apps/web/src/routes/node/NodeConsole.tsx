@@ -206,7 +206,6 @@ export function NodeConsole(): ReactNode {
               <Fact>
                 mode: {fetchedNode.mode !== PlanNodeMode.UNSPECIFIED ? "set" : "unspecified"}
               </Fact>
-              <Fact>check profile: {fetchedNode.checkProfile || "(unset)"}</Fact>
               <Fact>
                 allowed paths: {fetchedNode.allowedRepositoryPaths.join(", ") || "(none)"}
               </Fact>

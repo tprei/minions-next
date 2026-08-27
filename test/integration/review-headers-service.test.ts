@@ -248,7 +248,6 @@ async function createFixture(
       }),
       attentionId: deterministicId(0x22),
       rootAllowedRepositoryPaths: ["."],
-      rootCheckProfile: "root-checks",
     }),
     at,
   });
@@ -272,7 +271,6 @@ async function createFixture(
             value: create(ImplementationOutputContractSchema, {}),
           },
           allowedRepositoryPaths: ["."],
-          checkProfile: "implementation-checks",
         }),
       ],
     }),

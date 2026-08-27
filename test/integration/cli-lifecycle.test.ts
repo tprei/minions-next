@@ -318,8 +318,6 @@ describe("CLI tree provenance export", () => {
           "2",
           "--root-allowed-path",
           ".",
-          "--root-check-profile",
-          "provenance-root",
           "--home",
           home,
         ]),
@@ -344,7 +342,6 @@ describe("CLI tree provenance export", () => {
               inputs: [],
               implementation: {},
               allowedRepositoryPaths: ["src"],
-              checkProfile: "provenance-implementation",
             },
           ],
         }),
@@ -389,14 +386,12 @@ describe("CLI tree provenance export", () => {
       expect(rootProvenance["state"]).toBe("NODE_STATE_PLANNED");
       expect(rootProvenance["vcsChangeBinding"]).toBeUndefined();
       expect(rootProvenance["outcome"]).toBeNull();
-      expect(rootProvenance["checkProfile"]).toBe("provenance-root");
 
       expect(childProvenance["nodeId"]).toBe(PROVENANCE_CHILD_NODE_ID);
       expect(childProvenance["parentNodeId"]).toBe(rootNodeId);
       expect(childProvenance["objective"]).toBe("implement the provenance child");
       expect(childProvenance["state"]).toBe(childState);
       expect(childProvenance["vcsChangeBinding"]).toBeUndefined();
-      expect(childProvenance["checkProfile"]).toBe("provenance-implementation");
       expect(childProvenance["outcome"]).toBeNull();
 
       const malformed = await captureCli(() => main(["tree", "provenance", "--home", home]));
@@ -474,8 +469,6 @@ describe("CLI node inspection and steering", () => {
           "2",
           "--root-allowed-path",
           ".",
-          "--root-check-profile",
-          "node-steering-root",
           "--home",
           home,
         ]),
@@ -500,7 +493,6 @@ describe("CLI node inspection and steering", () => {
               inputs: [],
               implementation: {},
               allowedRepositoryPaths: ["src"],
-              checkProfile: "node-steering-implementation",
             },
           ],
         }),

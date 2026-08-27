@@ -107,7 +107,6 @@ type CreateTreeOptions = Readonly<{
   budget?: TreeBudget;
   attentionId?: string;
   rootAllowedRepositoryPaths?: readonly string[];
-  rootCheckProfile?: string;
 }>;
 
 type ProposedNodeOptions = Readonly<{
@@ -118,7 +117,6 @@ type ProposedNodeOptions = Readonly<{
   acceptanceCriteria?: readonly string[];
   inputs?: readonly Readonly<{ artifactId: string; sourceNodeId: string }>[];
   allowedRepositoryPaths?: readonly string[];
-  checkProfile?: string;
   output?:
     | Readonly<{ kind: "artifact"; artifactId: string; artifactType?: string }>
     | Readonly<{ kind: "implementation" }>;
@@ -282,7 +280,6 @@ function createTreeRequest(options: CreateTreeOptions = {}) {
     budget: options.budget ?? budget(),
     attentionId: options.attentionId ?? ATTENTION_ID,
     rootAllowedRepositoryPaths: [...(options.rootAllowedRepositoryPaths ?? [".", "src"])],
-    rootCheckProfile: options.rootCheckProfile ?? "root-checks",
   });
 }
 
@@ -320,7 +317,6 @@ function proposedNode(options: ProposedNodeOptions = {}): ProposedNode {
         ? artifactOutput(output.artifactId, output.artifactType)
         : implementationOutput(),
     allowedRepositoryPaths: [...(options.allowedRepositoryPaths ?? [".", "src"])],
-    checkProfile: options.checkProfile ?? "node-checks",
   };
   return create(ProposedNodeSchema, value);
 }
@@ -1189,15 +1185,6 @@ const invalidCases: readonly InvalidCase[] = [
       }),
   },
   {
-    name: "root empty check profile",
-    expectedCode: "invalid_input",
-    run: (fixture) =>
-      fixture.registry.create({
-        request: createTreeRequest({ commandId: id(503), rootCheckProfile: "" }),
-        at: AT,
-      }),
-  },
-  {
     name: "proposed backslash repository path",
     expectedCode: "invalid_input",
     prepare: prepareTree,
@@ -1231,26 +1218,6 @@ const invalidCases: readonly InvalidCase[] = [
               nodeId: id(509),
               parentNodeId: ROOT_NODE_ID,
               allowedRepositoryPaths: [".", "."],
-            }),
-          ],
-        }),
-        at: NEXT,
-      }),
-  },
-  {
-    name: "proposed empty check profile",
-    expectedCode: "invalid_input",
-    prepare: prepareTree,
-    run: (fixture) =>
-      fixture.registry.propose({
-        request: proposeRequest({
-          commandId: id(510),
-          planRevisionId: id(511),
-          nodes: [
-            proposedNode({
-              nodeId: id(512),
-              parentNodeId: ROOT_NODE_ID,
-              checkProfile: "",
             }),
           ],
         }),
@@ -1793,10 +1760,10 @@ describe("SQLite plan topology validation", () => {
       await createTree(fixture);
       await fixture.temporary.database.write((transaction) => {
         transaction.run("DELETE FROM node_plan_policies WHERE node_id = ?", [ROOT_NODE_ID]);
-        transaction.run(
-          "INSERT INTO node_plan_policies (node_id, check_profile, max_attempts) VALUES (?, ?, ?)",
-          [ROOT_NODE_ID, "root-checks", 3],
-        );
+        transaction.run("INSERT INTO node_plan_policies (node_id, max_attempts) VALUES (?, ?)", [
+          ROOT_NODE_ID,
+          3,
+        ]);
       });
       expect(() => fixture.registry.get(taskTreeId(TREE_ID))).toThrow(
         expect.objectContaining({ code: "corrupt" }),

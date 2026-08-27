@@ -46,7 +46,6 @@ interface FormState {
   goal: string;
   baseCommit: string;
   rootAllowedPath: string;
-  rootCheckProfile: string;
   maxDepth: string;
   maxFanOut: string;
   maxNodes: string;
@@ -60,7 +59,6 @@ interface FieldErrors {
   goal?: string;
   baseCommit?: string;
   rootAllowedPath?: string;
-  rootCheckProfile?: string;
   maxDepth?: string;
   maxFanOut?: string;
   maxNodes?: string;
@@ -77,7 +75,6 @@ const INITIAL_FORM_STATE: FormState = {
   goal: "",
   baseCommit: "",
   rootAllowedPath: ".",
-  rootCheckProfile: "",
   maxDepth: "4",
   maxFanOut: "4",
   maxNodes: "24",
@@ -85,19 +82,11 @@ const INITIAL_FORM_STATE: FormState = {
   maxAttemptsPerNode: "3",
 };
 
-// `root_check_profile` is a free-text gate profile name — these are only autocomplete
-// hints/placeholders (the 5 GateCategory values this repository's own .minions/gates.yaml
-// maps to real commands for). The client enforces nothing beyond non-empty text; the
-// daemon is authoritative for whether a named profile actually exists.
-const ROOT_CHECK_PROFILE_HINTS = ["lint", "typecheck", "tests", "build", "security_review"];
-const ROOT_CHECK_PROFILE_HINTS_ID = "new-task-root-check-profile-hints";
-
 const HOST_FIELD_ID = "new-task-host";
 const REPOSITORY_FIELD_ID = "new-task-repository";
 const GOAL_FIELD_ID = "new-task-goal";
 const BASE_COMMIT_FIELD_ID = "new-task-base-commit";
 const ROOT_ALLOWED_PATH_FIELD_ID = "new-task-root-allowed-path";
-const ROOT_CHECK_PROFILE_FIELD_ID = "new-task-root-check-profile";
 const MAX_DEPTH_FIELD_ID = "new-task-max-depth";
 const MAX_FAN_OUT_FIELD_ID = "new-task-max-fan-out";
 const MAX_NODES_FIELD_ID = "new-task-max-nodes";
@@ -126,10 +115,6 @@ function validateForm(fields: FormState): FieldErrors {
   );
   if (rootAllowedPathError !== undefined) {
     errors.rootAllowedPath = rootAllowedPathError;
-  }
-  const rootCheckProfileError = validateRequiredText(fields.rootCheckProfile, "Root check profile");
-  if (rootCheckProfileError !== undefined) {
-    errors.rootCheckProfile = rootCheckProfileError;
   }
   const maxDepthError = validateBudget(fields.maxDepth, "Max depth");
   if (maxDepthError !== undefined) {
@@ -248,7 +233,6 @@ export function NewTaskDialog({
           }),
           attentionId: generateUuidV7(),
           rootAllowedRepositoryPaths: [fields.rootAllowedPath],
-          rootCheckProfile: fields.rootCheckProfile.trim(),
         }),
       );
       if (response.tree === undefined) {
@@ -388,28 +372,6 @@ export function NewTaskDialog({
                 updateField("rootAllowedPath", event.target.value);
               }}
             />
-          </Field>
-          <Field
-            label="Root check profile"
-            htmlFor={ROOT_CHECK_PROFILE_FIELD_ID}
-            hint="Gate profile name the root node's checks run under."
-            error={errors.rootCheckProfile}
-          >
-            <TextInput
-              id={ROOT_CHECK_PROFILE_FIELD_ID}
-              list={ROOT_CHECK_PROFILE_HINTS_ID}
-              placeholder="e.g. lint"
-              value={fields.rootCheckProfile}
-              invalid={errors.rootCheckProfile !== undefined}
-              onChange={(event) => {
-                updateField("rootCheckProfile", event.target.value);
-              }}
-            />
-            <datalist id={ROOT_CHECK_PROFILE_HINTS_ID}>
-              {ROOT_CHECK_PROFILE_HINTS.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
           </Field>
           <div className="mn-new-task-budget">
             <Field label="Max depth" htmlFor={MAX_DEPTH_FIELD_ID} error={errors.maxDepth}>

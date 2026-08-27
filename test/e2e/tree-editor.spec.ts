@@ -26,7 +26,6 @@ test.describe("tree editor", () => {
     await page.locator("#new-task-host").selectOption({ index: 1 });
     await page.locator("#new-task-repository").selectOption({ label: gitFixtureRoot });
     await page.locator("#new-task-goal").fill(goal);
-    await page.locator("#new-task-root-check-profile").fill("lint");
     await page.getByRole("button", { name: "Create task" }).click();
     await expect(page.getByText("Task created.")).toBeVisible();
 
@@ -38,14 +37,13 @@ test.describe("tree editor", () => {
 
   /**
    * Fills the minimum fields required for validateWorkingTree to accept a newly-added
-   * working node (objective, mode, check profile, acceptance criteria). The default node
-   * from addWorkingNode has empty objective, empty check profile, PLAN mode + implementation
+   * working node (objective, mode, acceptance criteria). The default node
+   * from addWorkingNode has empty objective, PLAN mode + implementation
    * output (an inconsistent combination the validator rejects).
    */
   async function fillRequiredNodeFields(page: Page): Promise<void> {
     await page.locator("#tree-node-objective").fill("Implement the feature end to end");
     await page.locator("#tree-node-mode").selectOption({ label: "implementation" });
-    await page.locator("#tree-node-check-profile").fill("lint");
     // The EditableStringList renders the first criterion as an input at index 0.
     await page.locator("#tree-node-acceptance-criteria-0").fill("All tests pass");
   }

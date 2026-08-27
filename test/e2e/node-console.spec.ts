@@ -19,7 +19,6 @@ test.describe("node console", () => {
     await page.locator("#new-task-host").selectOption({ index: 1 });
     await page.locator("#new-task-repository").selectOption({ label: gitFixtureRoot });
     await page.locator("#new-task-goal").fill(goal);
-    await page.locator("#new-task-root-check-profile").fill("lint");
     await page.getByRole("button", { name: "Create task" }).click();
     await expect(page.getByText("Task created.")).toBeVisible();
 

@@ -139,7 +139,6 @@ async function createFixture(): Promise<Fixture> {
       }),
       attentionId: PLAN_ATTENTION,
       rootAllowedRepositoryPaths: ["."],
-      rootCheckProfile: "root-checks",
     }),
     at: AT,
   });

@@ -215,7 +215,6 @@ async function createFixture(): Promise<SteeringServiceFixture> {
       }),
       attentionId: planAttentionIdentifier,
       rootAllowedRepositoryPaths: ["."],
-      rootCheckProfile: "root-checks",
     }),
     at,
   });
@@ -239,7 +238,6 @@ async function createFixture(): Promise<SteeringServiceFixture> {
             value: create(ImplementationOutputContractSchema, {}),
           },
           allowedRepositoryPaths: ["."],
-          checkProfile: "implementation-checks",
         }),
       ],
     }),

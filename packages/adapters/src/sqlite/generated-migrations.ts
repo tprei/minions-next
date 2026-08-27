@@ -2634,6 +2634,22 @@ BEGIN
 END;
 `,
   }),
+  Object.freeze({
+    version: 15,
+    name: "drop_plan_policy_check_profile",
+    checksum: "5a798566f8409206182cab9cafff02950d0b25206561b79bde4e8bb02a4d37c5",
+    sql: `DROP TRIGGER node_plan_policy_definition_is_immutable;
+
+ALTER TABLE node_plan_policies DROP COLUMN check_profile;
+
+CREATE TRIGGER node_plan_policy_definition_is_immutable
+BEFORE UPDATE OF node_id, max_attempts
+ON node_plan_policies
+BEGIN
+  SELECT RAISE(ABORT, 'node plan policy definition is immutable');
+END;
+`,
+  }),
 ]) satisfies readonly SqliteMigration[];
 
 export const supervisorMigrations = Object.freeze([
