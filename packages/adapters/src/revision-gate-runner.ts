@@ -277,8 +277,8 @@ class ComposedRevisionGateRunner implements RevisionGateRunner {
 
   async #snapshotTree(treeId: TaskTreeId): Promise<readonly RevisionIdSnapshot[]> {
     const bindings = await this.#bindingStore.listForTree(treeId);
-    const treeChangeIds = bindings.map((binding) => binding.jjChangeId);
-    return this.#snapshotRevisions(buildRevisionRevset(treeChangeIds));
+    const treeCommitIds = bindings.map((binding) => binding.currentCommitId);
+    return this.#snapshotRevisions(buildRevisionRevset(treeCommitIds));
   }
 
   async #snapshotRevisions(revsetExpression: string): Promise<readonly RevisionIdSnapshot[]> {
@@ -382,16 +382,16 @@ class ComposedRevisionGateRunner implements RevisionGateRunner {
   }
 
   async #recordReceipts(
-    nodeByChangeId: ReadonlyMap<string, TaskNodeId>,
-    changeId: string,
+    nodeByCommitId: ReadonlyMap<string, TaskNodeId>,
+    commitId: string,
     attemptId: AttemptId | undefined,
     receipts: readonly GateReceipt[],
   ): Promise<void> {
-    const nodeId = nodeByChangeId.get(changeId);
+    const nodeId = nodeByCommitId.get(commitId);
     if (nodeId === undefined) {
       throw gateError(
         "receipt_failed",
-        `no node binding for change ${changeId}; cannot bind the gate receipt`,
+        `no node binding for commit ${commitId}; cannot bind the gate receipt`,
         "Register the revision's change binding before running gates.",
       );
     }
@@ -402,7 +402,7 @@ class ComposedRevisionGateRunner implements RevisionGateRunner {
       } catch (error: unknown) {
         throw gateError(
           "receipt_failed",
-          `gate receipt store failed for gate ${receipt.gateName} on change ${changeId}: ${errorMessage(error)}`,
+          `gate receipt store failed for gate ${receipt.gateName} on commit ${commitId}: ${errorMessage(error)}`,
           "Inspect the gate receipt database.",
           error,
         );

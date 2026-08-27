@@ -199,16 +199,31 @@ function createDouble(options: DoubleOptions): DoubleHandle {
     if (expr === "none()" || expr.length === 0) return [];
     return expr
       .split("|")
-      .map((part) => part.trim().replace(/^\(/u, "").replace(/\)$/u, "").trim())
+      .map((part) =>
+        part
+          .trim()
+          .replace(/^\(+|\)+$/gu, "")
+          .trim(),
+      )
       .filter((token) => token.length > 0);
   };
 
   const runner: RevisionGateJjRunner = Object.freeze({
     snapshot: (revsetExpression: string) => {
       const ids = parseExpr(revsetExpression);
-      const lines = ids
-        .filter((id) => state.has(id))
-        .map((id) => `${id} ${state.get(id) as string}`);
+      const lines: string[] = [];
+      for (const id of ids) {
+        if (state.has(id)) {
+          lines.push(`${id} ${state.get(id) as string}`);
+        } else {
+          for (const [ch, com] of state) {
+            if (com === id) {
+              lines.push(`${ch} ${com}`);
+              break;
+            }
+          }
+        }
+      }
       const stdout = lines.length === 0 ? "" : `${lines.join("\n")}\n`;
       return Promise.resolve({ exitCode: 0, stdout, stderr: "" });
     },
