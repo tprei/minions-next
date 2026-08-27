@@ -10,7 +10,7 @@ import {
   type SystemdCredsKeyMode,
 } from "@minions/adapters";
 import { afterEach, describe, expect, it } from "vitest";
-
+import { requireLiveDependency } from "../support/live-gate.js";
 /**
  * Integration test for the SystemdCredentialVault (PR 19, deliverable 8). Exercises
  * a real `systemd-creds encrypt/decrypt` round-trip plus the fail-closed paths:
@@ -28,7 +28,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const HOST_ID = "01900000-0000-7000-8000-000000000010";
 const systemdCredsPath = "/usr/bin/systemd-creds";
 const keyMode = detectKeyMode();
-const live = keyMode !== undefined;
+const live = requireLiveDependency("systemd-creds", keyMode !== undefined);
 
 const temporaryDirectories: string[] = [];
 

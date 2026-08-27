@@ -20,8 +20,8 @@ const COVERAGE: Record<SecurityBoundary, { tested: boolean; suites: string[] }> 
     suites: ["sandbox-policy.test.ts"],
   },
   auth_forge: {
-    tested: false,
-    suites: [],
+    tested: true,
+    suites: ["auth-forge.test.ts"],
   },
   protobuf_fuzz: {
     tested: true,
@@ -36,16 +36,22 @@ const COVERAGE: Record<SecurityBoundary, { tested: boolean; suites: string[] }> 
     suites: ["event-gap.test.ts"],
   },
   git_ambiguity: {
-    tested: false,
-    suites: [],
+    tested: true,
+    suites: [
+      "test/security/native-git-filter.test.ts",
+      "test/integration/vcs-backend-native-git.test.ts",
+    ],
   },
   policy_tampering: {
     tested: true,
     suites: ["sandbox-policy.test.ts"],
   },
   quota_restart: {
-    tested: false,
-    suites: [],
+    tested: true,
+    suites: [
+      "test/unit/core/admission.test.ts",
+      "test/integration/adapters/provider-admission.test.ts",
+    ],
   },
   // syntheticId 14 "changed host key rejected" is covered by ssh-adapter.test.ts's
   // host_key_mismatch suite. syntheticId 13 "revoked SSH host rejected" is covered
@@ -61,12 +67,19 @@ const COVERAGE: Record<SecurityBoundary, { tested: boolean; suites: string[] }> 
     ],
   },
   phone_revocation: {
-    tested: false,
-    suites: [],
+    tested: true,
+    suites: [
+      "test/unit/core/pairing.test.ts",
+      "test/integration/security/phone-revocation.test.ts",
+    ],
   },
   jj_specific: {
-    tested: false,
-    suites: [],
+    tested: true,
+    suites: [
+      "test/integration/adapters/revset.test.ts",
+      "test/security/jj-working-copy.test.ts",
+      "test/security/jj-registration.test.ts",
+    ],
   },
 };
 
@@ -81,20 +94,9 @@ describe("security scenario coverage audit", () => {
     }
   });
 
-  it("documents which boundaries have test coverage", () => {
+  it("ensures every security boundary has test coverage", () => {
     const untested = SECURITY_SCENARIOS.filter((s) => !COVERAGE[s.boundary].tested);
-
-    // These boundaries require platform infrastructure (SSH hosts, WSL2,
-    // Tailscale, real devices) that is not available in all test environments.
-    // The denial codes are registered and verified above; full integration
-    // tests land when the infrastructure is available.
-    expect(untested.every((s) => s.expectedDenialCode.length > 0)).toBe(true);
-
-    // At minimum, the core security boundaries must have coverage
-    expect(COVERAGE.repository_confinement.tested).toBe(true);
-    expect(COVERAGE.command_idempotency.tested).toBe(true);
-    expect(COVERAGE.event_gap.tested).toBe(true);
-    expect(COVERAGE.policy_tampering.tested).toBe(true);
+    expect(untested).toEqual([]);
   });
 
   it("every tested boundary maps to at least one test suite", () => {
