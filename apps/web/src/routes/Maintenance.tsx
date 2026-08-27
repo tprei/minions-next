@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Fact, NavBar, StateView, StatusBadge } from "@minions/ui-kit";
 import { useEventClient } from "../data/use-event-client.js";
 import { WEB_MAINTENANCE_TOOLS } from "./maintenance-tools.js";
@@ -24,9 +25,9 @@ export function MaintenanceRoute(): ReactNode {
   return (
     <>
       <NavBar brand="Minions">
-        <a className="mn-maintenance__back" href="/">
+        <Link className="mn-maintenance__back" to="/">
           ← Home
-        </a>
+        </Link>
         <StatusBadge
           status={connectionState === "live" ? "success" : "warning"}
           label={`daemon: ${connectionState}`}
@@ -38,9 +39,9 @@ export function MaintenanceRoute(): ReactNode {
         <div className="mn-maintenance__header">
           <h1>Maintenance</h1>
           <Fact>{String(WEB_MAINTENANCE_TOOLS.length)} tools</Fact>
-          <a className="mn-maintenance__audit-link" href="/recovery-audit">
+          <Link className="mn-maintenance__audit-link" to="/recovery-audit">
             Recovery audit →
-          </a>
+          </Link>
         </div>
 
         {WEB_MAINTENANCE_TOOLS.length === 0 ? (

@@ -1,4 +1,5 @@
 import { useMemo, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Button, Fact, NavBar, StateView, StatusBadge, type StatusKind } from "@minions/ui-kit";
 import { createApiClients, type ApiClients } from "../data/index.js";
 import { useEventClient } from "../data/use-event-client.js";
@@ -47,9 +48,9 @@ export function PushNotificationsRoute(): ReactNode {
   return (
     <>
       <NavBar brand="Minions">
-        <a className="mn-push-notifications__back" href="/">
+        <Link className="mn-push-notifications__back" to="/">
           ← Home
-        </a>
+        </Link>
         <StatusBadge
           status={connectionState === "live" ? "success" : "warning"}
           label={`daemon: ${connectionState}`}

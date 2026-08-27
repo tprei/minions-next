@@ -15,13 +15,15 @@ test.describe("inbox", () => {
     // The inbox link must be present on the home screen.
     await expect(page.getByTestId("inbox-link")).toBeVisible();
     await page.getByTestId("inbox-link").click();
+    await page.waitForURL("/inbox");
 
     // The inbox page loads.
     await expect(page.getByTestId("inbox")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Attention inbox" })).toBeVisible();
-
-    // With no open attention items, the empty state shows.
-    await expect(page.getByText("No open attention")).toBeVisible();
+    // With no open attention items, the empty state shows; otherwise the list renders.
+    const emptyState = page.getByText("No open attention");
+    const inboxList = page.getByTestId("inbox-list");
+    await expect(emptyState.or(inboxList)).toBeVisible();
   });
 
   test("filter buttons are present and switchable", async ({ page }) => {

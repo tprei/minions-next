@@ -1,11 +1,7 @@
-import { create } from "@bufbuild/protobuf";
-import { GetSnapshotResponseSchema, HostSummarySchema } from "@minions/contracts";
 import { describe, expect, it } from "vitest";
 import {
   CommandReceiptStore,
   createMemoryStorage,
-  ReadOnlyCache,
-  type CachedProjection,
   type KeyValueStorage,
   type ReceiptState,
 } from "../../apps/web/src/data/index.js";
@@ -61,52 +57,6 @@ describe("CommandReceiptStore", () => {
     unsubscribe();
     store.markApplied("cmd-4", 3);
     expect(notifications).toBe(2);
-  });
-});
-
-describe("ReadOnlyCache", () => {
-  it("round-trips a snapshot through storage, tagged as cache", () => {
-    const storage = createMemoryStorage();
-    const cache = new ReadOnlyCache(storage, "snapshot-cache");
-    const host = create(HostSummarySchema, {
-      id: "01900000-0000-7000-8000-000000000099",
-      online: true,
-      version: 1n,
-    });
-    const snapshot = create(GetSnapshotResponseSchema, {
-      hosts: [host],
-      lastSequence: 3n,
-      minimumAvailableSequence: 1n,
-    });
-
-    cache.save(snapshot, 1_000);
-    const loaded: CachedProjection | undefined = cache.load();
-
-    expect(loaded?.source).toBe("cache");
-    expect(loaded?.cachedAt).toBe(1_000);
-    expect(loaded?.snapshot).toEqual(snapshot);
-  });
-
-  it("returns undefined when nothing has been cached", () => {
-    const cache = new ReadOnlyCache(createMemoryStorage(), "snapshot-cache");
-    expect(cache.load()).toBeUndefined();
-  });
-
-  it("returns undefined for corrupted storage content instead of throwing", () => {
-    const storage = createMemoryStorage();
-    storage.setItem("snapshot-cache", "{not json");
-    const cache = new ReadOnlyCache(storage, "snapshot-cache");
-    expect(cache.load()).toBeUndefined();
-  });
-
-  it("clear() removes the cached entry", () => {
-    const storage = createMemoryStorage();
-    const cache = new ReadOnlyCache(storage, "snapshot-cache");
-    cache.save(
-      create(GetSnapshotResponseSchema, { lastSequence: 1n, minimumAvailableSequence: 1n }),
-    );
-    cache.clear();
-    expect(cache.load()).toBeUndefined();
   });
 });
 

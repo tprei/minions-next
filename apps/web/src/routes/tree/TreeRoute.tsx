@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useParams } from "react-router-dom";
 import { create } from "@bufbuild/protobuf";
 import {
   ApprovePlanRequestSchema,
@@ -57,10 +58,6 @@ import { TreeCanvas } from "./TreeCanvas.js";
 import { TreeOutline } from "./TreeOutline.js";
 import "./TreeRoute.css";
 
-export interface TreeRouteProps {
-  readonly treeId: string;
-}
-
 /**
  * Plan tree editor/approval screen (PR 46 — plan-tree-editor-approval). Reached after
  * `CreateTree` (see NewTaskDialog's "Open tree" link) or by following a task link from the
@@ -73,7 +70,9 @@ export interface TreeRouteProps {
  * `TreeSummary.version` to detect an out-of-band change (another session/CLI invocation) and
  * offers a manual reload rather than silently overwriting in-progress edits.
  */
-export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
+export function TreeRoute(): ReactNode {
+  const params = useParams<{ treeId: string }>();
+  const treeId = params.treeId ?? "";
   const clients = useMemo<ApiClients>(() => createApiClients(), []);
   const { projection, connectionState } = useEventClient();
 
@@ -368,9 +367,9 @@ export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
   return (
     <>
       <NavBar brand="Minions">
-        <a className="mn-tree-route__back" href="/" data-testid="tree-back-link">
+        <Link className="mn-tree-route__back" to="/" data-testid="tree-back-link">
           ← Back to hosts
-        </a>
+        </Link>
         <StatusBadge
           status={connectionState === "live" ? "success" : "warning"}
           label={`daemon: ${connectionState}`}
@@ -388,12 +387,12 @@ export function TreeRoute({ treeId }: TreeRouteProps): ReactNode {
           </div>
           <Fact title={tree.id}>tree {shortId(tree.id)}</Fact>
           {selectedKey !== undefined && consoleNodeId !== undefined ? (
-            <a
+            <Link
               className="mn-tree-route__console-link"
-              href={`/tree/${treeId}/node/${consoleNodeId}`}
+              to={`/tree/${treeId}/node/${consoleNodeId}`}
             >
               Open node console →
-            </a>
+            </Link>
           ) : null}
         </div>
 

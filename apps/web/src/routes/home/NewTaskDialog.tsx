@@ -1,4 +1,5 @@
 import { useState, type ReactNode, type SubmitEvent } from "react";
+import { Link } from "react-router-dom";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import {
@@ -296,12 +297,12 @@ export function NewTaskDialog({
             label={treeStateLabel(createdTree.state)}
           />
           <div className="mn-dialog-actions">
-            <a
+            <Link
               className="mn-button mn-button--secondary mn-focus-ring"
-              href={`/tree/${createdTree.id}`}
+              to={`/tree/${createdTree.id}`}
             >
               Open tree
-            </a>
+            </Link>
             <Button
               onClick={() => {
                 handleOpenChange(false);

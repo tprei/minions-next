@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { ThemeProvider } from "@minions/ui-kit";
+import { EventClientProvider } from "./data/index.js";
 import { FixturesRoute } from "./routes/Fixtures.js";
 import { HomeRoute } from "./routes/Home.js";
 import { InboxRoute } from "./routes/Inbox.js";
@@ -8,7 +10,6 @@ import { NodeConsole } from "./routes/node/NodeConsole.js";
 import { PushNotificationsRoute } from "./routes/PushNotifications.js";
 import { RecoveryAuditRoute } from "./routes/RecoveryAudit.js";
 import { TreeRoute } from "./routes/tree/TreeRoute.js";
-
 /**
  * Application shell (PR 43 — ui-design-system-shell; PR 44 — browser-projection-store;
  * PR 45 — host-repository-task-ui; PR 46 — plan-tree-editor-approval; PR 47 —
@@ -28,43 +29,25 @@ import { TreeRoute } from "./routes/tree/TreeRoute.js";
 export function App(): ReactNode {
   return (
     <ThemeProvider>
-      <Shell />
+      <EventClientProvider>
+        <Shell />
+      </EventClientProvider>
     </ThemeProvider>
   );
 }
 
+const router = createBrowserRouter([
+  { path: "/", element: <HomeRoute /> },
+  { path: "/fixtures", element: <FixturesRoute /> },
+  { path: "/inbox", element: <InboxRoute /> },
+  { path: "/maintenance", element: <MaintenanceRoute /> },
+  { path: "/push-notifications", element: <PushNotificationsRoute /> },
+  { path: "/recovery-audit", element: <RecoveryAuditRoute /> },
+  { path: "/tree/:treeId", element: <TreeRoute /> },
+  { path: "/tree/:treeId/node/:nodeId", element: <NodeConsole /> },
+  { path: "*", element: <HomeRoute /> },
+]);
+
 function Shell(): ReactNode {
-  if (typeof window === "undefined") {
-    return <HomeRoute />;
-  }
-  const { pathname } = window.location;
-  if (pathname === "/fixtures") {
-    return <FixturesRoute />;
-  }
-  if (pathname === "/inbox") {
-    return <InboxRoute />;
-  }
-  if (pathname === "/maintenance") {
-    return <MaintenanceRoute />;
-  }
-  if (pathname === "/push-notifications") {
-    return <PushNotificationsRoute />;
-  }
-  if (pathname === "/recovery-audit") {
-    return <RecoveryAuditRoute />;
-  }
-  const nodeMatch = /^\/tree\/([^/]+)\/node\/([^/]+)$/.exec(pathname);
-  if (nodeMatch?.[1] !== undefined && nodeMatch[2] !== undefined) {
-    return (
-      <NodeConsole
-        treeId={decodeURIComponent(nodeMatch[1])}
-        nodeId={decodeURIComponent(nodeMatch[2])}
-      />
-    );
-  }
-  const treeMatch = /^\/tree\/([^/]+)$/.exec(pathname);
-  if (treeMatch?.[1] !== undefined) {
-    return <TreeRoute treeId={decodeURIComponent(treeMatch[1])} />;
-  }
-  return <HomeRoute />;
+  return <RouterProvider router={router} />;
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { AttentionKind, NodeAttentionKind, NodeState } from "@minions/contracts";
 import { Button, Commentary, Fact, NavBar, StateView, StatusBadge } from "@minions/ui-kit";
 import { useEventClient } from "../data/use-event-client.js";
@@ -110,9 +111,9 @@ export function InboxRoute(): ReactNode {
   return (
     <>
       <NavBar brand="Minions">
-        <a className="mn-inbox__back" href="/">
+        <Link className="mn-inbox__back" to="/">
           ← Home
-        </a>
+        </Link>
         <StatusBadge
           status={connectionState === "live" ? "success" : "warning"}
           label={`daemon: ${connectionState}`}
@@ -215,9 +216,9 @@ export function InboxRoute(): ReactNode {
                       <Fact title={tree.id}>tree {shortId(tree.id)}</Fact>
                     ) : null}
                   </div>
-                  <a className="mn-inbox__link" href={`/tree/${item.treeId}/node/${item.nodeId}`}>
+                  <Link className="mn-inbox__link" to={`/tree/${item.treeId}/node/${item.nodeId}`}>
                     Open console →
-                  </a>
+                  </Link>
                 </li>
               );
             })}
