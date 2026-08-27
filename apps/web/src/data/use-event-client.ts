@@ -1,26 +1,40 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
 import {
-  createApiClients,
-  createLocalStorageAdapter,
-  EventClient,
-  ProjectionStore,
-  type ConnectionState,
-  type EventClientOptions,
-  type ProjectionState,
-} from "./index.js";
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { createApiClients } from "./api-client.js";
+import { createLocalStorageAdapter } from "./cursor-storage.js";
+import { EventClient, type ConnectionState, type EventClientOptions } from "./event-client.js";
+import { ProjectionStore } from "./projection-store.js";
+import type { ProjectionState } from "./projection-types.js";
+
+interface EventClientContextValue {
+  readonly store: ProjectionStore;
+  readonly eventClient: EventClient;
+}
+
+const EventClientContext = createContext<EventClientContextValue | undefined>(undefined);
+
+export interface EventClientProviderProps {
+  readonly children: ReactNode;
+  readonly cursorKey?: string;
+}
 
 /**
- * Starts one {@link EventClient} against the daemon on mount and exposes its live
- * {@link ProjectionState} and {@link ConnectionState} via `useSyncExternalStore` (PR 44/45).
- * Shares its API base URL resolution with every command hook via {@link createApiClients}
- * (including the E2E test override) so reads and writes always target the same daemon.
+ * Provides a single shared {@link EventClient} and {@link ProjectionStore} across the entire
+ * application, keeping the event stream live across client-side route navigations.
  */
-export function useEventClient(cursorKey = "minions.event-cursor"): {
-  readonly projection: ProjectionState;
-  readonly connectionState: ConnectionState;
-} {
-  const store = useMemo(() => new ProjectionStore(), []);
-  const eventClient = useMemo(() => {
+export function EventClientProvider({
+  children,
+  cursorKey = "minions.event-cursor",
+}: EventClientProviderProps): ReactNode {
+  const value = useMemo<EventClientContextValue>(() => {
+    const store = new ProjectionStore();
     const { event } = createApiClients();
     const options: EventClientOptions = {
       client: event,
@@ -28,20 +42,37 @@ export function useEventClient(cursorKey = "minions.event-cursor"): {
       storage: createLocalStorageAdapter(),
       cursorKey,
     };
-    return new EventClient(options);
-  }, [store, cursorKey]);
+    return {
+      store,
+      eventClient: new EventClient(options),
+    };
+  }, [cursorKey]);
 
   useEffect(() => {
-    void eventClient.start();
+    void value.eventClient.start();
     return () => {
-      eventClient.stop();
+      value.eventClient.stop();
     };
-  }, [eventClient]);
+  }, [value]);
 
-  const projection = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  return createElement(EventClientContext.Provider, { value }, children);
+}
+
+/**
+ * Accesses the shared live {@link ProjectionState} and {@link ConnectionState} via `useSyncExternalStore`.
+ */
+export function useEventClient(): {
+  readonly projection: ProjectionState;
+  readonly connectionState: ConnectionState;
+} {
+  const context = useContext(EventClientContext);
+  if (context === undefined) {
+    throw new Error("useEventClient must be used within an EventClientProvider");
+  }
+  const projection = useSyncExternalStore(context.store.subscribe, context.store.getSnapshot);
   const connectionState = useSyncExternalStore(
-    eventClient.subscribeConnectionState,
-    eventClient.getConnectionState,
+    context.eventClient.subscribeConnectionState,
+    context.eventClient.getConnectionState,
   );
 
   return { projection, connectionState };

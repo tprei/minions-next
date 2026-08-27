@@ -84,7 +84,7 @@ test.describe("mobile read layout", () => {
 
     // The typed attention filters (PRD UI-05) stay reachable, not clipped or pushed
     // off-screen, on a narrow viewport.
-    for (const name of ["All (0)", "Questions", "Approvals"]) {
+    for (const name of [/All/, /Questions/, /Approvals/]) {
       const button = page.getByRole("button", { name });
       await expect(button).toBeVisible();
       const box = await button.boundingBox();

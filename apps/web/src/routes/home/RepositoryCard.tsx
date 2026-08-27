@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { RegisteredRepository, RepositorySummary, TreeSummary } from "@minions/contracts";
 import { Card, Fact, StatusBadge } from "@minions/ui-kit";
 import { formatTimestamp } from "./format.js";
@@ -51,9 +52,9 @@ export function RepositoryCard({ summary, detail, trees }: RepositoryCardProps):
           <ul className="mn-tree-list">
             {trees.map((tree) => (
               <li key={tree.id} className="mn-tree-list__item">
-                <a className="mn-tree-list__link" href={`/tree/${tree.id}`} title={tree.id}>
+                <Link className="mn-tree-list__link" to={`/tree/${tree.id}`} title={tree.id}>
                   {shortId(tree.id)}
-                </a>
+                </Link>
                 <StatusBadge
                   status={treeStateBadgeKind(tree.state)}
                   label={treeStateLabel(tree.state)}

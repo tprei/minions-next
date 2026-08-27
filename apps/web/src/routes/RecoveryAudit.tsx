@@ -1,4 +1,5 @@
 import { type ReactNode, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { createApiClients, type ApiClients } from "../data/index.js";
 import { Fact, NavBar, StateView, StatusBadge } from "@minions/ui-kit";
 import { formatTimestamp } from "./home/format.js";
@@ -28,9 +29,9 @@ export function RecoveryAuditRoute(): ReactNode {
   return (
     <>
       <NavBar brand="Minions">
-        <a className="mn-recovery-audit__back" href="/maintenance">
+        <Link className="mn-recovery-audit__back" to="/maintenance">
           ← Maintenance
-        </a>
+        </Link>
       </NavBar>
 
       <main className="mn-recovery-audit" data-testid="recovery-audit">

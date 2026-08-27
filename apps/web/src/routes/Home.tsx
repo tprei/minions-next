@@ -1,4 +1,5 @@
 import { useCallback, useMemo, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { create } from "@bufbuild/protobuf";
 import {
   ListRepositoriesRequestSchema,
@@ -122,16 +123,16 @@ export function HomeRoute(): ReactNode {
   return (
     <div className="mn-home" data-testid="home-root">
       <NavBar brand="Minions">
-        <a className="mn-home__inbox-link" href="/inbox" data-testid="inbox-link">
+        <Link className="mn-home__inbox-link" to="/inbox" data-testid="inbox-link">
           Inbox
-        </a>
-        <a
+        </Link>
+        <Link
           className="mn-home__push-notifications-link"
-          href="/push-notifications"
+          to="/push-notifications"
           data-testid="push-notifications-link"
         >
           Push notifications
-        </a>
+        </Link>
         <StatusBadge
           status={CONNECTION_STATUS[connectionState]}
           label={`daemon: ${connectionState}`}

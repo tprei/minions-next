@@ -15,6 +15,7 @@
     "d3-hierarchy": "3.1.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-router-dom": "7.18.2",
     "workbox-precaching": "7.4.1"
   },
   "devDependencies": {

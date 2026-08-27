@@ -127,18 +127,22 @@ describe("EventClient", () => {
     eventClient.stop();
   });
 
-  it("resumes from a persisted cursor instead of resnapshotting", async () => {
+  it("seeds the store from a snapshot and resumes from the max cursor", async () => {
     const store = new ProjectionStore();
     const storage = createMemoryStorage();
     storage.setItem("cursor", "7");
-    const client = new ScriptedClient([], [() => once(watchResponse(8n, HOST_A))]);
+    const client = new ScriptedClient([snapshot(5n)], [() => once(watchResponse(8n, HOST_B))]);
     const eventClient = new EventClient({ client, store, storage, cursorKey: "cursor" });
 
     void eventClient.start();
     await vi.waitFor(() => {
+      expect(store.getSnapshot().hosts.has(HOST_A)).toBe(true);
+      expect(client.getSnapshotCalls).toBe(1);
       expect(client.watchEventsCalls).toEqual([7n]);
     });
-    expect(client.getSnapshotCalls).toBe(0);
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().hosts.has(HOST_B)).toBe(true);
+    });
     eventClient.stop();
   });
 
@@ -167,12 +171,12 @@ describe("EventClient", () => {
     eventClient.stop();
   });
 
-  it("resnapshots exactly once on an expired cursor and resumes from the new sequence", async () => {
+  it("resnapshots on an expired cursor and resumes from the new sequence", async () => {
     const store = new ProjectionStore();
     const storage = createMemoryStorage();
     storage.setItem("cursor", "2");
     const client = new ScriptedClient(
-      [snapshot(10n, 5n)],
+      [snapshot(0n), snapshot(10n, 5n)],
       [() => throwing(cursorExpiredError()), () => once(watchResponse(11n, HOST_B))],
     );
     const eventClient = new EventClient({ client, store, storage, cursorKey: "cursor" });
@@ -181,7 +185,7 @@ describe("EventClient", () => {
     await vi.waitFor(() => {
       expect(store.getSnapshot().hosts.has(HOST_B)).toBe(true);
     });
-    expect(client.getSnapshotCalls).toBe(1);
+    expect(client.getSnapshotCalls).toBe(2);
     expect(client.watchEventsCalls).toEqual([2n, 10n]);
     eventClient.stop();
   });

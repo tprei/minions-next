@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useParams } from "react-router-dom";
 import { create } from "@bufbuild/protobuf";
 import {
   AnswerNodeCommandSchema,
@@ -15,6 +16,7 @@ import {
   type TaskNode,
 } from "@minions/contracts";
 import {
+  Button,
   Commentary,
   Fact,
   NavBar,
@@ -44,23 +46,23 @@ import { EvidencePanel } from "./EvidencePanel.js";
 import { useEvidence } from "./use-evidence.js";
 import "./NodeConsole.css";
 
-export interface NodeConsoleProps {
-  readonly treeId: string;
-  readonly nodeId: string;
-}
-
-export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
+export function NodeConsole(): ReactNode {
+  const params = useParams<{ treeId: string; nodeId: string }>();
+  const treeId = params.treeId ?? "";
+  const nodeId = params.nodeId ?? "";
   const { projection, connectionState } = useEventClient();
   const [clients] = useState<ApiClients>(() => createApiClients());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<TypedError | undefined>(undefined);
+  const [getTreeError, setGetTreeError] = useState<TypedError | undefined>(undefined);
+  const [retryCount, setRetryCount] = useState(0);
   const [fetchedObjective, setFetchedObjective] = useState<string | undefined>();
   const [fetchedState, setFetchedState] = useState<NodeState | undefined>();
   const [fetchedNode, setFetchedNode] = useState<TaskNode | undefined>();
-
   useEffect(() => {
     const controller = new AbortController();
     async function fetchNode(): Promise<void> {
+      setGetTreeError(undefined);
       try {
         const response = await clients.tree.getTree(create(GetTreeRequestSchema, { treeId }));
         if (controller.signal.aborted) return;
@@ -70,15 +72,16 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
           setFetchedState(found.state);
           setFetchedNode(found);
         }
-      } catch {
-        // Projection store will eventually deliver the node via the event stream.
+      } catch (caught: unknown) {
+        if (controller.signal.aborted) return;
+        setGetTreeError(describeConnectError(caught));
       }
     }
     void fetchNode();
     return () => {
       controller.abort();
     };
-  }, [clients.tree, treeId, nodeId]);
+  }, [clients.tree, treeId, nodeId, retryCount]);
 
   const liveNode = projection.nodes.get(nodeId);
   const objective = liveNode?.objective ?? fetchedObjective ?? "";
@@ -122,13 +125,42 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
     }
   }
 
+  if (objective.length === 0 && getTreeError !== undefined && connectionState !== "live") {
+    return (
+      <>
+        <NavBar brand="Minions">
+          <Link className="mn-node-console__back" to={`/tree/${treeId}`}>
+            ← Back to tree
+          </Link>
+          <StatusBadge status="warning" label={`daemon: ${connectionState}`} />
+        </NavBar>
+        <main className="mn-node-console" data-testid="node-console">
+          <StateView
+            kind="error"
+            title="Could not load node"
+            description={`${getTreeError.code}: ${getTreeError.message}`}
+            action={
+              <Button
+                onClick={() => {
+                  setRetryCount((count) => count + 1);
+                }}
+              >
+                Retry
+              </Button>
+            }
+          />
+        </main>
+      </>
+    );
+  }
+
   if (objective.length === 0) {
     return (
       <>
         <NavBar brand="Minions">
-          <a className="mn-node-console__back" href={`/tree/${treeId}`}>
+          <Link className="mn-node-console__back" to={`/tree/${treeId}`}>
             ← Back to tree
-          </a>
+          </Link>
           <StatusBadge
             status={connectionState === "live" ? "success" : "warning"}
             label={`daemon: ${connectionState}`}
@@ -211,9 +243,9 @@ export function NodeConsole({ treeId, nodeId }: NodeConsoleProps): ReactNode {
   return (
     <>
       <NavBar brand="Minions">
-        <a className="mn-node-console__back" href={`/tree/${treeId}`} data-testid="node-back-link">
+        <Link className="mn-node-console__back" to={`/tree/${treeId}`} data-testid="node-back-link">
           ← Back to tree
-        </a>
+        </Link>
         <StatusBadge
           status={connectionState === "live" ? "success" : "warning"}
           label={`daemon: ${connectionState}`}

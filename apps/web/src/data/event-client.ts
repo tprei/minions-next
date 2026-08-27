@@ -95,10 +95,12 @@ export class EventClient {
       this.#controller = new AbortController();
     }
     const persisted = this.#storage.getItem(this.#cursorKey);
-    if (persisted !== null && /^[0-9]+$/u.test(persisted)) {
-      this.#cursor = BigInt(persisted);
-    } else {
-      await this.#resnapshot();
+    const persistedCursor =
+      persisted !== null && /^[0-9]+$/u.test(persisted) ? BigInt(persisted) : undefined;
+    await this.#resnapshot();
+    if (persistedCursor !== undefined && persistedCursor > this.#cursor) {
+      this.#cursor = persistedCursor;
+      this.#persistCursor();
     }
     let backoffMs = this.#initialBackoffMs;
     while (!isAborted(this.#controller)) {
