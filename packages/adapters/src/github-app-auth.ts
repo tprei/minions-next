@@ -15,9 +15,9 @@
  * changes.
  *
  * ## Token scoping (GIT-11)
- * Installation tokens are minted per repository via
- * `POST /app/installations/{id}/access_tokens` with a `repository` restriction,
- * so a token issued for `owner/a` cannot touch `owner/b`.
+ * `POST /app/installations/{id}/access_tokens` with a `repositories` restriction,
+ * so a token issued for `owner/a` cannot touch `owner/b`. The issued scope is
+ * verified against the target repository and any mismatch fails closed.
  */
 
 import { createSign } from "node:crypto";
@@ -335,10 +335,18 @@ class GitHubAppAuthImpl implements GitHubAppAuth {
     installationId: number,
     repositoryFullName: string,
   ): Promise<Readonly<{ token: string; expiresAt: string }>> {
+    const segments = repositoryFullName.split("/");
+    const repositoryName = segments.length === 2 ? segments[1] : undefined;
+    if (repositoryName === undefined || repositoryName.length === 0 || segments[0] === "") {
+      throw new GitHubAppAuthError(
+        "installation_not_found",
+        `invalid repository full name '${repositoryFullName}' (expected 'owner/name')`,
+      );
+    }
     const client = await this.appClient();
     let issued;
     try {
-      issued = await client.createInstallationToken(installationId);
+      issued = await client.createInstallationToken(installationId, repositoryName);
     } catch (error: unknown) {
       throw wrapClient(
         error,
@@ -346,15 +354,17 @@ class GitHubAppAuthImpl implements GitHubAppAuth {
         `failed to mint installation token for '${repositoryFullName}'`,
       );
     }
-    // SEC-10/GIT-11: confirm the token covers the target repository. GitHub mints
-    // a token scoped to the installation; we additionally verify the repo appears
-    // in the issued token's repository list so a misconfigured installation cannot
-    // silently broaden scope.
-    const covers = issued.repositories.some((repo) => repo.fullName === repositoryFullName);
-    if (!covers && issued.repositories.length > 0) {
+    // GIT-11: the mint asks GitHub to restrict the token to one repository, and
+    // GitHub echoes the effective scope back. Any shape other than exactly the
+    // target repository — over-scope or under-scope — fails closed.
+    if (
+      issued.repositorySelection !== "selected" ||
+      issued.repositories.length !== 1 ||
+      issued.repositories[0]?.fullName !== repositoryFullName
+    ) {
       throw new GitHubAppAuthError(
         "token_mint_failed",
-        `installation token for '${repositoryFullName}' does not cover that repository`,
+        `installation token for '${repositoryFullName}' is not restricted to that repository`,
       );
     }
     this.logger().debug(

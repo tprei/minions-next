@@ -342,6 +342,7 @@ class MockGitHub {
         token: `ghs_token_${String(this.tokenCounter)}`,
         expires_at: new Date(this.now() + 60 * 60 * 1000).toISOString(),
         permissions: { pull_requests: "write", contents: "write" },
+        repository_selection: "selected",
         repositories: [{ id: 4242, full_name: REPO }],
       });
     }

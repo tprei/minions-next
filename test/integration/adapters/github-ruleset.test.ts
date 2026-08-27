@@ -2,6 +2,7 @@ import { createVerify, generateKeyPairSync } from "node:crypto";
 
 import {
   createGitHubAppAuth,
+  GitHubAppAuthError,
   GitHubRulesetError,
   inspectRuleset,
   installRuleset,
@@ -147,6 +148,7 @@ class MockGitHub {
   private readonly rulesets = new Map<number, Readonly<Record<string, unknown>>>();
   private nextRulesetId = 1000;
   private tokenCounter = 0;
+  private tokenResponseOverride: Readonly<Record<string, unknown>> | undefined;
   readonly records: FetchRecord[] = [];
   private readonly now: () => number;
 
@@ -156,6 +158,7 @@ class MockGitHub {
 
   reset(seeds: readonly RulesetSeed[]): void {
     this.rulesets.clear();
+    this.tokenResponseOverride = undefined;
     this.records.length = 0;
     for (const seed of seeds) {
       this.rulesets.set(seed.id, serializeRuleset(seed));
@@ -167,6 +170,21 @@ class MockGitHub {
     return this.tokenCounter;
   }
 
+  /** Override fields merged into the mint response (scope-failure scenarios). */
+  setInstallationTokenResponse(override: Readonly<Record<string, unknown>>): void {
+    this.tokenResponseOverride = override;
+  }
+
+  /** Parsed bodies of every token-mint POST, in mint order. */
+  installationTokenMintBodies(): unknown[] {
+    return this.records
+      .filter(
+        (record) =>
+          record.method === "POST" &&
+          record.url.includes(`/app/installations/${String(INSTALLATION_ID)}/access_tokens`),
+      )
+      .map((record) => JSON.parse(record.body) as unknown);
+  }
   readonly fetch: GitHubFetch = (input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -193,12 +211,18 @@ class MockGitHub {
       url.includes(`/app/installations/${String(INSTALLATION_ID)}/access_tokens`)
     ) {
       this.tokenCounter += 1;
-      return jsonResponse({
+      const response = {
         token: `ghs_install_token_${String(this.tokenCounter)}`,
         expires_at: new Date(this.now() + 60 * 60 * 1000).toISOString(),
         permissions: { administration: "read", pull_requests: "write" },
+        repository_selection: "selected",
         repositories: [{ id: 4242, full_name: REPO }],
-      });
+      };
+      return jsonResponse(
+        this.tokenResponseOverride === undefined
+          ? response
+          : { ...response, ...this.tokenResponseOverride },
+      );
     }
     const detailMatch = /\/repos\/[^/]+\/[^/]+\/rulesets\/(\d+)/u.exec(url);
     if (method === "GET" && detailMatch !== null) {
@@ -550,6 +574,34 @@ describe("installation token rotation", () => {
     const rotated = await auth.getInstallationToken(REPO);
     expect(rotated.token).toBe("ghs_install_token_2");
     expect(mock.installationTokenMints()).toBe(2);
+  });
+});
+describe("installation token repository scoping (GIT-11)", () => {
+  it("mints with a single-repository restriction using the bare repository name", async () => {
+    const now = () => 1_700_000_000_000;
+    const mock = new MockGitHub(now);
+    mock.reset([]);
+    const auth = buildAuth(now, mock);
+
+    await auth.getInstallationToken(REPO);
+
+    expect(mock.installationTokenMintBodies()).toEqual([{ repositories: ["landing-app"] }]);
+  });
+
+  it("fails closed when GitHub issues a token broader than the target repository", async () => {
+    const now = () => 1_700_000_000_000;
+    const mock = new MockGitHub(now);
+    mock.reset([]);
+    mock.setInstallationTokenResponse({
+      repository_selection: "all",
+      repositories: [
+        { id: 4241, full_name: "acme/other-app" },
+        { id: 4242, full_name: REPO },
+      ],
+    });
+    const auth = buildAuth(now, mock);
+
+    await expect(auth.getInstallationToken(REPO)).rejects.toBeInstanceOf(GitHubAppAuthError);
   });
 });
 
