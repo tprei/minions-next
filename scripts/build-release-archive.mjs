@@ -90,7 +90,7 @@ async function buildReleaseArchive(config) {
   await writeFile(
     join(stagingDirectory, "bin/minions"),
     cliEntry.startsWith("#!") ? cliEntry : `#!/usr/bin/env node\n${cliEntry}`,
-    "utf8",
+    { encoding: "utf8", mode: 0o755 },
   );
 
   // 2. Built bundles for apps and the internal packages the runtime imports.
