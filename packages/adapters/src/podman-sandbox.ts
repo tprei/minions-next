@@ -821,13 +821,12 @@ export function containerFlagSet(
   return { globalArguments, createArguments };
 }
 
-async function assertHostMounts(
+export async function assertHostMounts(
   policy: SandboxPolicy,
   backendKind: SandboxBackendKind,
   options: PodmanSandboxOptions,
 ): Promise<void> {
   const protectedRoots = [resolve(options.storageRoot), resolve(options.stateRoot)];
-  const protectedPaths = [...protectedRoots, resolve(homedir())];
   for (const mount of policy.mounts) {
     const sourcePath = resolve(mount.sourcePath);
     let metadata;
@@ -854,10 +853,6 @@ async function assertHostMounts(
       protectedRoots.some(
         (protectedRoot) =>
           pathContainedBy(sourcePath, protectedRoot) || pathContainedBy(protectedRoot, sourcePath),
-      ) ||
-      protectedPaths.some(
-        (protectedPath) =>
-          pathContainedBy(protectedPath, sourcePath) || pathContainedBy(sourcePath, protectedPath),
       )
     ) {
       throw new PodmanSandboxError(
@@ -872,6 +867,24 @@ async function assertHostMounts(
   }
 }
 
+/**
+ * Mirrors SENSITIVE_MACOS_MOUNT_SOURCE_ROOTS in lima-sandbox.ts: podman is the
+ * backend on Linux and WSL2, where workspaces normally live under $HOME, so
+ * homedir containment alone is never a reason to reject a mount. The denylist
+ * is the exact set of credential/config roots under $HOME that must never be
+ * mounted, plus the home directory itself and its ancestors, because mounting
+ * those exposes every sensitive root beneath them.
+ */
+const SENSITIVE_LINUX_MOUNT_SOURCE_ROOTS = [
+  ".ssh",
+  ".gnupg",
+  ".aws",
+  ".config/gh",
+  ".docker",
+  ".kube",
+  ".local/share/keyrings",
+] as const;
+
 function isForbiddenMountSource(sourcePath: string): boolean {
   const normalized = resolve(sourcePath);
   const forbidden = [
@@ -884,8 +897,12 @@ function isForbiddenMountSource(sourcePath: string): boolean {
   if (forbidden.includes(normalized)) return true;
   if (normalized.endsWith(".sock")) return true;
   if (pathContainedBy(normalized, "/var/run") || pathContainedBy(normalized, "/run")) return true;
-  if (pathContainedBy(normalized, resolve(homedir()))) return true;
-  return false;
+  const home = resolve(homedir());
+  if (pathContainedBy(home, normalized)) return true;
+  return SENSITIVE_LINUX_MOUNT_SOURCE_ROOTS.some((root) => {
+    const sensitive = resolve(home, root);
+    return pathContainedBy(normalized, sensitive) || pathContainedBy(sensitive, normalized);
+  });
 }
 
 function assertWslSafeMount(sourcePath: string): void {

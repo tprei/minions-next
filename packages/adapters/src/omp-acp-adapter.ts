@@ -49,6 +49,7 @@ import {
   type StartHarnessSessionRequest,
   type Timestamp,
 } from "@minions/core";
+import { terminateProcessGroup } from "./process-group.js";
 
 export type OmpAcpAdapterErrorCode =
   | "invalid_configuration"
@@ -906,7 +907,7 @@ class OmpAcpClient {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    terminateProcessGroup(this.child);
+    void terminateProcessGroup(this.child);
     for (const pending of [...this.pending.values()]) {
       this.pending.delete(pending.id);
       clearTimeout(pending.timer);
@@ -1030,35 +1031,6 @@ function rpcErrorToAdapterError(method: string, error: AcpRpcError): OmpAcpAdapt
   );
 }
 
-function terminateProcessGroup(child: ChildProcess): void {
-  const pid = child.pid;
-  try {
-    if (child.stdin !== null) child.stdin.end();
-  } catch {
-    // ignore — process-group signal is the authoritative teardown
-  }
-  if (pid === undefined) return;
-  signalProcessGroup(child, pid, "SIGTERM");
-  const killTimer = setTimeout(() => {
-    signalProcessGroup(child, pid, "SIGKILL");
-  }, 1_000);
-  killTimer.unref();
-}
-
-function signalProcessGroup(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(-pid, signal);
-  } catch (groupError: unknown) {
-    if (!(isNodeError(groupError) && groupError.code === "ESRCH")) {
-      try {
-        child.kill(signal);
-      } catch {
-        // best-effort
-      }
-    }
-  }
-}
-
 function toBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) return new Uint8Array(value);
   if (typeof value === "string") return new TextEncoder().encode(value);
@@ -1074,10 +1046,6 @@ function concatenate(chunks: readonly Uint8Array[]): Uint8Array {
     offset += chunk.byteLength;
   }
   return output;
-}
-
-function isNodeError(value: unknown): value is NodeJS.ErrnoException {
-  return value instanceof Error && "code" in value;
 }
 
 function errorToString(value: unknown): string {
