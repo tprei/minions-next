@@ -454,7 +454,14 @@ function serveStaticWeb(req: IncomingMessage, res: ServerResponse, distDir: stri
   }
   const rawUrl = req.url ?? "/";
   const pathOnly = rawUrl.split("?")[0] ?? "/";
-  const decodedPath = decodeURIComponent(pathOnly);
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(pathOnly);
+  } catch {
+    res.writeHead(400);
+    res.end();
+    return;
+  }
   const relativePath = decodedPath === "/" ? "index.html" : decodedPath.replace(/^\/+/, "");
   const resolvedDist = normalize(distDir);
   const candidate = normalize(join(resolvedDist, relativePath));

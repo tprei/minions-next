@@ -793,6 +793,7 @@ class DeterministicHarnessSession implements HarnessSession {
   #state: HarnessSessionSnapshot["state"] = "idle";
   #eventStreamClosed = false;
   #eventStream: DeterministicHarnessEventStream | undefined;
+  #disposed = false;
 
   constructor(
     identity: HarnessSessionIdentity,
@@ -877,6 +878,13 @@ class DeterministicHarnessSession implements HarnessSession {
       }
       return step.snapshot;
     });
+  }
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#state = "aborted";
+    this.#eventStreamClosed = true;
+    this.#eventStream?.finishFromSession();
   }
 
   resumeFromAdapter(request: ResumeHarnessSessionRequest): HarnessSession {

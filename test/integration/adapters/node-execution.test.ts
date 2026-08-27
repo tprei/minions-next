@@ -206,6 +206,8 @@ class ScriptedHarnessSession implements HarnessSession {
   readonly #blockUntilInterrupted: boolean;
   readonly #onBlocked: () => void;
   #releaseGate: (() => void) | undefined;
+  #disposed = false;
+  disposeCount = 0;
 
   constructor(
     identity: HarnessSessionIdentity,
@@ -239,28 +241,34 @@ class ScriptedHarnessSession implements HarnessSession {
   }
 
   prompt(): Promise<void> {
+    this.ensureOpen();
     return Promise.resolve();
   }
 
   steer(): Promise<void> {
+    this.ensureOpen();
     return Promise.resolve();
   }
 
   followUp(): Promise<void> {
+    this.ensureOpen();
     return Promise.resolve();
   }
 
   interrupt(): Promise<void> {
+    this.ensureOpen();
     this.#releaseGate?.();
     return Promise.resolve();
   }
 
   abort(): Promise<void> {
+    this.ensureOpen();
     this.#releaseGate?.();
     return Promise.resolve();
   }
 
   snapshot(): Promise<HarnessSessionSnapshot> {
+    this.ensureOpen();
     return Promise.resolve(
       Object.freeze({
         identity: this.identity,
@@ -269,6 +277,19 @@ class ScriptedHarnessSession implements HarnessSession {
       }),
     );
   }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.disposeCount += 1;
+    this.#releaseGate?.();
+  }
+
+  private ensureOpen(): void {
+    if (this.#disposed) {
+      throw new Error("harness session is closed");
+    }
+  }
 }
 
 class ScriptedHarnessAdapter implements HarnessAdapter {
@@ -276,6 +297,9 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
   readonly whenBlocked: Promise<void>;
   #whenBlockedResolve: (() => void) | undefined;
   #session: ScriptedHarnessSession | undefined;
+  get session(): ScriptedHarnessSession | undefined {
+    return this.#session;
+  }
 
   constructor(options: ScriptedHarnessOptions) {
     this.#options = options;
@@ -813,6 +837,9 @@ describe("execution coordinator (node-execution pipeline)", () => {
     expect(outcome.contextDigest).toBe(
       computeContextPackDigest(buildContextPackInput(request, handshake()), sha256Digest),
     );
+
+    // Harness session disposed exactly once on success.
+    expect(harness.session?.disposeCount).toBe(1);
   });
 
   it("writes the final checkpoint before recording the node outcome", async () => {
@@ -945,6 +972,8 @@ describe("execution coordinator (node-execution pipeline)", () => {
     expect(checkpoint).toBeDefined();
     expect(checkpoint?.sequence).toBe(3n);
     expect(checkpoint?.identity.harnessIdentity.sessionId).toBe("session-resume");
+    // Harness session disposed exactly once on crash failure.
+    expect(crashHarness.session?.disposeCount).toBe(1);
 
     // (3) A restarted coordinator re-binds the SAME identity + sandbox and replays
     // from the checkpoint sequence, resuming ONLY this node.
@@ -965,6 +994,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     expect(resumedTranscript[3]?.payload.kind).toBe("result");
     expect(fixture.sandbox.destroys).toHaveLength(2); // sibling + resumed node
     expect(fixture.scheduler.releases).toHaveLength(siblingReleases + 2);
+    expect(resumeHarness.session?.disposeCount).toBe(1);
 
     // Sibling is untouched: same transcript length + same recorded outcome.
     const siblingTranscriptAfter = await fixture.transcripts.readAll(siblingAttempt);
@@ -1070,6 +1100,22 @@ describe("execution coordinator (node-execution pipeline)", () => {
     expect(fixture.scheduler.releases).toHaveLength(1);
     expect(fixture.sandbox.creates).toHaveLength(1);
     expect(fixture.sandbox.destroys).toHaveLength(1);
+  });
+  it("disposes the harness session exactly once on failed node execution outcome", async () => {
+    const fixture = await createFixture();
+    const attempt = freshAttempt();
+    const node = freshNode();
+    stageLease(fixture, attempt, node);
+    const harness = new ScriptedHarnessAdapter({
+      handshake: handshake(),
+      sessionId: "session-failed",
+      payloads: [message("failing"), result("failed", "execution failed")],
+    });
+
+    const outcome = await fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node));
+
+    expect(outcome.outcome.kind).toBe("failed");
+    expect(harness.session?.disposeCount).toBe(1);
   });
 
   it("renders a deterministic context pack (REC-03..06)", () => {
