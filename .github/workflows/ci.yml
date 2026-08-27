@@ -35,8 +35,17 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
+      - name: Install pinned omp runtime
+        run: |
+          curl -fsSL --retry 3 -o /tmp/omp \
+            https://github.com/can1357/oh-my-pi/releases/download/v17.1.3/omp-linux-x64
+          echo "17a7e2e1c49cbc09129e29fbf48cdebd1a545d053f5cad7295c1898b6eaa422e  /tmp/omp" | sha256sum --check
+          sudo install -m 755 /tmp/omp /usr/local/bin/omp
       - name: Verify
         run: pnpm verify:pr
+        env:
+          LIVE_DEPS: omp
+          OMP_PATH: /usr/local/bin/omp
       - name: Upload Playwright artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -1,9 +1,10 @@
 import {
-  createOmpAcpHarnessAdapter,
-  OmpAcpAdapterError,
   buildSessionNewParams,
+  createOmpAcpHarnessAdapter,
   decodeAcpFrame,
   normalizeAcpNotification,
+  OmpAcpAdapterError,
+  resolveOmpPath as resolveOmpPathProduction,
   type OmpAcpAdapterOptions,
 } from "@minions/adapters";
 import {
@@ -16,12 +17,12 @@ import {
   type HarnessAttemptContext,
   type HarnessCapability,
   type HarnessEvent,
-  type HarnessSession,
 } from "@minions/core";
-import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { requireLiveDependency } from "../support/live-gate.js";
 
 /**
  * Integration tests for the OMP ACP harness adapter. Live cases exercise the installed
@@ -31,8 +32,8 @@ import { afterAll, describe, expect, it } from "vitest";
  * normalization with hand-crafted JSON-RPC lines.
  */
 
-const ompPath = resolveOmpPath();
-const live = ompPath !== undefined;
+const ompPath = tryResolveOmpPath();
+const live = requireLiveDependency("omp", ompPath !== undefined);
 const policyDigest = contentHash("5".repeat(64));
 
 const startContext: HarnessAttemptContext = {
@@ -48,11 +49,6 @@ const resumedContext: HarnessAttemptContext = {
   ...startContext,
   attemptId: attemptId("018f3a2e-4a20-7b90-8123-abcdef000006"),
   attemptOrdinal: 2,
-};
-
-type DisposableSession = HarnessSession & {
-  dispose(): void;
-  stderrSummary(): string;
 };
 
 const temporaryDirectories: string[] = [];
@@ -108,18 +104,12 @@ async function expectErrorCode<T>(
   }
 }
 
-function resolveOmpPath(): string | undefined {
-  const fromEnv = process.env["OMP_PATH"];
-  if (fromEnv && fromEnv.length > 0) return fromEnv;
-  const candidates = ["/home/mbn/.local/bin/omp", "/usr/local/bin/omp", "/usr/bin/omp"];
-  for (const candidate of candidates) {
-    try {
-      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
-    } catch {
-      // try the next candidate
-    }
+function tryResolveOmpPath(): string | undefined {
+  try {
+    return resolveOmpPathProduction();
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
 
 describe("omp acp adapter — version probe fail-closed", () => {
@@ -368,10 +358,10 @@ describe("omp acp adapter — session lifecycle + restart/resume (HAR-01)", () =
       const sessionDirectory = makeSessionDirectory();
       const options = baseOptions({ sessionDirectory });
       const adapter = createOmpAcpHarnessAdapter(options);
-      const session = (await adapter.start({
+      const session = await adapter.start({
         context: startContext,
         durableHarnessId: durable,
-      })) as DisposableSession;
+      });
 
       let sessionId: string;
       let nextSequence: bigint;
@@ -392,11 +382,11 @@ describe("omp acp adapter — session lifecycle + restart/resume (HAR-01)", () =
 
       // A fresh adapter instance (fresh process) must recover the same durable session.
       const adapterTwo = createOmpAcpHarnessAdapter(options);
-      const resumed = (await adapterTwo.resume({
+      const resumed = await adapterTwo.resume({
         context: resumedContext,
         identity: { durableHarnessId: durable, sessionId },
         afterSequence: nextSequence,
-      })) as DisposableSession;
+      });
       try {
         expect(resumed.identity.durableHarnessId).toBe(durable);
         expect(resumed.identity.sessionId).toBe(sessionId);
@@ -450,7 +440,7 @@ describe("omp acp adapter — session lifecycle + restart/resume (HAR-01)", () =
         expect((reason as OmpAcpAdapterError).code).toBe("session_conflict");
       } finally {
         for (const result of results) {
-          if (result.status === "fulfilled") (result.value as DisposableSession).dispose();
+          if (result.status === "fulfilled") result.value.dispose();
         }
       }
     },
@@ -518,10 +508,10 @@ describe("omp acp adapter — malformed notification resilience", () => {
       securityPolicyDigest: policyDigest,
       requiredCapabilities: ["resume", "snapshot", "steer", "follow_up", "abort"],
     });
-    const session = (await adapter.start({
+    const session = await adapter.start({
       context: startContext,
       durableHarnessId: "node-malformed-identity",
-    })) as DisposableSession;
+    });
     try {
       // Drive a round-trip; the fake omp emits the malformed session/update alongside
       // the session/prompt response, after the session router is wired.

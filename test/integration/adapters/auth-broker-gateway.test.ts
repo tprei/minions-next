@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,6 +9,7 @@ import {
   createCredentialVault,
   parseJsonObject,
   redactSecrets,
+  resolveOmpPath as resolveOmpPathProduction,
   runOmp,
   scanForSecrets,
   type AuthBrokerManager,
@@ -17,6 +18,7 @@ import {
   type SystemdCredsKeyMode,
 } from "@minions/adapters";
 import { afterEach, describe, expect, it } from "vitest";
+import { requireLiveDependency } from "../support/live-gate.js";
 
 /**
  * Integration test for the auth-broker + auth-gateway lifecycle (PR 19, deliverable
@@ -44,9 +46,12 @@ import { afterEach, describe, expect, it } from "vitest";
  * mode at setup. The factory default remains `"host"`.
  */
 
-const ompPath = resolveOmpPath();
+const ompPath = tryResolveOmpPath();
 const keyMode = detectKeyMode();
-const live = ompPath !== undefined && keyMode !== undefined;
+const live = requireLiveDependency(
+  "omp+systemd-creds",
+  ompPath !== undefined && keyMode !== undefined,
+);
 
 const HOST_ID = "01900000-0000-7000-8000-000000000020";
 const temporaryDirectories: string[] = [];
@@ -357,21 +362,13 @@ async function readVaultText(vault: CredentialVault, name: string): Promise<stri
   const bytes = await vault.get(name);
   return new TextDecoder().decode(bytes);
 }
-
-function resolveOmpPath(): string | undefined {
-  const fromEnv = process.env["OMP_PATH"];
-  if (fromEnv && fromEnv.length > 0) return fromEnv;
-  const candidates = ["/home/mbn/.local/bin/omp", "/usr/local/bin/omp", "/usr/bin/omp"];
-  for (const candidate of candidates) {
-    try {
-      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
-    } catch {
-      // try the next candidate
-    }
+function tryResolveOmpPath(): string | undefined {
+  try {
+    return resolveOmpPathProduction();
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
-
 function detectKeyMode(): SystemdCredsKeyMode | undefined {
   if (!existsSync("/usr/bin/systemd-creds")) return undefined;
   const plain = join(tmpdir(), `mauth-probe-${String(process.pid)}-${String(Date.now())}.plain`);
