@@ -558,6 +558,7 @@ export type {
   GitHubInstallationToken,
   GitHubPullRequestParameters,
   GitHubRepositoryInstallation,
+  GitHubRepositorySelection,
   GitHubRule,
   GitHubRuleType,
   GitHubRulesetConfig,

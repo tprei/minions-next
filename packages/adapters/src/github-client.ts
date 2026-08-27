@@ -169,11 +169,15 @@ export interface GitHubRepositoryInstallation {
   readonly appSlug: string;
 }
 
+export type GitHubRepositorySelection = "all" | "selected";
+
 export interface GitHubInstallationToken {
   readonly token: string;
   /** ISO-8601 expiry timestamp from GitHub. */
   readonly expiresAt: string;
   readonly permissions: Readonly<Record<string, string>>;
+  /** GitHub's echo of the token's effective repository scope. */
+  readonly repositorySelection: GitHubRepositorySelection;
   readonly repositories: readonly GitHubInstallationRepository[];
 }
 
@@ -357,7 +361,10 @@ export interface GitHubClient {
   getUserByLogin(login: string): Promise<GitHubUser>;
   getInstallationRepositories(): Promise<readonly GitHubInstallationRepository[]>;
   getRepositoryInstallation(repositoryFullName: string): Promise<GitHubRepositoryInstallation>;
-  createInstallationToken(installationId: number): Promise<GitHubInstallationToken>;
+  createInstallationToken(
+    installationId: number,
+    repositoryName: string,
+  ): Promise<GitHubInstallationToken>;
   listPullRequests(
     repositoryFullName: string,
     options: GitHubPullRequestListOptions,
@@ -490,11 +497,14 @@ class GitHubClientImpl implements GitHubClient {
     return parseRepositoryInstallation(body);
   }
 
-  async createInstallationToken(installationId: number): Promise<GitHubInstallationToken> {
+  async createInstallationToken(
+    installationId: number,
+    repositoryName: string,
+  ): Promise<GitHubInstallationToken> {
     const body = await this.requestJson(
       "POST",
       `/app/installations/${String(installationId)}/access_tokens`,
-      {},
+      { repositories: [repositoryName] },
     );
     return parseInstallationToken(body);
   }
@@ -1105,6 +1115,10 @@ function parseInstallationToken(value: unknown): GitHubInstallationToken {
     token: requireString(object["token"], "installation_token.token"),
     expiresAt: requireString(object["expires_at"], "installation_token.expires_at"),
     permissions: Object.freeze(permissions),
+    repositorySelection: parseRepositorySelection(
+      object["repository_selection"],
+      "installation_token.repository_selection",
+    ),
     repositories: Object.freeze(
       repositoriesRaw.map((entry, index) => {
         const here = `installation_token.repositories[${String(index)}]`;
@@ -1116,6 +1130,18 @@ function parseInstallationToken(value: unknown): GitHubInstallationToken {
       }),
     ),
   });
+}
+
+function parseRepositorySelection(value: unknown, context: string): GitHubRepositorySelection {
+  const text = requireString(value, context);
+  if (text === "all" || text === "selected") {
+    return text;
+  }
+  throw new GitHubClientError(
+    "response_invalid",
+    `${context}: unknown repository selection '${text}'`,
+    200,
+  );
 }
 
 // -------------------------------------------------------------------------------------------------
