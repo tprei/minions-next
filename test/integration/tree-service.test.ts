@@ -2,7 +2,11 @@ import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
-import { createSqliteVcsChangeBindingStore, openHostDatabase } from "@minions/adapters";
+import {
+  createSqliteSchedulerStore,
+  createSqliteVcsChangeBindingStore,
+  openHostDatabase,
+} from "@minions/adapters";
 import {
   ApiVersionSchema,
   ApprovePlanRequestSchema,
@@ -47,6 +51,8 @@ import {
 import {
   contentHash,
   gitSha,
+  schedulerCapacityPolicy,
+  schedulerOwnerId,
   taskNodeId,
   taskTreeId,
   timestampFromEpochMilliseconds,
@@ -209,6 +215,16 @@ const VCS_BINDING_GOAL = "vcs binding tree root";
 const VCS_BINDING_JJ_CHANGE_ID = "ab".repeat(32);
 const VCS_BINDING_CURRENT_COMMIT_ID = "cd".repeat(20);
 const VCS_BINDING_LAST_JJ_OPERATION_ID = "ef".repeat(32);
+const SCHEDULER_CLOCK_INSTANCE_ID = "01900000-0000-7000-8000-000000000701";
+const SCHEDULER_CLOCK_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000702";
+const SCHEDULER_CLOCK_REGISTER_EVENT_ID = "01900000-0000-7000-8000-000000000703";
+const SCHEDULER_CLOCK_CREATE_EVENT_ID = "01900000-0000-7000-8000-000000000704";
+const SCHEDULER_CLOCK_PROPOSE_EVENT_ID = "01900000-0000-7000-8000-000000000705";
+const SCHEDULER_CLOCK_APPROVE_EVENT_ID = "01900000-0000-7000-8000-000000000706";
+const SCHEDULER_CLOCK_RESTART_INSTANCE_ID = "01900000-0000-7000-8000-000000000707";
+const SCHEDULER_CLOCK_RESTART_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000708";
+const SCHEDULER_CLOCK_ATTEMPT_ID = "01900000-0000-7000-8000-000000000709";
+const SCHEDULER_CLOCK_LEASE_ID = "01900000-0000-7000-8000-00000000070a";
 
 interface GitFixture {
   readonly directory: string;
@@ -2258,6 +2274,192 @@ describe("tree service integration", () => {
         ...rootNodeBeforeBinding,
         vcsChangeBinding: expectedBinding,
       });
+
+      await restartedRuntime.close();
+      restartedRuntime = undefined;
+    } finally {
+      await restartedRuntime?.close();
+      await runtime?.close();
+      await closeWritable(capture.stream);
+      await rm(fixture.directory, { force: true, recursive: true });
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("reads a tree after a node mutation lands later than the last tree-level command", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-tree-service-scheduler-clock-home-"));
+    const fixture = await createGitFixture("scheduler-clock");
+    const capture = createLogCapture();
+    const clock = new MutableClock(STARTED_AT_MS);
+    let runtime: RunningDaemonRuntime | undefined;
+    let restartedRuntime: RunningDaemonRuntime | undefined;
+    try {
+      const port = await reserveLoopbackPort();
+      const logger = createStructuredLogger({ stream: capture.stream, now: () => clock.now() });
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([
+            SCHEDULER_CLOCK_INSTANCE_ID,
+            SCHEDULER_CLOCK_HOST_CANDIDATE_ID,
+            SCHEDULER_CLOCK_REGISTER_EVENT_ID,
+            SCHEDULER_CLOCK_CREATE_EVENT_ID,
+            SCHEDULER_CLOCK_PROPOSE_EVENT_ID,
+            SCHEDULER_CLOCK_APPROVE_EVENT_ID,
+          ]),
+          logger,
+        ),
+      );
+      const hostId = runtime.hostId;
+      if (hostId === undefined) {
+        throw new Error("local runtime did not produce a host ID");
+      }
+      const clients = connectClients(runtime.server.baseUrl);
+      await clients.repository.registerRepository(
+        registerRequest(
+          CONNECT_REGISTER_COMMAND_ID,
+          CONNECT_ACTOR_SESSION_ID,
+          CONNECT_REPOSITORY_ID,
+          fixture.root,
+        ),
+      );
+      const createdResponse = await clients.tree.createTree(
+        createTreeRequest(
+          CONNECT_CREATE_COMMAND_ID,
+          CONNECT_ACTOR_SESSION_ID,
+          CONNECT_REPOSITORY_ID,
+          CONNECT_TREE_ID,
+          CONNECT_INITIAL_REVISION_ID,
+          CONNECT_ROOT_NODE_ID,
+          CONNECT_ROOT_ARTIFACT_ID,
+          CONNECT_ATTENTION_ID,
+          CONNECT_INITIAL_GOAL,
+          fixture.baseCommit,
+          treeBudget(),
+        ),
+      );
+      expect(createdResponse.tree?.id).toBe(CONNECT_TREE_ID);
+
+      clock.set(CONNECT_PROPOSED_AT_MS);
+      const proposedResponse = await clients.tree.proposePlan(
+        create(ProposePlanRequestSchema, {
+          commandId: CONNECT_PROPOSAL_COMMAND_ID,
+          actorSessionId: CONNECT_ACTOR_SESSION_ID,
+          treeId: CONNECT_TREE_ID,
+          planRevisionId: CONNECT_PROPOSAL_REVISION_ID,
+          goal: CONNECT_FIRST_PLAN_GOAL,
+          nodes: [
+            proposedImplementationNode(
+              CONNECT_CHILD_NODE_ID,
+              CONNECT_ROOT_NODE_ID,
+              CONNECT_CHILD_OBJECTIVE,
+              ["the scheduler child is implementable"],
+            ),
+            proposedResearchNode(
+              CONNECT_DEEP_NODE_ID,
+              CONNECT_CHILD_NODE_ID,
+              CONNECT_DEEP_OBJECTIVE,
+              ["the scheduler child output is researched"],
+              CONNECT_DEEP_ARTIFACT_ID,
+            ),
+          ],
+        }),
+      );
+      const proposed = proposedResponse.tree;
+      if (proposed === undefined) {
+        throw new Error("proposal response did not contain a tree");
+      }
+      expect(proposed.nodes.find((node) => node.id === CONNECT_CHILD_NODE_ID)?.state).toBe(
+        NodeState.PLANNED,
+      );
+
+      clock.set(CONNECT_APPROVED_AT_MS);
+      const approvedResponse = await clients.tree.approvePlan(
+        create(ApprovePlanRequestSchema, {
+          commandId: CONNECT_APPROVE_COMMAND_ID,
+          actorSessionId: CONNECT_ACTOR_SESSION_ID,
+          treeId: CONNECT_TREE_ID,
+          planRevisionId: CONNECT_PROPOSAL_REVISION_ID,
+        }),
+      );
+      const approved = approvedResponse.tree;
+      if (approved === undefined) {
+        throw new Error("approval response did not contain a tree");
+      }
+      expect(approved.state).toBe(TreeState.APPROVED);
+      expect(approved.nodes.find((node) => node.id === CONNECT_CHILD_NODE_ID)?.state).toBe(
+        NodeState.READY,
+      );
+
+      const activatedAtMs = CONNECT_APPROVED_AT_MS + 1000;
+      clock.set(activatedAtMs);
+
+      await runtime.close();
+      runtime = undefined;
+
+      const schedulerDatabase = await openHostDatabase({
+        path: join(home, "hosts", hostId, "host.db"),
+        clock,
+      });
+      try {
+        const scheduler = createSqliteSchedulerStore({
+          database: schedulerDatabase,
+          ids: new SequenceIdGenerator([SCHEDULER_CLOCK_ATTEMPT_ID, SCHEDULER_CLOCK_LEASE_ID]),
+        });
+        const lease = await scheduler.claimNext({
+          ownerId: schedulerOwnerId("tree-service-scheduler-clock-test"),
+          at: clock.now(),
+          leaseDurationMs: 60_000,
+          capacity: schedulerCapacityPolicy(4, 4),
+        });
+        if (lease === undefined) {
+          throw new Error("scheduler did not claim the ready node");
+        }
+        expect(lease.nodeId).toBe(CONNECT_CHILD_NODE_ID);
+      } finally {
+        await schedulerDatabase.close();
+      }
+
+      const hostDatabasePath = join(home, "hosts", hostId, "host.db");
+      const persisted = readDatabaseState(hostDatabasePath);
+      const persistedTree = persisted.trees.find((tree) => tree["id"] === CONNECT_TREE_ID);
+      const persistedChild = persisted.nodes.find((node) => node["id"] === CONNECT_CHILD_NODE_ID);
+      expect(persistedTree?.["updated_at_ms"]).toBe(BigInt(CONNECT_APPROVED_AT_MS));
+      expect(persistedChild?.["state_kind"]).toBe("active");
+      expect(persistedChild?.["updated_at_ms"]).toBe(BigInt(activatedAtMs));
+
+      const restartedClock = new MutableClock(activatedAtMs + 1000);
+      const restartedLogger = createStructuredLogger({
+        stream: capture.stream,
+        now: () => restartedClock.now(),
+      });
+      restartedRuntime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          restartedClock,
+          new SequenceIdGenerator([
+            SCHEDULER_CLOCK_RESTART_INSTANCE_ID,
+            SCHEDULER_CLOCK_RESTART_HOST_CANDIDATE_ID,
+          ]),
+          restartedLogger,
+        ),
+      );
+      expect(restartedRuntime.hostId).toBe(hostId);
+      const restartedClients = connectClients(restartedRuntime.server.baseUrl);
+      const rereadResponse = await restartedClients.tree.getTree({
+        treeId: CONNECT_TREE_ID,
+      });
+      const reread = rereadResponse.tree;
+      if (reread === undefined) {
+        throw new Error("reread get response did not contain a tree");
+      }
+      expect(reread.state).toBe(TreeState.APPROVED);
+      expect(reread.nodes.find((node) => node.id === CONNECT_CHILD_NODE_ID)?.state).toBe(
+        NodeState.ACTIVE,
+      );
 
       await restartedRuntime.close();
       restartedRuntime = undefined;
