@@ -46,6 +46,7 @@ import {
   type LimaTemplateBuildOptions,
   type LimaTemplateReceipt,
 } from "./lima-template.js";
+import { terminateProcessGroup } from "./process-group.js";
 
 export type MacOsLimaSandboxErrorCode =
   | "invalid_configuration"
@@ -2117,13 +2118,12 @@ function runHostCommand(
     let captured = 0;
     let settled = false;
     const timer = setTimeout(() => {
-      const terminationError = terminateProcessGroup(child);
+      void terminateProcessGroup(child);
       finish(
         new MacOsLimaSandboxError(
           "command_timeout",
           `Lima ${commandLabel(request.arguments)} command exceeded its bounded timeout`,
           "Inspect the VM and retry only after resolving the stalled operation.",
-          terminationError,
         ),
       );
     }, request.timeoutMs);
@@ -2133,13 +2133,12 @@ function runHostCommand(
       const bytes = toBytes(chunk);
       captured += bytes.byteLength;
       if (captured > request.maxOutputBytes) {
-        const terminationError = terminateProcessGroup(child);
+        void terminateProcessGroup(child);
         finish(
           new MacOsLimaSandboxError(
             "output_limit",
             `Lima ${commandLabel(request.arguments)} command exceeded its bounded output limit`,
             "Inspect the VM logs directly and resolve the noisy operation.",
-            terminationError,
           ),
         );
         return;
@@ -2192,39 +2191,12 @@ function runHostCommand(
   });
 }
 
-function terminateProcessGroup(child: ChildProcess): unknown {
-  const pid = child.pid;
-  if (pid === undefined) return undefined;
-  const terminationError = signalProcessGroup(child, pid, "SIGTERM");
-  setTimeout(() => {
-    signalProcessGroup(child, pid, "SIGKILL");
-  }, 1_000).unref();
-  return terminationError;
-}
-
 function commandLabel(arguments_: readonly string[]): string {
   const operation = arguments_.find((argument) => !argument.startsWith("-")) ?? "unknown";
   if (operation !== "shell") return operation;
   const separator = arguments_.indexOf("--");
   const guestExecutable = separator >= 0 ? arguments_[separator + 1] : undefined;
   return guestExecutable === undefined ? operation : `${operation}:${guestExecutable}`;
-}
-
-function signalProcessGroup(child: ChildProcess, pid: number, signal: NodeJS.Signals): unknown {
-  try {
-    process.kill(-pid, signal);
-    return undefined;
-  } catch (groupError: unknown) {
-    if (isNodeError(groupError) && groupError.code === "ESRCH") return undefined;
-    try {
-      return child.kill(signal) ? undefined : groupError;
-    } catch (childError: unknown) {
-      return new AggregateError(
-        [groupError, childError],
-        `cannot terminate the Lima command with ${signal}`,
-      );
-    }
-  }
 }
 
 function toBytes(value: unknown): Uint8Array {
