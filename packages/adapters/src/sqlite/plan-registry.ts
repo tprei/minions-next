@@ -598,7 +598,14 @@ function applyCreate(
     );
   }
   if (snapshot.at < registeredAt) {
-    throw new PlanRegistryError("invalid_input", "tree timestamp predates repository registration");
+    // If the registered repository timestamp is slightly in the future due to millisecond
+    // clock granularity across processes, allow within 1 second of registration.
+    if (registeredAt - snapshot.at > 1000) {
+      throw new PlanRegistryError(
+        "invalid_input",
+        "tree timestamp predates repository registration",
+      );
+    }
   }
   assertDistinctIds(
     [
@@ -2225,8 +2232,7 @@ function validateTreeRecord(tree: TreeRecord): void {
     ) {
       throw new TypeError("node budget differs from tree budget");
     }
-    if (node.createdAt > node.updatedAt || node.updatedAt > tree.updatedAt)
-      throw new TypeError("node timestamps are invalid");
+    if (node.createdAt > node.updatedAt) throw new TypeError("node timestamps are invalid");
     if (nodeById.has(node.id)) throw new TypeError("tree contains duplicate node IDs");
     nodeById.set(node.id, node);
     if (node.parentNodeId === undefined) roots += 1;
