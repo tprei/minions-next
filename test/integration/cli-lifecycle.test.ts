@@ -590,3 +590,191 @@ describe("CLI node inspection and steering", () => {
     }
   });
 });
+
+// -------------------------------------------------------------------------------------------------
+// One-prompt templated trees: `minions tree create-templated`.
+//
+// Drives the CLI against a real daemon and asserts that a template name plus a
+// prompt alone produces a correctly shaped task DAG: EXPLAIN auto-approves a
+// read-only RESEARCH child, FIX proposes a RESEARCH -> IMPLEMENTATION chain
+// that stays DRAFT until a human approves. The budget flags and the root
+// allowed path are deliberately absent — they come from the template.
+// -------------------------------------------------------------------------------------------------
+
+const TEMPLATED_STARTED_AT_MS = 1_700_000_000_000;
+const TEMPLATED_REPOSITORY_ID = "01900000-0000-7000-8000-000000000901";
+const TEMPLATED_TREE_ID = "01900000-0000-7000-8000-000000000902";
+const TEMPLATED_BASE_COMMIT = "ab".repeat(20);
+
+async function capturedUsageError(action: () => Promise<number>): Promise<string> {
+  const captured = await captureCli(action);
+  expect(captured.code).toBe(2);
+  const error = jsonRecord(JSON.parse(captured.stderr) as unknown);
+  expect(jsonString(error["code"])).toBe("invalid_usage");
+  return jsonString(error["message"]);
+}
+
+function jsonNodes(value: unknown): readonly Record<string, unknown>[] {
+  return jsonArray(value).map((node) => jsonRecord(node));
+}
+
+describe("CLI templated tree usage", () => {
+  it("rejects unknown templates and misplaced flags without contacting a daemon", async () => {
+    expect(
+      await capturedUsageError(() =>
+        main(["tree", "create-templated", TEMPLATED_REPOSITORY_ID, "deploy", "explain the bug"]),
+      ),
+    ).toBe("template must be explain, fix, or feature");
+
+    expect(
+      await capturedUsageError(() =>
+        main(["tree", "get", TEMPLATED_TREE_ID, "--base-commit", TEMPLATED_BASE_COMMIT]),
+      ),
+    ).toBe("--base-commit is only valid with tree create-templated");
+
+    expect(
+      await capturedUsageError(() =>
+        main([
+          "tree",
+          "create-templated",
+          TEMPLATED_REPOSITORY_ID,
+          "fix",
+          "stop the flaky retry test",
+          "--base-commit",
+          "nothex",
+        ]),
+      ),
+    ).toBe("base commit must be 40 or 64 lowercase hexadecimal characters");
+  });
+});
+
+describe("CLI templated tree creation", () => {
+  it("creates shaped trees from a prompt through a real daemon", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-cli-templated-home-"));
+    const fixture = await createProvenanceGitFixture();
+    const logStream = discardWritable();
+    const clock = new FixedClock(timestampFromEpochMilliseconds(TEMPLATED_STARTED_AT_MS));
+    const logger = createStructuredLogger({ stream: logStream, now: () => clock.now() });
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      const port = await reserveLoopbackPort();
+      runtime = await startDaemonRuntime({
+        home,
+        mode: "local",
+        port,
+        serverVersion: "1.0.0",
+        clock,
+        ids: createSecureIdGenerator(clock),
+        logger,
+        displayName: "cli-templated-tree-test-host",
+      });
+
+      const registration = await captureCliJson(() =>
+        main(["repository", "register", fixture.root, "--home", home]),
+      );
+      expect(registration.code).toBe(0);
+      const repositoryId = jsonString(
+        jsonRecord(jsonRecord(registration.json)["repository"])["id"],
+      );
+
+      const explained = await captureCliJson(() =>
+        main([
+          "tree",
+          "create-templated",
+          repositoryId,
+          "explain",
+          "explain why the retry loop drops messages",
+          "--home",
+          home,
+        ]),
+      );
+      expect(explained.code).toBe(0);
+      const explainedTree = jsonRecord(jsonRecord(explained.json)["tree"]);
+      expect(jsonString(explainedTree["state"])).toBe("TREE_STATE_APPROVED");
+      expect(jsonString(explainedTree["goal"])).toBe("explain why the retry loop drops messages");
+      expect(jsonString(explainedTree["base_commit"])).toBe(fixture.baseCommit);
+      const explainedBudget = jsonRecord(explainedTree["budget"]);
+      for (const field of [
+        "max_depth",
+        "max_fan_out",
+        "max_nodes",
+        "max_concurrency",
+        "max_attempts_per_node",
+      ]) {
+        expect(typeof explainedBudget[field]).toBe("number");
+      }
+      const explainedRevisions = jsonNodes(explainedTree["revisions"]);
+      expect(explainedRevisions).toHaveLength(1);
+      expect(jsonString(explainedRevisions[0]?.["state"])).toBe("PLAN_REVISION_STATE_APPROVED");
+
+      const explainedNodes = jsonNodes(explainedTree["nodes"]);
+      expect(explainedNodes).toHaveLength(2);
+      const explainedRoot = explainedNodes.find((node) => node["mode"] === "PLAN_NODE_MODE_PLAN");
+      const explainedResearch = explainedNodes.find(
+        (node) => node["mode"] === "PLAN_NODE_MODE_RESEARCH",
+      );
+      if (explainedRoot === undefined || explainedResearch === undefined) {
+        throw new Error("explained tree is missing the root or research node");
+      }
+      expect(explainedRoot["parent_node_id"]).toBeUndefined();
+      expect(jsonString(explainedRoot["state"])).toBe("NODE_STATE_PLANNED");
+      expect(jsonString(explainedResearch["parent_node_id"])).toBe(
+        jsonString(explainedTree["root_node_id"]),
+      );
+      expect(jsonString(explainedResearch["state"])).toBe("NODE_STATE_READY");
+      expect(jsonString(explainedResearch["objective"]).length).toBeGreaterThan(0);
+      expect(jsonArray(explainedResearch["acceptance_criteria"]).length).toBeGreaterThan(0);
+      expect(jsonRecord(explainedResearch["artifact"])["artifact_id"]).toBeDefined();
+      expect(explainedResearch["implementation"]).toBeUndefined();
+
+      const fixed = await captureCliJson(() =>
+        main([
+          "tree",
+          "create-templated",
+          repositoryId,
+          "fix",
+          "stop the flaky retry test",
+          "--base-commit",
+          fixture.baseCommit,
+          "--home",
+          home,
+        ]),
+      );
+      expect(fixed.code).toBe(0);
+      const fixedTree = jsonRecord(jsonRecord(fixed.json)["tree"]);
+      expect(jsonString(fixedTree["state"])).toBe("TREE_STATE_DRAFT");
+      expect(jsonString(fixedTree["goal"])).toBe("stop the flaky retry test");
+      expect(jsonString(fixedTree["base_commit"])).toBe(fixture.baseCommit);
+      const fixedRevisions = jsonNodes(fixedTree["revisions"]);
+      expect(fixedRevisions).toHaveLength(1);
+      expect(jsonString(fixedRevisions[0]?.["state"])).toBe("PLAN_REVISION_STATE_DRAFT");
+
+      const fixedNodes = jsonNodes(fixedTree["nodes"]);
+      expect(fixedNodes).toHaveLength(3);
+      const fixedResearch = fixedNodes.find((node) => node["mode"] === "PLAN_NODE_MODE_RESEARCH");
+      const fixedImplementation = fixedNodes.find(
+        (node) => node["mode"] === "PLAN_NODE_MODE_IMPLEMENTATION",
+      );
+      if (fixedResearch === undefined || fixedImplementation === undefined) {
+        throw new Error("fixed tree is missing the research or implementation node");
+      }
+      expect(jsonString(fixedResearch["parent_node_id"])).toBe(
+        jsonString(fixedTree["root_node_id"]),
+      );
+      expect(jsonString(fixedResearch["state"])).toBe("NODE_STATE_PLANNED");
+      expect(jsonString(fixedImplementation["parent_node_id"])).toBe(
+        jsonString(fixedResearch["id"]),
+      );
+      expect(jsonString(fixedImplementation["state"])).toBe("NODE_STATE_PLANNED");
+      expect(jsonString(fixedImplementation["objective"]).length).toBeGreaterThan(0);
+      expect(jsonArray(fixedImplementation["acceptance_criteria"]).length).toBeGreaterThan(0);
+      expect(fixedImplementation["implementation"]).toBeDefined();
+      expect(fixedImplementation["artifact"]).toBeUndefined();
+    } finally {
+      await runtime?.close();
+      await closeWritable(logStream);
+      await rm(fixture.directory, { force: true, recursive: true });
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+});

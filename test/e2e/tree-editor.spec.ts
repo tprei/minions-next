@@ -23,6 +23,7 @@ test.describe("tree editor", () => {
     const dialog = page.getByRole("dialog", { name: "New task" });
     await expect(dialog).toBeVisible();
 
+    await page.getByText("Advanced options (custom tree & budgets)").click();
     await page.locator("#new-task-host").selectOption({ index: 1 });
     await page.locator("#new-task-repository").selectOption({ label: gitFixtureRoot });
     await page.locator("#new-task-goal").fill(goal);

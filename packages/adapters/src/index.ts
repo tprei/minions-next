@@ -93,6 +93,8 @@ export type {
   ArtifactInputRecord,
   ArtifactOutputRecord,
   CreatePlanRegistryOptions,
+  CreateTemplatedNodeInput,
+  CreateTemplatedTreeInput,
   CreateTreeInput,
   ImplementationOutputRecord,
   ListTreesInput,

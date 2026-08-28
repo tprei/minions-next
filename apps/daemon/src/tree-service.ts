@@ -11,6 +11,7 @@ import { createValidator } from "@bufbuild/protovalidate";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import {
   createRevsetManager,
+  createSecureIdGenerator,
   GateProfileError,
   loadGateProfile,
   PlanRegistryError,
@@ -33,6 +34,7 @@ import {
   ApprovePlanResponseSchema,
   ArtifactInputSchema,
   ArtifactOutputContractSchema,
+  CreateTemplatedTreeResponseSchema,
   CreateTreeResponseSchema,
   ImplementationOutputContractSchema,
   GetReviewHeadersResponseSchema,
@@ -48,15 +50,22 @@ import {
   TaskNodeSchema,
   TaskTreeSchema,
   TreeBudgetSchema,
+  TaskTemplate,
   TreeService,
   TreeSummarySchema,
   VcsChangeBindingSchema,
   VcsConflictState,
 } from "@minions/contracts";
 import {
+  artifactId,
+  gitSha,
   repositoryId,
-  timestampFromEpochMilliseconds,
+  resolveTaskTemplate,
+  type IdGenerator,
+  type TaskTemplateKey,
+  taskNodeId,
   taskTreeId,
+  timestampFromEpochMilliseconds,
   type Clock,
   type ReviewFreshness as ReviewFreshnessDomain,
   type ReviewHeader,
@@ -91,9 +100,11 @@ export type TreeServiceOptions = Readonly<{
   repositoryRegistry?: RepositoryRegistry;
   hostMinimum?: HostGateMinimum;
   revset?: TreeServiceRevsetOptions;
+  ids?: IdGenerator;
 }>;
 
 export function registerTreeService(router: ConnectRouter, options: TreeServiceOptions): void {
+  const idGenerator = options.ids ?? createSecureIdGenerator(options.clock);
   // Cached per repository: a RevsetManager serializes its own jj invocations against one
   // working copy, so reusing the same instance across calls (rather than constructing a
   // fresh one per request) preserves that serialization instead of letting concurrent RPCs
@@ -121,6 +132,63 @@ export function registerTreeService(router: ConnectRouter, options: TreeServiceO
   }
 
   router.service(TreeService, {
+    async createTemplatedTree(request) {
+      try {
+        if (options.repositoryRegistry === undefined) {
+          throw new ConnectError(
+            "repository registry is required to enforce the gate profile",
+            Code.FailedPrecondition,
+          );
+        }
+        let templateKey: TaskTemplateKey;
+        switch (request.template) {
+          case TaskTemplate.EXPLAIN:
+            templateKey = "explain";
+            break;
+          case TaskTemplate.FIX:
+            templateKey = "fix";
+            break;
+          case TaskTemplate.FEATURE:
+            templateKey = "feature";
+            break;
+          case TaskTemplate.UNSPECIFIED:
+            throw new ConnectError(
+              "task template must be specified and recognized",
+              Code.InvalidArgument,
+            );
+        }
+        if (typeof request.prompt !== "string" || request.prompt.trim().length === 0) {
+          throw new ConnectError("prompt must not be empty", Code.InvalidArgument);
+        }
+        const repository = options.repositoryRegistry.get(repositoryId(request.repositoryId));
+        await loadGateProfile(repository.canonicalRoot, options.hostMinimum);
+        const baseCommit =
+          request.baseCommit !== undefined && request.baseCommit.length > 0
+            ? request.baseCommit
+            : repository.baseCommit;
+        const resolved = resolveTaskTemplate(templateKey, request.prompt);
+        const mintedNodes = resolved.nodes.map((node) => ({
+          nodeId: taskNodeId(idGenerator.nextId()),
+          ...(node.outputKind === "artifact"
+            ? { artifactId: artifactId(idGenerator.nextId()) }
+            : {}),
+        }));
+        const tree = await options.planRegistry.createTemplated({
+          request,
+          resolved,
+          baseCommit: gitSha(baseCommit),
+          mintedNodes,
+          at: timestampFromEpochMilliseconds(options.clock.now()),
+        });
+        const bindings = await loadBindingsByNodeId(options.vcsChangeBindingStore, tree);
+        return validateResponse(
+          CreateTemplatedTreeResponseSchema,
+          create(CreateTemplatedTreeResponseSchema, { tree: toTreeMessage(tree, bindings) }),
+        );
+      } catch (error) {
+        throw toConnectError(error);
+      }
+    },
     async createTree(request) {
       try {
         if (options.repositoryRegistry === undefined) {

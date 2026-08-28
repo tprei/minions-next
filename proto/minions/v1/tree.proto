@@ -8,6 +8,7 @@ import "minions/v1/event.proto";
 
 service TreeService {
   rpc CreateTree(CreateTreeRequest) returns (CreateTreeResponse);
+  rpc CreateTemplatedTree(CreateTemplatedTreeRequest) returns (CreateTemplatedTreeResponse);
   rpc GetTree(GetTreeRequest) returns (GetTreeResponse);
   rpc ListTrees(ListTreesRequest) returns (ListTreesResponse);
   rpc ProposePlan(ProposePlanRequest) returns (ProposePlanResponse);
@@ -29,6 +30,13 @@ enum PlanNodeMode {
   PLAN_NODE_MODE_RESEARCH = 2;
   PLAN_NODE_MODE_EXPLORE = 3;
   PLAN_NODE_MODE_IMPLEMENTATION = 4;
+}
+
+enum TaskTemplate {
+  TASK_TEMPLATE_UNSPECIFIED = 0;
+  TASK_TEMPLATE_EXPLAIN = 1;
+  TASK_TEMPLATE_FIX = 2;
+  TASK_TEMPLATE_FEATURE = 3;
 }
 
 enum PlanAttentionKind {
@@ -268,6 +276,27 @@ message CreateTreeRequest {
 }
 
 message CreateTreeResponse {
+  TaskTree tree = 1 [(buf.validate.field).required = true];
+}
+
+message CreateTemplatedTreeRequest {
+  string command_id = 1 [(buf.validate.field).string.uuid = true];
+  string actor_session_id = 2 [(buf.validate.field).string.uuid = true];
+  string repository_id = 3 [(buf.validate.field).string.uuid = true];
+  string tree_id = 4 [(buf.validate.field).string.uuid = true];
+  string plan_revision_id = 5 [(buf.validate.field).string.uuid = true];
+  string root_node_id = 6 [(buf.validate.field).string.uuid = true];
+  string root_artifact_id = 7 [(buf.validate.field).string.uuid = true];
+  string attention_id = 8 [(buf.validate.field).string.uuid = true];
+  TaskTemplate template = 9 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: 0
+  }];
+  string prompt = 10 [(buf.validate.field).string = {min_len: 1}];
+  optional string base_commit = 11 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}([0-9a-f]{24})?$"];
+}
+
+message CreateTemplatedTreeResponse {
   TaskTree tree = 1 [(buf.validate.field).required = true];
 }
 

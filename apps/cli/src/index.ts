@@ -27,6 +27,7 @@ import {
   ArtifactInputSchema,
   ArtifactOutputContractSchema,
   ArtifactService,
+  CreateTemplatedTreeRequestSchema,
   CreateTreeRequestSchema,
   DoctorStatus,
   GetNodeOutcomeRequestSchema,
@@ -55,6 +56,7 @@ import {
   RepositoryService,
   SteeringService,
   SystemService,
+  TaskTemplate,
   TextNodeCommandSchema,
   TreeBudgetSchema,
   TreeService,
@@ -107,6 +109,14 @@ export async function main(argv: readonly string[]): Promise<number> {
           invocation.baseCommit,
           invocation.rootAllowedRepositoryPath,
           invocation.budget,
+        );
+      case "tree-create-templated":
+        return await createTemplatedTree(
+          invocation.home,
+          invocation.repositoryId,
+          invocation.template,
+          invocation.prompt,
+          invocation.baseCommit,
         );
       case "tree-get":
         return await getTree(invocation.home, invocation.treeId);
@@ -206,6 +216,14 @@ type Invocation =
       baseCommit: string;
       rootAllowedRepositoryPath: string;
       budget: TreeBudgetInput;
+    }>
+  | Readonly<{
+      command: "tree-create-templated";
+      home: string;
+      repositoryId: string;
+      template: TaskTemplate;
+      prompt: string;
+      baseCommit?: string;
     }>
   | Readonly<{
       command: "tree-get";
@@ -327,6 +345,7 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let maxConcurrency: number | undefined;
   let maxAttemptsPerNode: number | undefined;
   let rootAllowedRepositoryPath: string | undefined;
+  let baseCommit: string | undefined;
   let nodeSteerText: string | undefined;
   let nodeSteerAnswer: string | undefined;
   let nodeSteerAttentionId: string | undefined;
@@ -427,6 +446,13 @@ function parseInvocation(argv: readonly string[]): Invocation {
           requiredValue(option, value),
           option,
         );
+        index += 1;
+        break;
+      case "--base-commit":
+        if (command !== "tree-create-templated") {
+          throw new UsageError("--base-commit is only valid with tree create-templated");
+        }
+        baseCommit = parseBaseCommit(requiredValue(option, value));
         index += 1;
         break;
       case "--text":
@@ -584,6 +610,19 @@ function parseInvocation(argv: readonly string[]): Invocation {
         maxConcurrency,
         maxAttemptsPerNode,
       },
+    };
+  }
+  if (command === "tree-create-templated") {
+    return {
+      command,
+      home,
+      repositoryId: parseUuidV7Argument(
+        "repository ID",
+        requiredPositional("repository ID", positional[0]),
+      ),
+      template: parseTaskTemplate(requiredPositional("template", positional[1])),
+      prompt: requiredText("task prompt", requiredPositional("task prompt", positional[2])),
+      ...(baseCommit === undefined ? {} : { baseCommit }),
     };
   }
   if (command === "tree-get") {
@@ -787,6 +826,7 @@ function normalizeCommand(
   if (
     first === "tree" &&
     (second === "create" ||
+      second === "create-templated" ||
       second === "get" ||
       second === "list" ||
       second === "propose" ||
@@ -814,6 +854,7 @@ function invocationPositionalCount(command: string | undefined): number {
     case "node-attention":
       return 1;
     case "tree-create":
+    case "tree-create-templated":
     case "tree-propose":
     case "node-steer":
       return 3;
@@ -907,7 +948,7 @@ function parseBudget(value: string, option: string): number {
 }
 
 function usageText(): string {
-  return "usage: minions <start|stop|status|doctor|host list|repository register|repository get|repository list|tree create|tree get|tree list|tree propose|tree repair|tree approve|tree provenance|node get|node steer|node attention|auth login|auth status|auth logout> [options]";
+  return "usage: minions <start|stop|status|doctor|host list|repository register|repository get|repository list|tree create|tree create-templated|tree get|tree list|tree propose|tree repair|tree approve|tree provenance|node get|node steer|node attention|auth login|auth status|auth logout> [options]";
 }
 
 async function start(invocation: StartInvocation): Promise<number> {
@@ -1055,6 +1096,35 @@ async function createTree(
     }),
   );
   writeJson({ tree: treeJson(requiredTree(response.tree, "create tree")) });
+  return 0;
+}
+
+async function createTemplatedTree(
+  home: string,
+  repositoryId: string,
+  template: TaskTemplate,
+  prompt: string,
+  baseCommit: string | undefined,
+): Promise<number> {
+  const ids = createSecureIdGenerator({
+    now: () => timestampFromEpochMilliseconds(Date.now()),
+  });
+  const response = await clientsForHome(home).tree.createTemplatedTree(
+    create(CreateTemplatedTreeRequestSchema, {
+      commandId: ids.nextId(),
+      actorSessionId: ids.nextId(),
+      repositoryId,
+      treeId: ids.nextId(),
+      planRevisionId: ids.nextId(),
+      rootNodeId: ids.nextId(),
+      rootArtifactId: ids.nextId(),
+      attentionId: ids.nextId(),
+      template,
+      prompt,
+      ...(baseCommit === undefined ? {} : { baseCommit }),
+    }),
+  );
+  writeJson({ tree: treeJson(requiredTree(response.tree, "create templated tree")) });
   return 0;
 }
 
@@ -2403,6 +2473,19 @@ function parseMode(value: string): DaemonModeName {
     return value;
   }
   throw new UsageError("--mode must be host, local, or supervisor");
+}
+
+function parseTaskTemplate(value: string): TaskTemplate {
+  switch (value) {
+    case "explain":
+      return TaskTemplate.EXPLAIN;
+    case "fix":
+      return TaskTemplate.FIX;
+    case "feature":
+      return TaskTemplate.FEATURE;
+    default:
+      throw new UsageError("template must be explain, fix, or feature");
+  }
 }
 
 function parsePort(value: string): number {

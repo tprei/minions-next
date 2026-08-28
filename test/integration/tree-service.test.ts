@@ -14,6 +14,7 @@ import {
   ArtifactOutputContractSchema,
   AttentionKind,
   AttentionSummarySchema,
+  CreateTemplatedTreeRequestSchema,
   CreateTreeRequestSchema,
   EventService,
   GetServerInfoRequestSchema,
@@ -37,6 +38,7 @@ import {
   TaskNodeSchema,
   TaskTreeSchema,
   TreeBudgetSchema,
+  TaskTemplate,
   TreeService,
   TreeState,
   TreeSummarySchema,
@@ -3435,6 +3437,267 @@ describe("tree service integration", () => {
       await closeWritable(capture.stream);
       await rm(malformedPath ?? join(home, "malformed-repair-plan.json"), { force: true });
       await rm(repairPath ?? join(home, "repair-plan.json"), { force: true });
+      await rm(fixture.directory, { force: true, recursive: true });
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("creates templated trees for EXPLAIN, FIX, handles replay idempotency and rejects invalid template/prompt", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-tree-templated-test-home-"));
+    const fixture = await createGitFixture("templated");
+    const capture = createLogCapture();
+    const clock = new MutableClock(STARTED_AT_MS);
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      const port = await reserveLoopbackPort();
+      const logger = createStructuredLogger({ stream: capture.stream, now: () => clock.now() });
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([
+            "01900000-0000-7000-8000-000000001001",
+            "01900000-0000-7000-8000-000000001002",
+            "01900000-0000-7000-8000-000000001003",
+            "01900000-0000-7000-8000-000000001004",
+            "01900000-0000-7000-8000-000000001005",
+            "01900000-0000-7000-8000-000000001006",
+            "01900000-0000-7000-8000-000000001007",
+            "01900000-0000-7000-8000-000000001008",
+            "01900000-0000-7000-8000-000000001009",
+            "01900000-0000-7000-8000-00000000100a",
+            "01900000-0000-7000-8000-00000000100b",
+            "01900000-0000-7000-8000-00000000100c",
+            "01900000-0000-7000-8000-00000000100d",
+            "01900000-0000-7000-8000-00000000100e",
+            "01900000-0000-7000-8000-00000000100f",
+            "01900000-0000-7000-8000-000000001010",
+          ]),
+          logger,
+        ),
+      );
+      const hostId = runtime.hostId;
+      if (hostId === undefined) {
+        throw new Error("local runtime did not produce a host ID");
+      }
+      const clients = connectClients(runtime.server.baseUrl);
+
+      const repoId = "01900000-0000-7000-8000-000000000201";
+      await clients.repository.registerRepository(
+        registerRequest(
+          "01900000-0000-7000-8000-000000000202",
+          "01900000-0000-7000-8000-000000000203",
+          repoId,
+          fixture.root,
+        ),
+      );
+
+      await expectConnectCode(
+        () =>
+          clients.tree.createTemplatedTree(
+            create(CreateTemplatedTreeRequestSchema, {
+              commandId: "01900000-0000-7000-8000-000000000210",
+              actorSessionId: "01900000-0000-7000-8000-000000000203",
+              repositoryId: repoId,
+              treeId: "01900000-0000-7000-8000-000000000211",
+              planRevisionId: "01900000-0000-7000-8000-000000000212",
+              rootNodeId: "01900000-0000-7000-8000-000000000213",
+              rootArtifactId: "01900000-0000-7000-8000-000000000214",
+              attentionId: "01900000-0000-7000-8000-000000000215",
+              template: TaskTemplate.UNSPECIFIED,
+              prompt: "explain the architecture",
+            }),
+          ),
+        Code.InvalidArgument,
+      );
+
+      await expectConnectCode(
+        () =>
+          clients.tree.createTemplatedTree(
+            create(CreateTemplatedTreeRequestSchema, {
+              commandId: "01900000-0000-7000-8000-000000000220",
+              actorSessionId: "01900000-0000-7000-8000-000000000203",
+              repositoryId: repoId,
+              treeId: "01900000-0000-7000-8000-000000000221",
+              planRevisionId: "01900000-0000-7000-8000-000000000222",
+              rootNodeId: "01900000-0000-7000-8000-000000000223",
+              rootArtifactId: "01900000-0000-7000-8000-000000000224",
+              attentionId: "01900000-0000-7000-8000-000000000225",
+              template: TaskTemplate.EXPLAIN,
+              prompt: "   ",
+            }),
+          ),
+        Code.InvalidArgument,
+      );
+
+      const explainCommandId = "01900000-0000-7000-8000-000000000230";
+      const explainTreeId = "01900000-0000-7000-8000-000000000231";
+      const explainRevisionId = "01900000-0000-7000-8000-000000000232";
+      const explainRootNodeId = "01900000-0000-7000-8000-000000000233";
+      const explainRootArtifactId = "01900000-0000-7000-8000-000000000234";
+      const explainAttentionId = "01900000-0000-7000-8000-000000000235";
+      const explainPrompt = "explain authentication architecture";
+
+      const explainResponse = await clients.tree.createTemplatedTree(
+        create(CreateTemplatedTreeRequestSchema, {
+          commandId: explainCommandId,
+          actorSessionId: "01900000-0000-7000-8000-000000000203",
+          repositoryId: repoId,
+          treeId: explainTreeId,
+          planRevisionId: explainRevisionId,
+          rootNodeId: explainRootNodeId,
+          rootArtifactId: explainRootArtifactId,
+          attentionId: explainAttentionId,
+          template: TaskTemplate.EXPLAIN,
+          prompt: explainPrompt,
+        }),
+      );
+
+      const explainTree = explainResponse.tree;
+      if (explainTree === undefined) {
+        throw new Error("explain template response did not contain a tree");
+      }
+      expect(explainTree.id).toBe(explainTreeId);
+      expect(explainTree.state).toBe(TreeState.APPROVED);
+      expect(explainTree.goal).toBe(explainPrompt);
+      expect(explainTree.revisions).toHaveLength(1);
+      expect(explainTree.revisions[0]?.state).toBe(PlanRevisionState.APPROVED);
+      expect(explainTree.revisions[0]?.version).toBe(1n);
+      expect(explainTree.nodes).toHaveLength(2);
+      const explainRoot = explainTree.nodes.find((n) => n.id === explainRootNodeId);
+      expect(explainRoot?.mode).toBe(PlanNodeMode.PLAN);
+      expect(explainRoot?.state).toBe(NodeState.PLANNED);
+      const explainResearchChild = explainTree.nodes.find((n) => n.id !== explainRootNodeId);
+      expect(explainResearchChild).toBeDefined();
+      expect(explainResearchChild?.parentNodeId).toBe(explainRootNodeId);
+      expect(explainResearchChild?.mode).toBe(PlanNodeMode.RESEARCH);
+      expect(explainResearchChild?.state).toBe(NodeState.READY);
+      expect(explainResearchChild?.version).toBe(1n);
+      expect(explainResearchChild?.outputContract.case).toBe("artifact");
+
+      const explainReplay = await clients.tree.createTemplatedTree(
+        create(CreateTemplatedTreeRequestSchema, {
+          commandId: explainCommandId,
+          actorSessionId: "01900000-0000-7000-8000-000000000203",
+          repositoryId: repoId,
+          treeId: explainTreeId,
+          planRevisionId: explainRevisionId,
+          rootNodeId: explainRootNodeId,
+          rootArtifactId: explainRootArtifactId,
+          attentionId: explainAttentionId,
+          template: TaskTemplate.EXPLAIN,
+          prompt: explainPrompt,
+        }),
+      );
+      expect(explainReplay.tree).toEqual(explainTree);
+
+      const fixCommandId = "01900000-0000-7000-8000-000000000240";
+      const fixTreeId = "01900000-0000-7000-8000-000000000241";
+      const fixRevisionId = "01900000-0000-7000-8000-000000000242";
+      const fixRootNodeId = "01900000-0000-7000-8000-000000000243";
+      const fixRootArtifactId = "01900000-0000-7000-8000-000000000244";
+      const fixAttentionId = "01900000-0000-7000-8000-000000000245";
+      const fixPrompt = "fix connection timeout bug";
+
+      const fixResponse = await clients.tree.createTemplatedTree(
+        create(CreateTemplatedTreeRequestSchema, {
+          commandId: fixCommandId,
+          actorSessionId: "01900000-0000-7000-8000-000000000203",
+          repositoryId: repoId,
+          treeId: fixTreeId,
+          planRevisionId: fixRevisionId,
+          rootNodeId: fixRootNodeId,
+          rootArtifactId: fixRootArtifactId,
+          attentionId: fixAttentionId,
+          template: TaskTemplate.FIX,
+          prompt: fixPrompt,
+        }),
+      );
+
+      const fixTree = fixResponse.tree;
+      if (fixTree === undefined) {
+        throw new Error("fix template response did not contain a tree");
+      }
+      expect(fixTree.id).toBe(fixTreeId);
+      expect(fixTree.state).toBe(TreeState.DRAFT);
+      expect(fixTree.goal).toBe(fixPrompt);
+      expect(fixTree.revisions).toHaveLength(1);
+      expect(fixTree.revisions[0]?.state).toBe(PlanRevisionState.DRAFT);
+      expect(fixTree.revisions[0]?.version).toBe(0n);
+      expect(fixTree.nodes).toHaveLength(3);
+
+      const fixRoot = fixTree.nodes.find((n) => n.id === fixRootNodeId);
+      expect(fixRoot).toBeDefined();
+      expect(fixRoot?.mode).toBe(PlanNodeMode.PLAN);
+      expect(fixRoot?.state).toBe(NodeState.PLANNED);
+
+      const fixResearchChild = fixTree.nodes.find((n) => n.mode === PlanNodeMode.RESEARCH);
+      if (fixResearchChild === undefined) {
+        throw new Error("fix template did not produce a research child");
+      }
+      expect(fixResearchChild.parentNodeId).toBe(fixRootNodeId);
+      expect(fixResearchChild.state).toBe(NodeState.PLANNED);
+      expect(fixResearchChild.version).toBe(0n);
+      expect(fixResearchChild.outputContract.case).toBe("artifact");
+
+      const fixImplementationGrandchild = fixTree.nodes.find(
+        (n) => n.mode === PlanNodeMode.IMPLEMENTATION,
+      );
+      if (fixImplementationGrandchild === undefined) {
+        throw new Error("fix template did not produce an implementation grandchild");
+      }
+      expect(fixImplementationGrandchild.parentNodeId).toBe(fixResearchChild.id);
+      expect(fixImplementationGrandchild.parentNodeId).not.toBe(fixRootNodeId);
+      expect(fixImplementationGrandchild.state).toBe(NodeState.PLANNED);
+      expect(fixImplementationGrandchild.version).toBe(0n);
+      expect(fixImplementationGrandchild.outputContract.case).toBe("implementation");
+
+      const featureCommandId = "01900000-0000-7000-8000-000000000250";
+      const featureTreeId = "01900000-0000-7000-8000-000000000251";
+      const featureRevisionId = "01900000-0000-7000-8000-000000000252";
+      const featureRootNodeId = "01900000-0000-7000-8000-000000000253";
+      const featureRootArtifactId = "01900000-0000-7000-8000-000000000254";
+      const featureAttentionId = "01900000-0000-7000-8000-000000000255";
+      const featurePrompt = "build dark mode setting";
+
+      const featureResponse = await clients.tree.createTemplatedTree(
+        create(CreateTemplatedTreeRequestSchema, {
+          commandId: featureCommandId,
+          actorSessionId: "01900000-0000-7000-8000-000000000203",
+          repositoryId: repoId,
+          treeId: featureTreeId,
+          planRevisionId: featureRevisionId,
+          rootNodeId: featureRootNodeId,
+          rootArtifactId: featureRootArtifactId,
+          attentionId: featureAttentionId,
+          template: TaskTemplate.FEATURE,
+          prompt: featurePrompt,
+        }),
+      );
+
+      const featureTree = featureResponse.tree;
+      if (featureTree === undefined) {
+        throw new Error("feature template response did not contain a tree");
+      }
+      expect(featureTree.state).toBe(TreeState.DRAFT);
+      expect(featureTree.nodes).toHaveLength(3);
+      const featureExploreChild = featureTree.nodes.find((n) => n.mode === PlanNodeMode.EXPLORE);
+      if (featureExploreChild === undefined) {
+        throw new Error("feature template did not produce an explore child");
+      }
+      expect(featureExploreChild.parentNodeId).toBe(featureRootNodeId);
+
+      const featureImplementationGrandchild = featureTree.nodes.find(
+        (n) => n.mode === PlanNodeMode.IMPLEMENTATION,
+      );
+      if (featureImplementationGrandchild === undefined) {
+        throw new Error("feature template did not produce an implementation grandchild");
+      }
+      expect(featureImplementationGrandchild.parentNodeId).toBe(featureExploreChild.id);
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
       await rm(fixture.directory, { force: true, recursive: true });
       await rm(home, { force: true, recursive: true });
     }

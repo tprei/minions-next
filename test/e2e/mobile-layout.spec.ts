@@ -26,6 +26,7 @@ async function openFreshTree(page: Page, gitFixtureRoot: string, goal: string): 
   await registerRepositoryViaUi(page, gitFixtureRoot);
   await page.getByRole("button", { name: "New task" }).click();
   await expect(page.getByRole("dialog", { name: "New task" })).toBeVisible();
+  await page.getByText("Advanced options (custom tree & budgets)").click();
   await page.locator("#new-task-host").selectOption({ index: 1 });
   await page.locator("#new-task-repository").selectOption({ label: gitFixtureRoot });
   await page.locator("#new-task-goal").fill(goal);
