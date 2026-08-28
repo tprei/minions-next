@@ -227,21 +227,12 @@ export function NodeEditorPanel({
       />
 
       <Field label="Output contract" htmlFor="tree-node-output-kind">
-        <Select
+        <TextInput
           id="tree-node-output-kind"
-          value={working.outputContract.case}
-          options={[
-            { value: "implementation", label: "implementation (no artifact)" },
-            { value: "artifact", label: "artifact" },
-          ]}
-          onChange={(event) => {
-            patch({
-              outputContract:
-                event.target.value === "artifact"
-                  ? { case: "artifact", artifactType: "" }
-                  : { case: "implementation" },
-            });
-          }}
+          value={
+            working.outputContract.case === "artifact" ? "artifact" : "implementation (no artifact)"
+          }
+          disabled
         />
       </Field>
       {working.outputContract.case === "artifact" ? (

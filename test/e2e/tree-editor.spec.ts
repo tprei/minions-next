@@ -37,14 +37,12 @@ test.describe("tree editor", () => {
 
   /**
    * Fills the minimum fields required for validateWorkingTree to accept a newly-added
-   * working node (objective, mode, acceptance criteria). The default node
-   * from addWorkingNode has empty objective, PLAN mode + implementation
-   * output (an inconsistent combination the validator rejects).
+   * working node (objective, mode, acceptance criteria).
    */
   async function fillRequiredNodeFields(page: Page): Promise<void> {
     await page.locator("#tree-node-objective").fill("Implement the feature end to end");
     await page.locator("#tree-node-mode").selectOption({ label: "implementation" });
-    // The EditableStringList renders the first criterion as an input at index 0.
+    await page.getByRole("button", { name: "Add acceptance criteria" }).click();
     await page.locator("#tree-node-acceptance-criteria-0").fill("All tests pass");
   }
 
@@ -74,6 +72,34 @@ test.describe("tree editor", () => {
     const rows = page.getByTestId("tree-outline-row");
     await expect(rows).toHaveCount(2);
     await expect(rows.filter({ hasText: "Implement the feature end to end" })).toHaveCount(1);
+  });
+
+  test("adds a research child, couples output contract to mode, and saves the plan", async ({
+    page,
+    gitFixtureRepo,
+  }) => {
+    await openFreshTree(page, gitFixtureRepo.root);
+
+    await page.getByTestId("tree-add-child").click();
+    await expect(page.getByRole("heading", { level: 2, name: "Edit node" })).toBeVisible();
+
+    await page.locator("#tree-node-objective").fill("Investigate repository structure");
+    await page.locator("#tree-node-mode").selectOption({ label: "research" });
+
+    await expect(page.locator("#tree-node-output-kind")).toHaveValue("artifact");
+    await expect(page.locator("#tree-node-artifact-type")).toHaveValue("research");
+
+    await page.getByRole("button", { name: "Add acceptance criteria" }).click();
+    await page.locator("#tree-node-acceptance-criteria-0").fill("Architecture is documented");
+
+    await page.getByRole("button", { name: "Save plan" }).click();
+    await expect(page.getByRole("button", { name: "Reject changes" })).toBeDisabled({
+      timeout: 10_000,
+    });
+
+    const rows = page.getByTestId("tree-outline-row");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.filter({ hasText: "Investigate repository structure" })).toHaveCount(1);
   });
 
   test("approves a draft plan", async ({ page, gitFixtureRepo }) => {

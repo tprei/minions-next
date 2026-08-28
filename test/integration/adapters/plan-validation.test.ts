@@ -1419,6 +1419,7 @@ describe("SQLite plan topology validation", () => {
       expect(approved.nodes.find((node) => node.id === implementationLeaf)?.state).toBe(
         NodeState.READY,
       );
+      expect(approved.nodes.find((node) => node.id === id(206))?.state).toBe(NodeState.READY);
       expect(approved.nodes.find((node) => node.id === ROOT_NODE_ID)?.state).toBe(
         NodeState.PLANNED,
       );
@@ -1552,7 +1553,7 @@ describe("SQLite plan topology validation", () => {
           },
           nodes: [
             expectedNodeSummary(ROOT_NODE_ID, undefined, 0n, NodeState.PLANNED, 0n),
-            expectedNodeSummary(id(206), ROOT_NODE_ID, 2n, NodeState.PLANNED, 0n),
+            expectedNodeSummary(id(206), ROOT_NODE_ID, 2n, NodeState.READY, 1n),
             expectedNodeSummary(id(207), id(206), 0n, NodeState.PLANNED, 0n),
             expectedNodeSummary(implementationLeaf, ROOT_NODE_ID, 0n, NodeState.READY, 1n),
             expectedNodeSummary(directImplementation, ROOT_NODE_ID, 1n, NodeState.READY, 1n),
@@ -1567,7 +1568,7 @@ describe("SQLite plan topology validation", () => {
           },
           nodes: [
             expectedNodeSummary(ROOT_NODE_ID, undefined, 0n, NodeState.PLANNED, 0n),
-            expectedNodeSummary(id(206), ROOT_NODE_ID, 2n, NodeState.SUCCEEDED, 1n),
+            expectedNodeSummary(id(206), ROOT_NODE_ID, 2n, NodeState.SUCCEEDED, 2n),
             expectedNodeSummary(id(207), id(206), 0n, NodeState.BLOCKED, 1n),
             expectedNodeSummary(implementationLeaf, ROOT_NODE_ID, 0n, NodeState.SUPERSEDED, 2n),
             expectedNodeSummary(directImplementation, ROOT_NODE_ID, 1n, NodeState.ACTIVE, 2n),
@@ -1583,7 +1584,7 @@ describe("SQLite plan topology validation", () => {
           },
           nodes: [
             expectedNodeSummary(ROOT_NODE_ID, undefined, 0n, NodeState.PLANNED, 0n),
-            expectedNodeSummary(id(206), ROOT_NODE_ID, 2n, NodeState.SUCCEEDED, 1n),
+            expectedNodeSummary(id(206), ROOT_NODE_ID, 2n, NodeState.SUCCEEDED, 2n),
             expectedNodeSummary(id(207), id(206), 0n, NodeState.BLOCKED, 1n),
             expectedNodeSummary(implementationLeaf, ROOT_NODE_ID, 0n, NodeState.SUPERSEDED, 2n),
             expectedNodeSummary(directImplementation, ROOT_NODE_ID, 1n, NodeState.ACTIVE, 2n),
@@ -1698,7 +1699,44 @@ describe("SQLite plan topology validation", () => {
       expect(rowCounts(fixture.temporary)).toEqual(before);
     });
   });
-  it("rejects approval without an implementation child and leaves rows unchanged", async () => {
+  it("approves a research-only revision and readies the research child", async () => {
+    await withFixture(async (fixture) => {
+      await createTree(fixture);
+      const revisionId = id(608);
+      const request = proposeRequest({
+        commandId: id(609),
+        planRevisionId: revisionId,
+        nodes: [
+          proposedNode({
+            nodeId: id(610),
+            parentNodeId: ROOT_NODE_ID,
+            mode: PlanNodeMode.RESEARCH,
+            output: { kind: "artifact", artifactId: id(611) },
+          }),
+        ],
+      });
+      await fixture.registry.propose({ request, at: NEXT });
+      const approved = await fixture.registry.approve({
+        request: approveRequest({ commandId: id(612), planRevisionId: revisionId }),
+        at: APPROVED,
+      });
+      expect(approved.state).toBe(TreeState.APPROVED);
+      expect(approved.revisions.find((revision) => revision.id === revisionId)?.state).toBe(
+        PlanRevisionState.APPROVED,
+      );
+      expect(approved.nodes.find((node) => node.id === id(610))?.state).toBe(NodeState.READY);
+      expect(approved.nodes.find((node) => node.id === id(610))?.version).toBe(1);
+      expect(approved.nodes.find((node) => node.id === ROOT_NODE_ID)?.state).toBe(
+        NodeState.PLANNED,
+      );
+      const replayed = await fixture.registry.approve({
+        request: approveRequest({ commandId: id(612), planRevisionId: revisionId }),
+        at: APPROVED,
+      });
+      expect(replayed).toEqual(approved);
+    });
+  });
+  it("rejects approval without an executable child and leaves rows unchanged", async () => {
     await withFixture(async (fixture) => {
       await createTree(fixture);
       const revisionId = id(608);
@@ -1710,7 +1748,9 @@ describe("SQLite plan topology validation", () => {
             proposedNode({
               nodeId: id(610),
               parentNodeId: ROOT_NODE_ID,
-              mode: PlanNodeMode.RESEARCH,
+              mode: PlanNodeMode.PLAN,
+              objective: "plan the next revision",
+              acceptanceCriteria: ["the follow-up plan exists"],
               output: { kind: "artifact", artifactId: id(611) },
             }),
           ],
@@ -1725,7 +1765,7 @@ describe("SQLite plan topology validation", () => {
         }),
       ).rejects.toMatchObject({
         code: "invalid_plan",
-        message: "an approved plan requires an implementation child",
+        message: "an approved plan requires at least one planned executable child",
       });
       expect(rowCounts(fixture.temporary)).toEqual(before);
     });

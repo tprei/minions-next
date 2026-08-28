@@ -438,6 +438,9 @@ export function TreeRoute(): ReactNode {
           label="Goal"
           htmlFor="tree-goal"
           hint="Carried into the next plan revision when you save."
+          error={
+            showValidation && goalDraft.trim().length === 0 ? "Goal must not be empty." : undefined
+          }
         >
           <TextArea
             id="tree-goal"

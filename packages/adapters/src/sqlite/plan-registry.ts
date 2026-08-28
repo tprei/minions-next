@@ -910,13 +910,13 @@ function applyApprove(
     !current.nodes.some(
       (node) =>
         node.planRevisionId === snapshot.planRevisionId &&
-        node.mode === PlanNodeMode.IMPLEMENTATION &&
+        isExecutableNodeMode(node.mode) &&
         node.state === NodeState.PLANNED,
     )
   ) {
     throw new PlanRegistryError(
       "invalid_plan",
-      "an approved plan requires an implementation child",
+      "an approved plan requires at least one planned executable child",
     );
   }
   transaction.run(
@@ -929,8 +929,14 @@ function applyApprove(
     `UPDATE nodes
         SET state_kind = 'ready', version = version + 1, updated_at_ms = ?
       WHERE tree_id = ? AND plan_revision_id = ? AND parent_node_id = ?
-        AND mode = 'implementation' AND state_kind = 'planned'`,
-    [snapshot.at, snapshot.treeId, snapshot.planRevisionId, current.rootNodeId],
+        AND mode IN (${EXECUTABLE_NODE_MODE_PLACEHOLDERS}) AND state_kind = 'planned'`,
+    [
+      snapshot.at,
+      snapshot.treeId,
+      snapshot.planRevisionId,
+      current.rootNodeId,
+      ...EXECUTABLE_NODE_MODE_KINDS,
+    ],
   );
   transaction.run(`UPDATE trees SET version = version + 1, updated_at_ms = ? WHERE id = ?`, [
     snapshot.at,
@@ -2586,9 +2592,7 @@ function assertRequestFacts(
     const revisionNodes = tree.nodes.filter(
       (node) => node.planRevisionId === snapshot.planRevisionId && node.id !== tree.rootNodeId,
     );
-    const implementationNodes = revisionNodes.filter(
-      (node) => node.mode === PlanNodeMode.IMPLEMENTATION,
-    );
+    const executableNodes = revisionNodes.filter((node) => isExecutableNodeMode(node.mode));
     if (
       tree.activePlanRevisionId !== snapshot.planRevisionId ||
       tree.state !== TreeState.APPROVED ||
@@ -2597,11 +2601,11 @@ function assertRequestFacts(
       revision.version !== 1 ||
       revision.approvedAt === undefined ||
       revision.approvedAt !== tree.updatedAt ||
-      implementationNodes.length === 0 ||
+      executableNodes.length === 0 ||
       revisionNodes.some((node) => {
-        const isDirectImplementation =
-          node.parentNodeId === tree.rootNodeId && node.mode === PlanNodeMode.IMPLEMENTATION;
-        return isDirectImplementation
+        const isDirectExecutable =
+          node.parentNodeId === tree.rootNodeId && isExecutableNodeMode(node.mode);
+        return isDirectExecutable
           ? node.state !== NodeState.READY ||
               node.version !== 1 ||
               node.updatedAt !== tree.updatedAt
@@ -2943,6 +2947,26 @@ function assertProposedIdAvailability(
 
 function assertDistinctIds(values: readonly string[], message: string): void {
   if (new Set(values).size !== values.length) throw new PlanRegistryError("invalid_plan", message);
+}
+
+const EXECUTABLE_NODE_MODES: readonly PlanNodeMode[] = [
+  PlanNodeMode.RESEARCH,
+  PlanNodeMode.EXPLORE,
+  PlanNodeMode.IMPLEMENTATION,
+];
+
+const EXECUTABLE_NODE_MODE_KINDS: readonly string[] = EXECUTABLE_NODE_MODES.map((mode) =>
+  modeKind(mode),
+);
+
+const EXECUTABLE_NODE_MODE_PLACEHOLDERS: string = EXECUTABLE_NODE_MODE_KINDS.map(() => "?").join(
+  ", ",
+);
+
+/** Modes a plan approval activates. PLAN is excluded: the root's own planning node is never
+ *  promoted to ready by approving the plan it produced. */
+function isExecutableNodeMode(mode: PlanNodeMode): boolean {
+  return EXECUTABLE_NODE_MODES.includes(mode);
 }
 
 function modeKind(mode: PlanNodeMode): string {
