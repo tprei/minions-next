@@ -35,6 +35,7 @@ export interface EvidenceSection {
   readonly revision: string;
   readonly freshness: string;
   readonly facts: readonly EvidenceFact[];
+  readonly diffText?: string;
 }
 
 export interface UseEvidenceOptions {
@@ -42,13 +43,25 @@ export interface UseEvidenceOptions {
   readonly commands: readonly NodeCommand[];
   readonly openAttention: readonly NodeAttention[];
   readonly connectionState: string;
+  /** Unified diff of the node's latest attempt; `undefined` when none was captured. */
+  readonly diffText?: string;
 }
 
 export function useEvidence(options: UseEvidenceOptions): readonly EvidenceSection[] {
-  const { node, commands, openAttention, connectionState } = options;
+  const { node, commands, openAttention, connectionState, diffText } = options;
   return useMemo<readonly EvidenceSection[]>(() => {
     const sections: EvidenceSection[] = [];
     const freshness = `projection (${connectionState})`;
+
+    if (diffText !== undefined) {
+      sections.push({
+        title: "Code diff",
+        revision: node?.id ?? "unknown node",
+        freshness: `ChangeService.GetNodeDiff (${connectionState})`,
+        facts: [],
+        diffText,
+      });
+    }
 
     if (node?.vcsChangeBinding !== undefined) {
       const binding = node.vcsChangeBinding;
@@ -121,5 +134,5 @@ export function useEvidence(options: UseEvidenceOptions): readonly EvidenceSecti
     }
 
     return sections;
-  }, [node, commands, openAttention, connectionState]);
+  }, [node, commands, openAttention, connectionState, diffText]);
 }

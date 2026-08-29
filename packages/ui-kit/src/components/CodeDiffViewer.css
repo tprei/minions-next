@@ -1,0 +1,116 @@
+.mn-code-diff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mn-space-3);
+  font-family: var(--mn-font-sans);
+}
+
+.mn-code-diff__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--mn-space-3);
+  padding: var(--mn-space-2) var(--mn-space-3);
+  background-color: var(--mn-color-bg-subtle, #1e1e24);
+  border-radius: var(--mn-radius-md);
+  font-size: var(--mn-font-size-sm);
+  color: var(--mn-color-fg-muted);
+}
+
+.mn-code-diff__stat--add {
+  color: var(--mn-color-status-success-fg);
+  font-family: var(--mn-font-mono);
+  font-weight: var(--mn-font-weight-semibold);
+}
+
+.mn-code-diff__stat--del {
+  color: var(--mn-color-status-danger-fg);
+  font-family: var(--mn-font-mono);
+  font-weight: var(--mn-font-weight-semibold);
+}
+
+.mn-code-diff__file {
+  border: 1px solid var(--mn-color-border-subtle, #2e2e38);
+  border-radius: var(--mn-radius-md);
+  overflow: hidden;
+}
+
+.mn-code-diff__file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--mn-space-2) var(--mn-space-3);
+  background-color: var(--mn-color-bg-subtle, #1e1e24);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mn-code-diff__file-path {
+  font-family: var(--mn-font-mono);
+  font-size: var(--mn-font-size-sm);
+  font-weight: var(--mn-font-weight-medium);
+  color: var(--mn-color-fg);
+}
+
+.mn-code-diff__file-stats {
+  display: flex;
+  gap: var(--mn-space-2);
+  font-size: var(--mn-font-size-xs);
+  font-family: var(--mn-font-mono);
+}
+
+.mn-code-diff__hunks {
+  overflow-x: auto;
+  background-color: var(--mn-color-bg, #141418);
+  font-family: var(--mn-font-mono);
+  font-size: var(--mn-font-size-xs);
+  line-height: 1.5;
+}
+
+.mn-code-diff__hunk-header {
+  padding: var(--mn-space-1) var(--mn-space-3);
+  background-color: rgba(59, 130, 246, 0.1);
+  color: var(--mn-color-fg-muted);
+  font-style: italic;
+}
+
+.mn-code-diff__line {
+  display: flex;
+  min-width: fit-content;
+  white-space: pre;
+}
+
+.mn-code-diff__line--add {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+}
+
+.mn-code-diff__line--del {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.mn-code-diff__line--ctx {
+  color: var(--mn-color-fg-muted);
+}
+
+.mn-code-diff__gutter {
+  display: inline-block;
+  width: 3rem;
+  padding-right: var(--mn-space-2);
+  text-align: right;
+  user-select: none;
+  opacity: 0.5;
+}
+
+.mn-code-diff__marker {
+  display: inline-block;
+  width: 1.25rem;
+  text-align: center;
+  user-select: none;
+  font-weight: bold;
+}
+
+.mn-code-diff__content {
+  flex: 1;
+  padding-right: var(--mn-space-3);
+}

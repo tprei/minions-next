@@ -4,15 +4,16 @@ import { create } from "@bufbuild/protobuf";
 import {
   AnswerNodeCommandSchema,
   EmptyNodeCommandSchema,
+  GetNodeDiffRequestSchema,
   GetTreeRequestSchema,
   NodeCommandPayloadSchema,
+  NodeState,
   PlanNodeMode,
   QueueNodeCommandRequestSchema,
   ReplanNodeCommandSchema,
   ResolveApprovalNodeCommandSchema,
   TextNodeCommandSchema,
   type NodeCommandPayload,
-  type NodeState,
   type TaskNode,
 } from "@minions/contracts";
 import {
@@ -59,6 +60,7 @@ export function NodeConsole(): ReactNode {
   const [fetchedObjective, setFetchedObjective] = useState<string | undefined>();
   const [fetchedState, setFetchedState] = useState<NodeState | undefined>();
   const [fetchedNode, setFetchedNode] = useState<TaskNode | undefined>();
+  const [diffText, setDiffText] = useState<string | undefined>();
   useEffect(() => {
     const controller = new AbortController();
     async function fetchNode(): Promise<void> {
@@ -83,6 +85,37 @@ export function NodeConsole(): ReactNode {
     };
   }, [clients.tree, treeId, nodeId, retryCount]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    async function fetchDiff(): Promise<void> {
+      const loaded = fetchedNode;
+      if (
+        loaded === undefined ||
+        loaded.state === NodeState.UNSPECIFIED ||
+        loaded.state === NodeState.PLANNED ||
+        loaded.state === NodeState.READY ||
+        loaded.state === NodeState.BLOCKED
+      ) {
+        return;
+      }
+      setDiffText(undefined);
+      try {
+        const response = await clients.change.getNodeDiff(
+          create(GetNodeDiffRequestSchema, { repositoryId: loaded.repositoryId, nodeId }),
+        );
+        if (controller.signal.aborted) return;
+        setDiffText(response.isEmpty ? undefined : new TextDecoder().decode(response.diff));
+      } catch {
+        // A node without a captured attempt has no diff; absence is not an error surface.
+        if (!controller.signal.aborted) setDiffText(undefined);
+      }
+    }
+    void fetchDiff();
+    return () => {
+      controller.abort();
+    };
+  }, [clients.change, fetchedNode, nodeId]);
+
   const liveNode = projection.nodes.get(nodeId);
   const objective = liveNode?.objective ?? fetchedObjective ?? "";
   const state = liveNode?.state ?? fetchedState;
@@ -103,6 +136,7 @@ export function NodeConsole(): ReactNode {
     commands,
     openAttention: openAttention !== undefined ? [openAttention] : [],
     connectionState,
+    ...(diffText !== undefined ? { diffText } : {}),
   });
 
   async function handleAction(action: SteeringAction): Promise<void> {
@@ -183,7 +217,7 @@ export function NodeConsole(): ReactNode {
       label: "Console",
       content: (
         <>
-          <CommandTimeline commands={commands} />
+          <CommandTimeline commands={commands} nodeState={state} />
           <h2 className="mn-node-console__section">Steer</h2>
           <Composer
             openAttention={openAttention}

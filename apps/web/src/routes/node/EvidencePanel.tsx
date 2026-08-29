@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Commentary, Fact } from "@minions/ui-kit";
+import { CodeDiffViewer, Commentary, Fact } from "@minions/ui-kit";
 import type { EvidenceSection } from "./use-evidence.js";
 
 /**
@@ -35,16 +35,26 @@ export function EvidencePanel({
               {section.revision}
             </span>
           </header>
-          <ul className="mn-evidence__facts">
-            {section.facts.map((fact, index) => (
-              <li
-                key={`${section.title}-${String(index)}-${fact.label}`}
-                className="mn-evidence__fact"
-              >
-                <Fact title={fact.title}>{`${fact.label}: ${fact.value}`}</Fact>
-              </li>
-            ))}
-          </ul>
+          {section.facts.length > 0 ? (
+            <ul className="mn-evidence__facts">
+              {section.facts.map((fact, index) => (
+                <li
+                  key={`${section.title}-${String(index)}-${fact.label}`}
+                  className="mn-evidence__fact"
+                >
+                  <Fact title={fact.title}>{`${fact.label}: ${fact.value}`}</Fact>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {section.diffText !== undefined ? (
+            <div
+              className="mn-evidence__diff"
+              style={{ marginTop: "0.75rem", marginBottom: "0.75rem" }}
+            >
+              <CodeDiffViewer diffText={section.diffText} />
+            </div>
+          ) : null}
           <Commentary>{`Source/freshness: ${section.freshness}`}</Commentary>
         </section>
       ))}
