@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package minions.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+service ChangeService {
+  rpc CreatePullRequest(CreatePullRequestRequest) returns (CreatePullRequestResponse);
+  rpc GetPullRequest(GetPullRequestRequest) returns (GetPullRequestResponse);
+  rpc GetNodeDiff(GetNodeDiffRequest) returns (GetNodeDiffResponse);
+  rpc ListPullRequests(ListPullRequestsRequest) returns (ListPullRequestsResponse);
+  rpc LandPullRequest(LandPullRequestRequest) returns (LandPullRequestResponse);
+  rpc GetStackStatus(GetStackStatusRequest) returns (GetStackStatusResponse);
+}
+
+message PullRequestInfo {
+  optional uint32 pr_number = 1 [(buf.validate.field).uint32.gt = 0];
+  string node_id = 2 [(buf.validate.field).string.uuid = true];
+  string tree_id = 3 [(buf.validate.field).string.uuid = true];
+  string branch_name = 4 [(buf.validate.field).string.min_len = 1];
+  string base_branch_name = 5 [(buf.validate.field).string.min_len = 1];
+  string title = 6 [(buf.validate.field).string.min_len = 1];
+  string body = 7;
+  string html_url = 8;
+  string state = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp merged_at = 11;
+}
+
+message CreatePullRequestRequest {
+  string repository_id = 1 [(buf.validate.field).string.uuid = true];
+  string tree_id = 2 [(buf.validate.field).string.uuid = true];
+  string node_id = 3 [(buf.validate.field).string.uuid = true];
+  string branch_name = 4 [(buf.validate.field).string.min_len = 1];
+  string base_branch_name = 5;
+  string title = 6 [(buf.validate.field).string.min_len = 1];
+  string body = 7;
+}
+
+message CreatePullRequestResponse {
+  PullRequestInfo pr = 1 [(buf.validate.field).required = true];
+}
+
+message GetPullRequestRequest {
+  string repository_id = 1 [(buf.validate.field).string.uuid = true];
+  uint32 pr_number = 2 [(buf.validate.field).uint32.gt = 0];
+}
+
+message GetPullRequestResponse {
+  PullRequestInfo pr = 1 [(buf.validate.field).required = true];
+}
+
+message ListPullRequestsRequest {
+  string repository_id = 1 [(buf.validate.field).string.uuid = true];
+  string tree_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetNodeDiffRequest {
+  string repository_id = 1 [(buf.validate.field).string.uuid = true];
+  string node_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetNodeDiffResponse {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  string attempt_id = 2 [(buf.validate.field).string.uuid = true];
+  bytes diff = 3;
+  string base_commit = 4;
+  string head_commit = 5;
+  bool is_empty = 6;
+}
+
+message ListPullRequestsResponse {
+  repeated PullRequestInfo prs = 1;
+}
+
+message LandPullRequestRequest {
+  string repository_id = 1 [(buf.validate.field).string.uuid = true];
+  string tree_id = 2 [(buf.validate.field).string.uuid = true];
+  uint32 pr_number = 3 [(buf.validate.field).uint32.gt = 0];
+  string actor_session_id = 4;
+}
+
+message LandPullRequestResponse {
+  string status = 1 [(buf.validate.field).string.min_len = 1];
+  string receipt_id = 2;
+  string commit_sha = 3;
+  google.protobuf.Timestamp landed_at = 4;
+}
+
+message StackPositionInfo {
+  string node_id = 1 [(buf.validate.field).string.uuid = true];
+  string parent_node_id = 2;
+  string branch_name = 3 [(buf.validate.field).string.min_len = 1];
+  string parent_branch_name = 4 [(buf.validate.field).string.min_len = 1];
+  uint32 depth = 5;
+  optional uint32 pr_number = 6;
+}
+
+message GetStackStatusRequest {
+  string repository_id = 1 [(buf.validate.field).string.uuid = true];
+  string tree_id = 2 [(buf.validate.field).string.uuid = true];
+}
+
+message GetStackStatusResponse {
+  string tree_id = 1 [(buf.validate.field).string.uuid = true];
+  repeated StackPositionInfo positions = 2;
+}
