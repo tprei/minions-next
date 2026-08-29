@@ -1,9 +1,10 @@
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   acquireLifecycleLock,
@@ -105,6 +106,23 @@ import {
   type Timestamp,
   type VcsBackend,
 } from "@minions/core";
+
+function defaultWebDistDir(): string | undefined {
+  const candidates = [
+    resolve(process.cwd(), "apps/web/dist"),
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+        return candidate;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
 
 /**
  * The sandbox image pins are host facts with no legitimate default: composing
@@ -249,6 +267,8 @@ export type DaemonRuntimeOptions = Readonly<{
 
 export type RemoteAccessRuntimeOptions = Readonly<{
   enabled: true;
+  bindHost?: string;
+  port?: number;
 }>;
 export type ProviderAdmissionRuntimeOptions = Readonly<{
   enabled: true;
@@ -359,6 +379,7 @@ export async function startDaemonRuntime(
   let providerAdmission: ProviderAdmissionProxy | undefined;
   let executionCoordinator: ExecutionCoordinator | undefined;
   let schedulerLoop: SchedulerLoop | undefined;
+  let executionVcs: VcsBackend | undefined;
   let admissionEventLoop: Promise<void> | undefined;
 
   try {
@@ -448,7 +469,7 @@ export async function startDaemonRuntime(
             ? {}
             : { outputCaptureLimitBytes: nodeExecution.outputCaptureLimitBytes }),
         });
-
+        executionVcs = nodeExecution.vcs;
       } else {
         const executionConfig = readExecutionHostConfig(hostDirectory);
         if (executionConfig === undefined) {
@@ -609,7 +630,7 @@ export async function startDaemonRuntime(
                 });
               },
             });
-
+            executionVcs = vcs;
           } catch (error: unknown) {
             options.logger.log("info", "execution_unavailable", {
               reason: errorMessage(error),
@@ -817,9 +838,16 @@ export async function startDaemonRuntime(
         jj_version: probe.version,
       });
     }
+    const webDistDir = options.webDistDir ?? defaultWebDistDir();
     const remoteAccess =
       options.remoteAccess?.enabled === true
-        ? { sessionStore: createDeviceSessionStore() }
+        ? {
+            sessionStore: createDeviceSessionStore(),
+            ...(options.remoteAccess.bindHost !== undefined
+              ? { bindHost: options.remoteAccess.bindHost }
+              : {}),
+            ...(options.remoteAccess.port !== undefined ? { port: options.remoteAccess.port } : {}),
+          }
         : undefined;
 
     if (options.mode === "local") {
@@ -848,7 +876,8 @@ export async function startDaemonRuntime(
         },
         hostRegistry: requireRegistry(hostRegistry),
         ...(revset !== undefined ? { revset } : {}),
-        ...(options.webDistDir !== undefined ? { webDistDir: options.webDistDir } : {}),
+        ...(executionVcs !== undefined ? { vcs: executionVcs } : {}),
+        ...(webDistDir !== undefined ? { webDistDir } : {}),
         ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else if (options.mode === "host") {
@@ -875,8 +904,9 @@ export async function startDaemonRuntime(
           clock: options.clock,
           ...(jjCentralRepo !== undefined ? { jjCentralRepo } : {}),
         },
-        ...(options.webDistDir !== undefined ? { webDistDir: options.webDistDir } : {}),
+        ...(webDistDir !== undefined ? { webDistDir } : {}),
         ...(remoteAccess !== undefined ? { remoteAccess } : {}),
+        ...(executionVcs !== undefined ? { vcs: executionVcs } : {}),
       });
     } else {
       server = await startDaemonServer({

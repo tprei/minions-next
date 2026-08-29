@@ -28,6 +28,7 @@ import type {
   RecoveryGateProfile,
   RecoveryStore,
   SteeringCommandStore,
+  VcsBackend,
 } from "@minions/core";
 import { createErrorDetailInterceptor } from "./error-detail-interceptor.js";
 import { registerArtifactService } from "./artifact-service.js";
@@ -42,6 +43,7 @@ import { registerSystemService } from "./system-service.js";
 import { registerTreeService, type TreeServiceRevsetOptions } from "./tree-service.js";
 import { registerWslHostService } from "./wsl-service.js";
 import { registerRecoveryService } from "./recovery-service.js";
+import { registerChangeService } from "./change-service.js";
 import { createUnknownFieldInterceptor } from "./unknown-field-interceptor.js";
 import type { DeviceSessionStore } from "./device-session-store.js";
 import type { RecoveryRestarter } from "./recovery-restart.js";
@@ -91,6 +93,8 @@ export type RemoteAccessServerOptions = Readonly<{
    * authenticated private network (e.g. `tailscale serve http://127.0.0.1:<port>`).
    */
   bindHost?: string;
+  /** Specific port to bind on (defaults to 0 for ephemeral port). */
+  port?: number;
 }>;
 
 export type DaemonServerOptions =
@@ -112,6 +116,8 @@ export type DaemonServerOptions =
         recoveryRestart: RecoveryRestarter;
         repository?: DaemonRepositoryOptions;
         revset?: TreeServiceRevsetOptions;
+        /** The composed VCS backend; present only when node execution is composed. */
+        vcs?: VcsBackend;
       }>)
   | (BaseDaemonServerOptions &
       Readonly<{
@@ -137,6 +143,8 @@ export type DaemonServerOptions =
         repository?: DaemonRepositoryOptions;
         revset?: TreeServiceRevsetOptions;
         hostRegistry: SupervisorHostRegistry;
+        /** The composed VCS backend; present only when node execution is composed. */
+        vcs?: VcsBackend;
       }>);
 
 export type RunningDaemonServer = Readonly<{
@@ -212,6 +220,16 @@ export async function startDaemonServer(
           : { sessionStore: options.remoteAccess.sessionStore },
       );
       registerPushService(router, {});
+      registerChangeService(router, {
+        planRegistry: options.planRegistry,
+        clock: options.clock,
+        ...(options.repository === undefined
+          ? {}
+          : { repositoryRegistry: options.repository.registry }),
+        vcsChangeBindingStore: options.vcsChangeBindingStore,
+        database: options.database,
+        ...(options.vcs !== undefined ? { vcs: options.vcs } : {}),
+      });
     }
     if (options.mode !== "host") {
       registerHostService(router, options.hostRegistry);
