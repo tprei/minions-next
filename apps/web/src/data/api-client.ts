@@ -1,5 +1,6 @@
 import { createClient, type Client } from "@connectrpc/connect";
 import {
+  ChangeService,
   EventService,
   HostService,
   PushService,
@@ -11,6 +12,7 @@ import {
 import { createDaemonTransport } from "./transport.js";
 
 export interface ApiClients {
+  readonly change: Client<typeof ChangeService>;
   readonly event: Client<typeof EventService>;
   readonly host: Client<typeof HostService>;
   readonly push: Client<typeof PushService>;
@@ -44,6 +46,7 @@ export function createApiClients(
   const transport = createDaemonTransport({ baseUrl });
   return {
     event: createClient(EventService, transport),
+    change: createClient(ChangeService, transport),
     host: createClient(HostService, transport),
     push: createClient(PushService, transport),
     recovery: createClient(RecoveryService, transport),

@@ -11,6 +11,15 @@ export {
   type DiffListEntry,
   type DiffListProps,
 } from "./components/DiffList.js";
+export {
+  CodeDiffViewer,
+  type CodeDiffViewerProps,
+  type ParsedDiffFile,
+  type DiffHunk,
+  type DiffLine,
+  type DiffLineType,
+} from "./components/CodeDiffViewer.js";
+export { parseUnifiedDiff } from "./components/diff-parser.js";
 export { Dialog, type DialogProps } from "./components/Dialog.js";
 export {
   Commentary,

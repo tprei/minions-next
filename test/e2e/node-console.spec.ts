@@ -41,9 +41,10 @@ test.describe("node console", () => {
     await expect(page.getByTestId("connection-state")).toBeVisible();
     await expect(page.getByTestId("connection-state")).toContainText(/daemon:/);
 
-    // The command timeline should start empty.
+    // The command timeline should start empty with the honest state line for a
+    // planned root (no attempt has run; nothing is dispatchable yet).
     await expect(page.getByTestId("command-timeline")).toBeVisible();
-    await expect(page.getByText("No commands yet")).toBeVisible();
+    await expect(page.getByText("Node is planned")).toBeVisible();
 
     // The composer must be visible with all action buttons.
     await expect(page.getByTestId("composer")).toBeVisible();

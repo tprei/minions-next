@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Fact, StatusBadge } from "@minions/ui-kit";
-import type { NodeCommand } from "@minions/contracts";
+import { NodeState, type NodeCommand } from "@minions/contracts";
 import { deliveryStateBadgeKind, deliveryStateLabel } from "./steering-labels.js";
 import { commandPayloadLabel } from "./command-payload.js";
 import "./CommandTimeline.css";
@@ -20,12 +20,13 @@ import "./CommandTimeline.css";
  */
 export interface CommandTimelineProps {
   readonly commands: readonly NodeCommand[];
+  readonly nodeState?: NodeState | undefined;
 }
 
 const ROW_HEIGHT = 48;
 const OVERSCAN = 6;
 
-export function CommandTimeline({ commands }: CommandTimelineProps): ReactNode {
+export function CommandTimeline({ commands, nodeState }: CommandTimelineProps): ReactNode {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(400);
@@ -78,7 +79,11 @@ export function CommandTimeline({ commands }: CommandTimelineProps): ReactNode {
     >
       {sorted.length === 0 ? (
         <p className="mn-muted mn-command-timeline__empty">
-          No commands yet. Use the composer below to steer this node.
+          {nodeState === NodeState.READY
+            ? "Node is ready. Awaiting scheduler dispatch or manual steering commands."
+            : nodeState === NodeState.PLANNED
+              ? "Node is planned. Waiting for parent node completion before entering the ready queue."
+              : "No commands yet. Use the composer below to steer this node."}
         </p>
       ) : (
         <div style={{ height: sorted.length * ROW_HEIGHT }}>
