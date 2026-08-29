@@ -66,8 +66,8 @@ minions node-steer --node <id> --kind message --text "..."          # address an
 minions node-attention --node <id>                                  # see pending questions/approvals
 ```
 
-No writable node starts before the plan is approved; every command and node outcome is
-durable and replayable from `tree-provenance`.
+No change merges without human review; a templated task may run to a pull request unattended;
+every command and node outcome is durable and replayable from `tree-provenance`.
 
 ### Survive failures mid-run
 
@@ -93,3 +93,4 @@ Where a slice cannot yet run through the product (a capability the current UI/ba
 not yet expose), record a typed bootstrap reason rather than silently falling back. The
 acceptance bar is that every manual exception is explicit and reviewable, not that no
 exception ever exists during the bootstrap phase.
+

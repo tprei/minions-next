@@ -3620,11 +3620,11 @@ describe("tree service integration", () => {
         throw new Error("fix template response did not contain a tree");
       }
       expect(fixTree.id).toBe(fixTreeId);
-      expect(fixTree.state).toBe(TreeState.DRAFT);
+      expect(fixTree.state).toBe(TreeState.APPROVED);
       expect(fixTree.goal).toBe(fixPrompt);
       expect(fixTree.revisions).toHaveLength(1);
-      expect(fixTree.revisions[0]?.state).toBe(PlanRevisionState.DRAFT);
-      expect(fixTree.revisions[0]?.version).toBe(0n);
+      expect(fixTree.revisions[0]?.state).toBe(PlanRevisionState.APPROVED);
+      expect(fixTree.revisions[0]?.version).toBe(1n);
       expect(fixTree.nodes).toHaveLength(3);
 
       const fixRoot = fixTree.nodes.find((n) => n.id === fixRootNodeId);
@@ -3637,8 +3637,8 @@ describe("tree service integration", () => {
         throw new Error("fix template did not produce a research child");
       }
       expect(fixResearchChild.parentNodeId).toBe(fixRootNodeId);
-      expect(fixResearchChild.state).toBe(NodeState.PLANNED);
-      expect(fixResearchChild.version).toBe(0n);
+      expect(fixResearchChild.state).toBe(NodeState.READY);
+      expect(fixResearchChild.version).toBe(1n);
       expect(fixResearchChild.outputContract.case).toBe("artifact");
 
       const fixImplementationGrandchild = fixTree.nodes.find(
@@ -3680,13 +3680,15 @@ describe("tree service integration", () => {
       if (featureTree === undefined) {
         throw new Error("feature template response did not contain a tree");
       }
-      expect(featureTree.state).toBe(TreeState.DRAFT);
+      expect(featureTree.state).toBe(TreeState.APPROVED);
       expect(featureTree.nodes).toHaveLength(3);
       const featureExploreChild = featureTree.nodes.find((n) => n.mode === PlanNodeMode.EXPLORE);
       if (featureExploreChild === undefined) {
         throw new Error("feature template did not produce an explore child");
       }
       expect(featureExploreChild.parentNodeId).toBe(featureRootNodeId);
+      expect(featureExploreChild.state).toBe(NodeState.READY);
+      expect(featureExploreChild.version).toBe(1n);
 
       const featureImplementationGrandchild = featureTree.nodes.find(
         (n) => n.mode === PlanNodeMode.IMPLEMENTATION,

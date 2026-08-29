@@ -45,14 +45,6 @@ export type ResolvedTaskTemplate = Readonly<{
 }>;
 
 export function validateTemplateDefinition(definition: TaskTemplateDefinition): void {
-  const hasImplementation = definition.nodes.some((node) => node.mode === "implementation");
-  if (hasImplementation && definition.autoApprove) {
-    throw new DomainError(
-      "invalid_value",
-      `template "${definition.key}" contains an implementation node and cannot be autoApprove`,
-    );
-  }
-
   const depths: number[] = [];
   for (let i = 0; i < definition.nodes.length; i++) {
     const node = definition.nodes[i];
@@ -141,7 +133,7 @@ export const TASK_TEMPLATES: Readonly<Record<TaskTemplateKey, TaskTemplateDefini
     }),
     fix: Object.freeze({
       key: "fix",
-      autoApprove: false,
+      autoApprove: true,
       budget: Object.freeze({
         maxDepth: 3,
         maxFanOut: 1,
@@ -175,7 +167,7 @@ export const TASK_TEMPLATES: Readonly<Record<TaskTemplateKey, TaskTemplateDefini
     }),
     feature: Object.freeze({
       key: "feature",
-      autoApprove: false,
+      autoApprove: true,
       budget: Object.freeze({
         maxDepth: 3,
         maxFanOut: 1,

@@ -846,16 +846,6 @@ function applyCreateTemplated(
   );
   assertCreateTemplatedIdAvailability(transaction, snapshot);
 
-  if (
-    snapshot.autoApprove &&
-    snapshot.nodes.some((node) => node.mode === PlanNodeMode.IMPLEMENTATION)
-  ) {
-    throw new PlanRegistryError(
-      "invalid_plan",
-      "a template with implementation nodes cannot be auto-approved",
-    );
-  }
-
   transaction.run(
     `INSERT INTO trees (
        id, repository_id, host_id, base_commit, goal, active_plan_revision_id,

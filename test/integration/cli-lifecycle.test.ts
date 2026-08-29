@@ -742,12 +742,12 @@ describe("CLI templated tree creation", () => {
       );
       expect(fixed.code).toBe(0);
       const fixedTree = jsonRecord(jsonRecord(fixed.json)["tree"]);
-      expect(jsonString(fixedTree["state"])).toBe("TREE_STATE_DRAFT");
+      expect(jsonString(fixedTree["state"])).toBe("TREE_STATE_APPROVED");
       expect(jsonString(fixedTree["goal"])).toBe("stop the flaky retry test");
       expect(jsonString(fixedTree["base_commit"])).toBe(fixture.baseCommit);
       const fixedRevisions = jsonNodes(fixedTree["revisions"]);
       expect(fixedRevisions).toHaveLength(1);
-      expect(jsonString(fixedRevisions[0]?.["state"])).toBe("PLAN_REVISION_STATE_DRAFT");
+      expect(jsonString(fixedRevisions[0]?.["state"])).toBe("PLAN_REVISION_STATE_APPROVED");
 
       const fixedNodes = jsonNodes(fixedTree["nodes"]);
       expect(fixedNodes).toHaveLength(3);
@@ -761,7 +761,7 @@ describe("CLI templated tree creation", () => {
       expect(jsonString(fixedResearch["parent_node_id"])).toBe(
         jsonString(fixedTree["root_node_id"]),
       );
-      expect(jsonString(fixedResearch["state"])).toBe("NODE_STATE_PLANNED");
+      expect(jsonString(fixedResearch["state"])).toBe("NODE_STATE_READY");
       expect(jsonString(fixedImplementation["parent_node_id"])).toBe(
         jsonString(fixedResearch["id"]),
       );
