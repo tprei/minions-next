@@ -35,8 +35,10 @@ export type RemoteAccessPolicy = ReadonlyMap<string, PairingScope>;
 export const PHONE_REMOTE_ACCESS_POLICY: RemoteAccessPolicy = new Map<string, PairingScope>([
   ["minions.v1.SteeringService/QueueNodeCommand", "control"],
   ["minions.v1.TreeService/ApprovePlan", "control"],
+  ["minions.v1.TreeService/CreateTemplatedTree", "control"],
   ["minions.v1.TreeService/GetTree", "read_only"],
   ["minions.v1.TreeService/ListTrees", "read_only"],
+  ["minions.v1.RepositoryService/ListRepositories", "read_only"],
   ["minions.v1.EventService/WatchEvents", "read_only"],
   ["minions.v1.SystemService/GetHealth", "read_only"],
 ]);
