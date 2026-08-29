@@ -304,9 +304,18 @@ export async function startDaemonServer(
         return;
       }
       trackPendingBodyRequest(request, pendingBodyRequests);
+      const path = request.url?.split("?")[0] ?? "/";
+      if (options.webDistDir !== undefined && !path.startsWith("/minions.")) {
+        serveStaticWeb(request, response, options.webDistDir);
+        return;
+      }
       remoteHandler(request, response);
     });
-    await listenOnce(remoteServer, 0, options.remoteAccess.bindHost ?? "127.0.0.1");
+    await listenOnce(
+      remoteServer,
+      options.remoteAccess.port ?? 0,
+      options.remoteAccess.bindHost ?? "127.0.0.1",
+    );
     const remoteAddress = remoteServer.address();
     if (remoteAddress === null || typeof remoteAddress === "string") {
       trustedServer.close();

@@ -104,7 +104,8 @@ function parseArguments(argv: readonly string[]): ProcessArguments {
   let port = 4_817;
   let configuredHostId: HostId | undefined;
   let allowRemote = false;
-
+  let remoteBindHost: string | undefined;
+  let remotePort: number | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === undefined) {
@@ -131,6 +132,16 @@ function parseArguments(argv: readonly string[]): ProcessArguments {
       case "--allow-remote":
         allowRemote = true;
         break;
+      case "--remote-bind-host":
+        remoteBindHost = requiredValue(argument, value);
+        allowRemote = true;
+        index += 1;
+        break;
+      case "--remote-port":
+        remotePort = parsePort(requiredValue(argument, value));
+        allowRemote = true;
+        index += 1;
+        break;
       default:
         throw new TypeError(`unknown daemon argument: ${argument}`);
     }
@@ -150,7 +161,15 @@ function parseArguments(argv: readonly string[]): ProcessArguments {
     mode,
     port,
     ...(configuredHostId === undefined ? {} : { hostId: configuredHostId }),
-    ...(allowRemote ? { remoteAccess: { enabled: true } } : {}),
+    ...(allowRemote
+      ? {
+          remoteAccess: {
+            enabled: true,
+            ...(remoteBindHost !== undefined ? { bindHost: remoteBindHost } : {}),
+            ...(remotePort !== undefined ? { port: remotePort } : {}),
+          },
+        }
+      : {}),
   };
 }
 

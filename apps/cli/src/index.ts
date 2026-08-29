@@ -196,6 +196,8 @@ type StartInvocation = Readonly<{
   port: number;
   hostId?: HostId;
   allowRemote?: boolean;
+  remoteBindHost?: string;
+  remotePort?: number;
 }>;
 
 type TreeBudgetInput = Readonly<{
@@ -350,6 +352,8 @@ function parseInvocation(argv: readonly string[]): Invocation {
   let port = 4_817;
   let configuredHostId: HostId | undefined;
   let allowRemote = false;
+  let remoteBindHost: string | undefined;
+  let remotePort: number | undefined;
   let authHostId: HostId | undefined;
   let authProvider: string | undefined;
   let authVia: string | undefined;
@@ -419,6 +423,22 @@ function parseInvocation(argv: readonly string[]): Invocation {
           throw new UsageError("--allow-remote is only valid with start");
         }
         allowRemote = true;
+        break;
+      case "--remote-bind-host":
+        if (command !== "start") {
+          throw new UsageError("--remote-bind-host is only valid with start");
+        }
+        remoteBindHost = requiredValue(option, value);
+        allowRemote = true;
+        index += 1;
+        break;
+      case "--remote-port":
+        if (command !== "start") {
+          throw new UsageError("--remote-port is only valid with start");
+        }
+        remotePort = parsePort(requiredValue(option, value));
+        allowRemote = true;
+        index += 1;
         break;
       case "--max-depth":
         if (command !== "tree-create") {
@@ -575,6 +595,8 @@ function parseInvocation(argv: readonly string[]): Invocation {
       port,
       ...(configuredHostId === undefined ? {} : { hostId: configuredHostId }),
       ...(allowRemote ? { allowRemote } : {}),
+      ...(remoteBindHost !== undefined ? { remoteBindHost } : {}),
+      ...(remotePort !== undefined ? { remotePort } : {}),
     };
   }
   if (
@@ -992,6 +1014,12 @@ async function start(invocation: StartInvocation): Promise<number> {
   }
   if (invocation.allowRemote === true) {
     arguments_.push("--allow-remote");
+  }
+  if (invocation.remoteBindHost !== undefined) {
+    arguments_.push("--remote-bind-host", invocation.remoteBindHost);
+  }
+  if (invocation.remotePort !== undefined) {
+    arguments_.push("--remote-port", String(invocation.remotePort));
   }
   return await runDaemon(arguments_);
 }

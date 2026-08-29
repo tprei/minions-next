@@ -94,3 +94,13 @@ not yet expose), record a typed bootstrap reason rather than silently falling ba
 acceptance bar is that every manual exception is explicit and reviewable, not that no
 exception ever exists during the bootstrap phase.
 
+### Phone over Tailscale
+
+To supervise and steer runs from a phone over Tailscale:
+
+1. On the target Linux host, install rootless podman and the pinned omp runtime.
+2. Run `minions execution prepare` to measure and pin the host execution parameters.
+3. Start the daemon with remote access enabled on a chosen port: `minions start --allow-remote --remote-port <port>`.
+4. Pair the phone once from the desktop UI on the trusted loopback interface.
+5. Expose the remote port over Tailscale: `tailscale serve https / http://127.0.0.1:<port>`.
+6. Open the tailnet hostname in the mobile browser to access the PWA.
