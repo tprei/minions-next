@@ -4,6 +4,7 @@ import {
   decodeAcpFrame,
   normalizeAcpNotification,
   OmpAcpAdapterError,
+  probeOmpAgentVersion,
   resolveOmpPath as resolveOmpPathProduction,
   type OmpAcpAdapterOptions,
 } from "@minions/adapters";
@@ -34,6 +35,8 @@ import { requireLiveDependency } from "../support/live-gate.js";
 
 const ompPath = tryResolveOmpPath();
 const live = requireLiveDependency("omp", ompPath !== undefined);
+const liveOmpVersion =
+  ompPath !== undefined ? await probeOmpAgentVersion(ompPath).catch(() => "17.1.3") : "17.1.3";
 const policyDigest = contentHash("5".repeat(64));
 
 const startContext: HarnessAttemptContext = {
@@ -76,7 +79,7 @@ function baseOptions(overrides: Partial<OmpAcpAdapterOptions> = {}): OmpAcpAdapt
   const resolvedOmpPath = ompPath ?? "/usr/local/bin/omp";
   return {
     ompPath: resolvedOmpPath,
-    expectedVersion: "17.1.3",
+    expectedVersion: liveOmpVersion,
     cwd: tmpdir(),
     sessionDirectory: makeSessionDirectory(),
     model: "zai/glm-4.6",
@@ -120,7 +123,7 @@ describe("omp acp adapter — version probe fail-closed", () => {
       try {
         const handshake = await adapter.handshake();
         expect(handshake.harnessKind).toBe("omp-acp");
-        expect(handshake.harnessVersion).toBe("17.1.3");
+        expect(handshake.harnessVersion).toBe(liveOmpVersion);
         expect(handshake.securityPolicyDigest).toBe(policyDigest);
         expect(handshake.tools).toEqual(["read", "bash", "edit", "write", "grep", "glob"]);
       } finally {
@@ -135,6 +138,15 @@ describe("omp acp adapter — version probe fail-closed", () => {
     async () => {
       const adapter = createOmpAcpHarnessAdapter(baseOptions({ expectedVersion: "0.0.0" }));
       await expectErrorCode(() => adapter.handshake(), "version_mismatch");
+    },
+    30_000,
+  );
+  it.runIf(live)(
+    "probes agent version directly via probeOmpAgentVersion",
+    async () => {
+      if (ompPath === undefined) throw new Error("omp binary required");
+      const version = await probeOmpAgentVersion(ompPath);
+      expect(version).toMatch(/^\d+\.\d+\.\d+$/u);
     },
     30_000,
   );

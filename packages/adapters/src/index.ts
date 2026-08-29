@@ -293,6 +293,7 @@ export {
   createLinuxPodmanSandboxLifecycle,
   createWsl2PodmanSandboxLifecycle,
   PodmanSandboxError,
+  resolveDefaultSeccompProfilePath,
 } from "./podman-sandbox.js";
 export type { PodmanSandboxErrorCode, PodmanSandboxOptions } from "./podman-sandbox.js";
 export {
@@ -300,6 +301,7 @@ export {
   OmpAcpAdapterError,
   buildSessionNewParams,
   resolveOmpPath,
+  probeOmpAgentVersion,
 } from "./omp-acp-adapter.js";
 export type {
   AcpFrame,
@@ -309,6 +311,12 @@ export type {
   OmpAcpAdapterErrorCode,
 } from "./omp-acp-adapter.js";
 export { decodeAcpFrame, normalizeAcpNotification } from "./omp-acp-adapter.js";
+export {
+  readExecutionHostConfig,
+  writeExecutionHostConfig,
+  validateExecutionHostConfig,
+  type ExecutionHostConfig,
+} from "./execution-config.js";
 export { PINNED_JJ_VERSION, ensureJjCapability, JjCapabilityError } from "./jj-capability.js";
 export type {
   JjCapabilities,

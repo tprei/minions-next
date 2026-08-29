@@ -4,20 +4,27 @@ import { create } from "@bufbuild/protobuf";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { existsSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
+import { delimiter, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   AuthBrokerError,
   createAuthBrokerManager,
   createCredentialVault,
   createSecureIdGenerator,
+  createSupervisorHostRegistry,
   daemonLifecyclePath,
   inspectLifecycleLock,
+  openSupervisorDatabase,
+  preparePodmanImage,
+  probeOmpAgentVersion,
+  resolveDefaultSeccompProfilePath,
+  writeExecutionHostConfig,
   type AuthBrokerManager,
   type DaemonModeName,
+  type ExecutionHostConfig,
   type SystemdCredsKeyMode,
 } from "@minions/adapters";
 import {
@@ -77,7 +84,12 @@ import {
   type TreeSummary,
   type VcsChangeBinding,
 } from "@minions/contracts";
-import { hostId, timestampFromEpochMilliseconds, type HostId } from "@minions/core";
+import {
+  hostId,
+  timestampFromEpochMilliseconds,
+  type ContentHash,
+  type HostId,
+} from "@minions/core";
 import { main as runDaemon } from "@minions/daemon";
 import * as distribution from "./distribution.js";
 
@@ -87,6 +99,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     switch (invocation.command) {
       case "start":
         return await start(invocation);
+      case "execution-prepare":
+        return await prepareExecution(invocation);
       case "stop":
         return await stop(invocation.home);
       case "status":
@@ -276,6 +290,7 @@ type Invocation =
   | Readonly<{ command: "upgrade"; archive: string; prefix: string; home: string }>
   | Readonly<{ command: "rollback"; prefix: string; home: string }>
   | Readonly<{ command: "uninstall"; prefix: string; home: string; purge: boolean }>
+  | Readonly<{ command: "execution-prepare"; home: string; hostId?: HostId }>
   | Readonly<{ command: "version" }>;
 
 type AuthLoginInvocation = Readonly<{
@@ -323,7 +338,8 @@ function parseInvocation(argv: readonly string[]): Invocation {
     first === "repository" ||
     first === "tree" ||
     first === "node" ||
-    first === "auth"
+    first === "auth" ||
+    first === "execution"
       ? rest
       : argv.slice(1);
   const positionalCount = invocationPositionalCount(command);
@@ -389,11 +405,12 @@ function parseInvocation(argv: readonly string[]): Invocation {
         } else if (
           command === "auth-login" ||
           command === "auth-status" ||
-          command === "auth-logout"
+          command === "auth-logout" ||
+          command === "execution-prepare"
         ) {
           authHostId = parseConfiguredHostId(requiredValue(option, value));
         } else {
-          throw new UsageError("--host-id is only valid with start or auth");
+          throw new UsageError("--host-id is only valid with start, auth, or execution");
         }
         index += 1;
         break;
@@ -779,6 +796,13 @@ function parseInvocation(argv: readonly string[]): Invocation {
       ...(vaultKeyMode !== undefined ? { vaultKeyMode } : {}),
     };
   }
+  if (command === "execution-prepare") {
+    return {
+      command,
+      home,
+      ...(authHostId !== undefined ? { hostId: authHostId } : {}),
+    };
+  }
   if (command === "version") {
     return { command };
   }
@@ -841,6 +865,9 @@ function normalizeCommand(
   }
   if (first === "auth" && (second === "login" || second === "status" || second === "logout")) {
     return `auth-${second}`;
+  }
+  if (first === "execution" && second === "prepare") {
+    return "execution-prepare";
   }
   return first;
 }
@@ -2295,7 +2322,12 @@ async function listHosts(home: string): Promise<number> {
 function resolveOmpPath(): string {
   const fromEnv = process.env["OMP_PATH"];
   if (fromEnv && fromEnv.length > 0) return fromEnv;
-  const candidates = ["/usr/local/bin/omp", "/usr/bin/omp", `${homedir()}/.local/bin/omp`];
+  const candidates = [
+    "/usr/local/bin/omp",
+    "/usr/bin/omp",
+    `${homedir()}/.local/bin/omp`,
+    `${homedir()}/.bun/bin/omp`,
+  ];
   for (const candidate of candidates) {
     try {
       if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
@@ -2373,6 +2405,143 @@ async function authLogout(invocation: AuthLogoutInvocation): Promise<number> {
     host_id: invocation.hostId,
     provider: invocation.provider,
   });
+  return 0;
+}
+
+async function resolvePodmanPath(): Promise<string> {
+  const pathValue = process.env["PATH"];
+  if (typeof pathValue !== "string" || pathValue.length === 0) {
+    throw new UsageError(
+      "podman is unavailable. Remediation: Install rootless Podman and ensure podman is executable on PATH.",
+    );
+  }
+  for (const directory of pathValue.split(delimiter)) {
+    const candidate = join(directory.length === 0 ? process.cwd() : resolve(directory), "podman");
+    try {
+      const metadata = await lstat(candidate);
+      if (!metadata.isFile() && !metadata.isSymbolicLink()) continue;
+      const resolvedPath = await realpath(candidate);
+      const resolvedMetadata = await lstat(resolvedPath);
+      if (resolvedMetadata.isFile() && (resolvedMetadata.mode & 0o111) !== 0) return resolvedPath;
+    } catch {
+      continue;
+    }
+  }
+  throw new UsageError(
+    "podman is unavailable. Remediation: Install rootless Podman and ensure podman is executable on PATH.",
+  );
+}
+
+/**
+ * The sandbox image pins are host facts with no legitimate default: preparing
+ * against an assumed image would record a fingerprint the host never verified.
+ */
+function requiredExecutionInput(name: string, meaning: string): string {
+  const value = process.env[name];
+  if (value === undefined || value.length === 0) {
+    throw new UsageError(
+      `${name} is not set; set it to ${meaning} before running minions execution prepare.`,
+    );
+  }
+  return value;
+}
+
+async function prepareExecution(
+  invocation: Readonly<{ command: "execution-prepare"; home: string; hostId?: HostId }>,
+): Promise<number> {
+  const ompPath = resolveOmpPath();
+  const ompAgentVersion = await probeOmpAgentVersion(ompPath);
+  const podmanPath = await resolvePodmanPath();
+  const seccompProfilePath = resolveDefaultSeccompProfilePath();
+
+  const home = invocation.home;
+  let targetHostId: string;
+  if (invocation.hostId !== undefined) {
+    targetHostId = invocation.hostId;
+  } else {
+    const supervisorDbPath = join(home, "supervisor.db");
+    const supervisorDatabase = await openSupervisorDatabase({
+      path: supervisorDbPath,
+      backupPath: join(home, "backups", "supervisor.db"),
+      clock: { now: () => timestampFromEpochMilliseconds(Date.now()) },
+    });
+    const hostRegistry = createSupervisorHostRegistry({ database: supervisorDatabase });
+    const localHost = await hostRegistry.ensureLocalHost({
+      id: hostId(
+        createSecureIdGenerator({
+          now: () => timestampFromEpochMilliseconds(Date.now()),
+        }).nextId(),
+      ),
+      displayName: hostname(),
+      observedAt: timestampFromEpochMilliseconds(Date.now()),
+    });
+    targetHostId = localHost.id;
+  }
+
+  const hostDirectory = join(home, "hosts", targetHostId);
+  await mkdir(hostDirectory, { recursive: true, mode: 0o700 });
+
+  let sandboxImageFingerprint: string;
+  const envFingerprint = process.env["MINIONS_PODMAN_IMAGE_FINGERPRINT"];
+  if (envFingerprint !== undefined && /^[0-9a-f]{64}$/u.test(envFingerprint)) {
+    sandboxImageFingerprint = envFingerprint;
+  } else {
+    const storageRoot =
+      process.env["MINIONS_PODMAN_STORAGE"] ?? join(hostDirectory, "podman-storage");
+    const stateRoot = process.env["MINIONS_PODMAN_STATE"] ?? join(hostDirectory, "podman-state");
+    await mkdir(storageRoot, { recursive: true, mode: 0o700 });
+    await mkdir(stateRoot, { recursive: true, mode: 0o700 });
+
+    const imageReference = requiredExecutionInput(
+      "MINIONS_PODMAN_IMAGE_REF",
+      "the sandbox image reference (registry path, tag and sha256 digest) that nodes execute inside",
+    );
+    const digestInput = requiredExecutionInput(
+      "MINIONS_PODMAN_IMAGE_DIGEST",
+      "the expected sha256 digest of the sandbox image, as 64 lowercase hexadecimal characters",
+    );
+    if (!/^[0-9a-f]{64}$/u.test(digestInput)) {
+      throw new UsageError(
+        "MINIONS_PODMAN_IMAGE_DIGEST must be 64 lowercase hexadecimal characters",
+      );
+    }
+    const expectedImageDigest = digestInput as ContentHash;
+    const version = requiredExecutionInput(
+      "MINIONS_PODMAN_VERSION",
+      "the podman runtime version recorded in the sandbox template",
+    );
+
+    const template = Object.freeze({
+      podmanPath,
+      imageReference,
+      expectedImageDigest,
+      storageRoot,
+      stateRoot,
+      runtime: Object.freeze({
+        podmanPath,
+        version,
+      }),
+    });
+
+    const receipt = await preparePodmanImage(template);
+    sandboxImageFingerprint = receipt.fingerprint.digest;
+  }
+
+  const isWsl =
+    typeof process.env["WSL_DISTRO_NAME"] === "string" && process.env["WSL_DISTRO_NAME"].length > 0;
+  const wslDistroName = isWsl ? (process.env["WSL_DISTRO_NAME"] ?? null) : null;
+
+  const config: ExecutionHostConfig = Object.freeze({
+    ompPath,
+    ompAgentVersion,
+    podmanPath,
+    seccompProfilePath,
+    sandboxImageFingerprint,
+    wslDistroName,
+  });
+
+  writeExecutionHostConfig(hostDirectory, config);
+  writeJson(config);
   return 0;
 }
 

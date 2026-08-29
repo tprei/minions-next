@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, fsyncSync, openSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, openSync, statSync } from "node:fs";
 import { chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   contentHash,
   attemptId,
@@ -135,6 +136,25 @@ export function createLinuxPodmanSandboxLifecycle(options: PodmanSandboxOptions)
 
 export function createWsl2PodmanSandboxLifecycle(options: PodmanSandboxOptions): SandboxLifecycle {
   return new PodmanSandboxLifecycle(validateOptions(options, "wsl2_podman"));
+}
+
+export function resolveDefaultSeccompProfilePath(): string {
+  const assetPath = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../assets/podman/seccomp-default.json",
+  );
+  if (existsSync(assetPath) && statSync(assetPath).isFile()) {
+    return assetPath;
+  }
+  const fallback = resolve(process.cwd(), "packages/adapters/assets/podman/seccomp-default.json");
+  if (existsSync(fallback) && statSync(fallback).isFile()) {
+    return fallback;
+  }
+  throw new PodmanSandboxError(
+    "invalid_configuration",
+    `Podman seccomp profile asset not found at ${assetPath}`,
+    "Ensure packages/adapters/assets/podman/seccomp-default.json exists.",
+  );
 }
 
 class PodmanSandboxLifecycle implements SandboxLifecycle {

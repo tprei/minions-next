@@ -41,7 +41,12 @@ import type {
   SandboxPolicyFingerprint,
 } from "./sandbox.js";
 import type { ArtifactRegistry, RecordedNodeOutcome } from "./artifact.js";
-import type { SchedulerCapacityPolicy, SchedulerOwnerId, SchedulerStore } from "./scheduler.js";
+import type {
+  SchedulerCapacityPolicy,
+  SchedulerLease,
+  SchedulerOwnerId,
+  SchedulerStore,
+} from "./scheduler.js";
 import type { VcsBackend } from "./vcs-backend.js";
 
 /**
@@ -343,6 +348,7 @@ export type NodeOutcomeRecording = Readonly<{
 /** Request to run a single node attempt end to end. */
 export type NodeExecutionRequest = Readonly<{
   context: HarnessAttemptContext;
+  lease: SchedulerLease;
   ownerId: SchedulerOwnerId;
   leaseDurationMs: number;
   capacity: SchedulerCapacityPolicy;

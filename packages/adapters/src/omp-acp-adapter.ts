@@ -92,7 +92,12 @@ export class OmpAcpAdapterError extends Error {
 export function resolveOmpPath(): string {
   const fromEnv = process.env["OMP_PATH"];
   if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
-  const candidates = ["/usr/local/bin/omp", "/usr/bin/omp", `${homedir()}/.local/bin/omp`];
+  const candidates = [
+    "/usr/local/bin/omp",
+    "/usr/bin/omp",
+    `${homedir()}/.local/bin/omp`,
+    `${homedir()}/.bun/bin/omp`,
+  ];
   for (const candidate of candidates) {
     try {
       if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
@@ -105,6 +110,47 @@ export function resolveOmpPath(): string {
     "omp binary not found; install the pinned OMP runtime or set OMP_PATH",
     "Install the pinned OMP runtime and rerun host setup, or set OMP_PATH to its absolute path.",
   );
+}
+
+/**
+ * Probe the installed `omp` binary's agent version via the ACP `initialize` exchange.
+ * Spawns `omp acp`, performs only the initialization request, extracts `agentInfo.version`,
+ * and terminates the process without creating any session.
+ */
+export async function probeOmpAgentVersion(ompPath: string): Promise<string> {
+  const router: ClientCallbacks = {
+    onNotification: noopNotification,
+    onProtocolError: noopProtocolError,
+  };
+  const client = new OmpAcpClient(ompPath, process.cwd(), router);
+  try {
+    let raw: unknown;
+    try {
+      raw = await client.send("initialize", {
+        protocolVersion: 1,
+        clientInfo: { name: "minions-omp-acp", version: "1.0.0" },
+      });
+    } catch (error: unknown) {
+      throw rethrowAdapter(
+        error,
+        `omp acp initialize failed: ${errorToString(error)}`,
+        "Install the pinned OMP runtime and rerun host setup.",
+      );
+    }
+    if (!isPlainObject(raw)) {
+      throw protocolError("ACP initialize result must be a JSON object");
+    }
+    const agentInfo = raw["agentInfo"];
+    if (!isPlainObject(agentInfo)) {
+      throw protocolError("ACP initialize result.agentInfo must be a JSON object");
+    }
+    if (typeof agentInfo["version"] !== "string" || !versionPattern.test(agentInfo["version"])) {
+      throw protocolError("ACP initialize result.agentInfo.version is missing or malformed");
+    }
+    return agentInfo["version"];
+  } finally {
+    client.close();
+  }
 }
 
 export type OmpAcpAdapterOptions = Readonly<{
@@ -604,7 +650,7 @@ function mapHarnessCapabilities(agent: AgentCapabilities): readonly HarnessCapab
 export function buildSessionNewParams(cwd: string, allowedTools: readonly string[]): UnknownRecord {
   return Object.freeze({
     cwd,
-    mcpServers: Object.freeze({}) as Readonly<Record<string, never>>,
+    mcpServers: Object.freeze([]),
     session: Object.freeze({ tools: Object.freeze([...allowedTools]) }),
   });
 }
@@ -1531,13 +1577,14 @@ export function createOmpAcpHarnessAdapter(options: OmpAcpAdapterOptions): Harne
       );
     }
     activeIdentities.add(request.durableHarnessId);
+    const cwd = request.workspacePath ?? validated.cwd;
     try {
       await ensureProtectedSessionDirectory(validated.sessionDirectory);
       const router: ClientCallbacks = {
         onNotification: noopNotification,
         onProtocolError: noopProtocolError,
       };
-      const client = new OmpAcpClient(validated.ompPath, validated.cwd, router);
+      const client = new OmpAcpClient(validated.ompPath, cwd, router);
       let sessionId: string;
       let initialized: InitializeResult;
       try {
@@ -1549,7 +1596,7 @@ export function createOmpAcpHarnessAdapter(options: OmpAcpAdapterOptions): Harne
         await client.send("authenticate", { methodId: "agent" });
         const raw = await client.send(
           "session/new",
-          buildSessionNewParams(validated.cwd, validated.allowedTools),
+          buildSessionNewParams(cwd, validated.allowedTools),
         );
         sessionId = parseSessionId(raw);
       } catch (error: unknown) {
@@ -1602,6 +1649,7 @@ export function createOmpAcpHarnessAdapter(options: OmpAcpAdapterOptions): Harne
       );
     }
     activeIdentities.add(request.identity.durableHarnessId);
+    const cwd = request.workspacePath ?? validated.cwd;
     try {
       await ensureProtectedSessionDirectory(validated.sessionDirectory);
       const manifest = await readManifest(
@@ -1619,7 +1667,7 @@ export function createOmpAcpHarnessAdapter(options: OmpAcpAdapterOptions): Harne
         onNotification: noopNotification,
         onProtocolError: noopProtocolError,
       };
-      const client = new OmpAcpClient(validated.ompPath, validated.cwd, router);
+      const client = new OmpAcpClient(validated.ompPath, cwd, router);
       let initialized: InitializeResult;
       try {
         initialized = await initializeClient(client, validated);
@@ -1630,8 +1678,8 @@ export function createOmpAcpHarnessAdapter(options: OmpAcpAdapterOptions): Harne
         await client.send("authenticate", { methodId: "agent" });
         await client.send("session/load", {
           sessionId: manifest.sessionId,
-          cwd: validated.cwd,
-          mcpServers: Object.freeze({}),
+          cwd,
+          mcpServers: Object.freeze([]),
         });
       } catch (error: unknown) {
         client.close();

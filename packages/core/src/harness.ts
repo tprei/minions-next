@@ -94,12 +94,16 @@ export type HarnessSessionSnapshot = Readonly<{
 export type StartHarnessSessionRequest = Readonly<{
   context: HarnessAttemptContext;
   durableHarnessId: string;
+  /** Absolute path of the per-attempt working copy; the harness must spawn and run the agent there. */
+  workspacePath?: string;
 }>;
 
 export type ResumeHarnessSessionRequest = Readonly<{
   context: HarnessAttemptContext;
   identity: HarnessSessionIdentity;
   afterSequence: bigint;
+  /** Absolute path of the per-attempt working copy; the harness must spawn and run the agent there. */
+  workspacePath?: string;
 }>;
 
 export interface HarnessSession {
