@@ -5,8 +5,10 @@ import {
   gitSha,
   hostId,
   nonEmptyText,
+  fencingToken,
   repositoryId,
   schedulerCapacityPolicy,
+  schedulerLeaseId,
   schedulerOwnerId,
   taskNodeId,
   taskTreeId,
@@ -37,6 +39,7 @@ import {
   type RepairAttention,
   type SandboxPolicy,
   type SandboxPolicyFingerprint,
+  type SchedulerLease,
   type TaskNodeId,
   type VcsBackend,
   type VcsCommitReceipt,
@@ -220,6 +223,20 @@ function sandboxPolicy(): SandboxPolicy {
   });
 }
 
+const LEASE: SchedulerLease = Object.freeze({
+  id: schedulerLeaseId("01900000-0000-7000-8000-000000000006"),
+  attemptId: ATTEMPT_ID,
+  nodeId: NODE_ID,
+  treeId: TREE_ID,
+  repositoryId: REPOSITORY_ID,
+  hostId: HOST_ID,
+  ownerId: OWNER_ID,
+  fencingToken: fencingToken(1n),
+  acquiredAt: BASE_TIME,
+  heartbeatAt: BASE_TIME,
+  expiresAt: timestampFromEpochMilliseconds(1_700_000_010_000),
+});
+
 function nodeRequest(): NodeExecutionRequest {
   return Object.freeze({
     context: Object.freeze({
@@ -230,6 +247,7 @@ function nodeRequest(): NodeExecutionRequest {
       repositoryId: REPOSITORY_ID,
       hostId: HOST_ID,
     }),
+    lease: LEASE,
     ownerId: OWNER_ID,
     leaseDurationMs: 10_000,
     capacity: schedulerCapacityPolicy(4, 2),

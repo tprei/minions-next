@@ -1,5 +1,6 @@
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,18 +15,27 @@ import {
   createEventCommitWaiter,
   createExecutionCoordinator,
   createFileContentBlobStore,
+  createLinuxPodmanSandboxLifecycle,
+  createNativeGitVcsBackend,
+  createNodeGitProcess,
+  createOmpAcpHarnessAdapter,
   createPlanRegistry,
+  createProductionSandboxLifecycle,
   createProviderAdmissionProxy,
   createRepositoryRegistry,
+  createSecureIdGenerator,
   createSqliteArtifactRegistry,
   createSqliteCheckpointStore,
   createSqliteCommandStore,
+  createSqliteGitMutationLeaseStore,
   createSqliteRecoveryStore,
+  createSqliteSchedulerStore,
   createSqliteSteeringCommandStore,
   createSqliteTranscriptStore,
   createSqliteVcsChangeBindingStore,
-  createSecureIdGenerator,
+  createSqliteWorkspaceRegistry,
   createSupervisorHostRegistry,
+  createWsl2PodmanSandboxLifecycle,
   daemonLifecyclePath,
   ensureJjCapability,
   createJjCentralRepoManager,
@@ -33,6 +43,7 @@ import {
   inspectLifecycleLock,
   openHostDatabase,
   openSupervisorDatabase,
+  readExecutionHostConfig,
   resolveOmpPath,
   SqliteDatabaseError,
   type AcquiredLifecycleLock,
@@ -46,6 +57,8 @@ import {
   type JjCentralRepoManager,
   type ManagedSqliteDatabase,
   type PlanRegistry,
+  type PodmanImageBuildOptions,
+  type PodmanSandboxOptions,
   type ProviderAdmissionProxy,
   type RepositoryRegistry,
   type SupervisorHostRegistry,
@@ -65,7 +78,10 @@ import {
   type RunDoctorResponse,
 } from "@minions/contracts";
 import {
+  contentHash,
   hostId,
+  schedulerCapacityPolicy,
+  schedulerOwnerId,
   timestampFromEpochMilliseconds,
   validateAdmissionPolicy,
   type AdmissionEventPayload,
@@ -78,21 +94,53 @@ import {
   type HarnessAdapter,
   type HostId,
   type IdGenerator,
+  type ProductionSandboxBackendKind,
   type RecoveryGateProfile,
   type RecoveryStore,
   type SandboxLifecycle,
+  type SandboxPolicyFingerprint,
+  type SchedulerLoop,
   type SchedulerStore,
   type SteeringCommandStore,
   type Timestamp,
   type VcsBackend,
 } from "@minions/core";
 
+/**
+ * The sandbox image pins are host facts with no legitimate default: composing
+ * execution without them would run nodes against an unverified image.
+ */
+function requiredExecutionEnv(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value.length === 0) {
+    throw new Error(
+      `${name} is not set; MINIONS_PODMAN_IMAGE_REF, MINIONS_PODMAN_IMAGE_DIGEST and MINIONS_PODMAN_VERSION are required to compose node execution`,
+    );
+  }
+  return value;
+}
+
+/** Deterministic JSON: sorted keys, no whitespace, `undefined` members dropped. */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, member]) => member !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return `{${entries.map(([key, member]) => `${JSON.stringify(key)}:${canonicalJson(member)}`).join(",")}}`;
+}
 import type { StructuredLogger } from "./logger.js";
 import { startDaemonServer, type RunningDaemonServer } from "./server.js";
 import type { TreeServiceRevsetOptions } from "./tree-service.js";
 import { createDeviceSessionStore } from "./device-session-store.js";
 import { createSystemRecoveryRestarter, type RecoveryRestarter } from "./recovery-restart.js";
 
+import { createSchedulerLoop } from "./scheduler.js";
+import { createNodeExecutionDispatcher } from "./node-dispatcher.js";
 /**
  * Default gate profile for the `restart` recovery-action kind (PR 56 —
  * maintenance-elevation-recovery). Fail-closed: only `restart` is grantable — every
@@ -196,23 +244,12 @@ export type DaemonRuntimeOptions = Readonly<{
    * directory for non-RPC GET requests, making the PWA and RPC API same-origin.
    */
   webDistDir?: string;
-  /**
-   * OPTIONAL remote (phone) access surface (PR 57 — private-phone-pairing). When
-   * enabled, the daemon constructs a process-lifetime {@link DeviceSessionStore},
-   * shares it between the pairing RPCs and the remote-access interceptor, and starts
-   * a second loopback listener for phones (see `server.ts`'s `remoteAccess` doc for the
-   * full security model — trust derives from the listener, not the peer
-   * address). Only meaningful for "local"/"host" mode, which is where
-   * the mutation RPCs a phone session gates actually live; ignored for "supervisor"
-   * mode. Omitted, daemon behaviour is unchanged (REMOTE-01's loopback-only default).
-   */
   remoteAccess?: RemoteAccessRuntimeOptions;
 }>;
 
 export type RemoteAccessRuntimeOptions = Readonly<{
   enabled: true;
 }>;
-
 export type ProviderAdmissionRuntimeOptions = Readonly<{
   enabled: true;
   /** Unvalidated policy config; validated (fail-closed) at construction. */
@@ -279,8 +316,8 @@ export type RunningDaemonRuntime = Readonly<{
   server: RunningDaemonServer;
   /** The admission proxy when enabled; `undefined` when admission is disabled. */
   providerAdmission: ProviderAdmissionProxy | undefined;
-  /** The node-execution coordinator when enabled; `undefined` when disabled. */
   executionCoordinator: ExecutionCoordinator | undefined;
+  schedulerLoop: SchedulerLoop | undefined;
   close: () => Promise<void>;
 }>;
 
@@ -321,6 +358,7 @@ export async function startDaemonRuntime(
   let authGatewayHealth: (() => Promise<unknown>) | undefined;
   let providerAdmission: ProviderAdmissionProxy | undefined;
   let executionCoordinator: ExecutionCoordinator | undefined;
+  let schedulerLoop: SchedulerLoop | undefined;
   let admissionEventLoop: Promise<void> | undefined;
 
   try {
@@ -410,6 +448,175 @@ export async function startDaemonRuntime(
             ? {}
             : { outputCaptureLimitBytes: nodeExecution.outputCaptureLimitBytes }),
         });
+
+      } else {
+        const executionConfig = readExecutionHostConfig(hostDirectory);
+        if (executionConfig === undefined) {
+          options.logger.log("info", "execution_unavailable", {
+            reason: "execution.json is missing or invalid in host directory",
+            host_id: activeHostId,
+          });
+        } else {
+          try {
+            const schedulerStore = createSqliteSchedulerStore({
+              database: hostDatabase,
+              ids: options.ids,
+            });
+            const storageRoot = join(hostDirectory, "podman-storage");
+            const stateRoot = join(hostDirectory, "podman-state");
+            mkdirSync(storageRoot, { recursive: true, mode: 0o700 });
+            mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+            const imageReference = requiredExecutionEnv("MINIONS_PODMAN_IMAGE_REF");
+            const expectedImageDigest = contentHash(
+              requiredExecutionEnv("MINIONS_PODMAN_IMAGE_DIGEST"),
+            );
+            const podmanVersion = requiredExecutionEnv("MINIONS_PODMAN_VERSION");
+            const template: PodmanImageBuildOptions = Object.freeze({
+              podmanPath: executionConfig.podmanPath,
+              imageReference,
+              expectedImageDigest,
+              storageRoot,
+              stateRoot,
+              runtime: Object.freeze({
+                podmanPath: executionConfig.podmanPath,
+                version: podmanVersion,
+              }),
+            });
+            const templateFingerprint = executionConfig.sandboxImageFingerprint;
+            const expectedTemplateFingerprint: SandboxPolicyFingerprint = Object.freeze({
+              policyVersion: 1,
+              digest: contentHash(templateFingerprint),
+            });
+
+            const podmanOptions: PodmanSandboxOptions = Object.freeze({
+              storageRoot,
+              stateRoot,
+              podmanPath: executionConfig.podmanPath,
+              seccompProfilePath: executionConfig.seccompProfilePath,
+              template,
+              expectedTemplateFingerprint,
+              ...(executionConfig.wslDistroName !== null
+                ? { wslDistroName: executionConfig.wslDistroName }
+                : {}),
+            });
+
+            const rawLifecycle =
+              executionConfig.wslDistroName !== null
+                ? createWsl2PodmanSandboxLifecycle(podmanOptions)
+                : createLinuxPodmanSandboxLifecycle(podmanOptions);
+
+            const backendKind: ProductionSandboxBackendKind =
+              executionConfig.wslDistroName !== null ? "wsl2_podman" : "linux_podman";
+
+            const sandboxLifecycle = await createProductionSandboxLifecycle({
+              lifecycle: rawLifecycle,
+              backendKind,
+              templateFingerprint: expectedTemplateFingerprint.digest,
+            });
+
+            const sessionDirectory = join(hostDirectory, "omp-sessions");
+            mkdirSync(sessionDirectory, { recursive: true, mode: 0o700 });
+
+            const allowedTools = Object.freeze(["read", "edit", "write", "glob", "grep", "bash"]);
+            const requiredCapabilities = Object.freeze([
+              "resume",
+              "snapshot",
+              "steer",
+              "follow_up",
+              "abort",
+            ] as const);
+            // Provenance-only digest over the exact policy the harness enforces;
+            // it is recorded in the handshake and never sent to omp.
+            const securityPolicyDigest = contentHash(
+              createHash("sha256")
+                .update(
+                  canonicalJson({
+                    allowedTools: [...allowedTools],
+                    requiredCapabilities: [...requiredCapabilities],
+                    sandboxImageFingerprint: templateFingerprint,
+                  }),
+                  "utf8",
+                )
+                .digest("hex"),
+            );
+
+            const harness = createOmpAcpHarnessAdapter({
+              ompPath: executionConfig.ompPath,
+              expectedVersion: executionConfig.ompAgentVersion,
+              cwd: hostDirectory,
+              sessionDirectory,
+              allowedTools,
+              requiredCapabilities,
+              securityPolicyDigest,
+            });
+
+            const workspaceRegistry = createSqliteWorkspaceRegistry({ database: hostDatabase });
+            const gitMutationLeaseStore = createSqliteGitMutationLeaseStore({
+              database: hostDatabase,
+            });
+            const vcs = createNativeGitVcsBackend({
+              git: createNodeGitProcess(),
+              workspaceRegistry,
+              repositoryRegistry,
+              gitMutationLeaseStore,
+              clock: options.clock,
+            });
+
+            const coordinator = createExecutionCoordinator({
+              scheduler: schedulerStore,
+              sandbox: sandboxLifecycle,
+              harness,
+              vcs,
+              artifacts: requireArtifactRegistry(artifactRegistry),
+              transcripts: createSqliteTranscriptStore({ database: requireDatabase(hostDatabase) }),
+              checkpoints: createSqliteCheckpointStore({ database: requireDatabase(hostDatabase) }),
+              clock: options.clock,
+              ids: options.ids,
+              logger: options.logger,
+            });
+            executionCoordinator = coordinator;
+
+            const ownerId = schedulerOwnerId(`daemon-${lifecycle.instanceId}`);
+            const capacity = schedulerCapacityPolicy(2, 1);
+            const leaseDurationMs = 120_000;
+            const pollIntervalMs = 2_000;
+
+            const dispatcher = createNodeExecutionDispatcher({
+              coordinator,
+              planRegistry,
+              repositoryRegistry,
+              database: hostDatabase,
+              ids: options.ids,
+              ownerId,
+              leaseDurationMs,
+              capacity,
+              sandboxImageFingerprint: templateFingerprint,
+            });
+
+            schedulerLoop = createSchedulerLoop({
+              store: schedulerStore,
+              dispatcher,
+              clock: options.clock,
+              options: {
+                ownerId,
+                capacity,
+                leaseDurationMs,
+                pollIntervalMs,
+              },
+              onError: (error) => {
+                options.logger.log("error", "scheduler_cycle_error", {
+                  error: errorMessage(error),
+                });
+              },
+            });
+
+          } catch (error: unknown) {
+            options.logger.log("info", "execution_unavailable", {
+              reason: errorMessage(error),
+              host_id: activeHostId,
+            });
+          }
+        }
       }
     }
     options.signal?.throwIfAborted();
@@ -668,7 +875,7 @@ export async function startDaemonRuntime(
           clock: options.clock,
           ...(jjCentralRepo !== undefined ? { jjCentralRepo } : {}),
         },
-        ...(revset !== undefined ? { revset } : {}),
+        ...(options.webDistDir !== undefined ? { webDistDir: options.webDistDir } : {}),
         ...(remoteAccess !== undefined ? { remoteAccess } : {}),
       });
     } else {
@@ -680,6 +887,7 @@ export async function startDaemonRuntime(
       });
     }
     options.signal?.throwIfAborted();
+    schedulerLoop?.start();
 
     options.logger.log("info", "daemon_started", {
       instance_id: lifecycle.instanceId,
@@ -694,9 +902,10 @@ export async function startDaemonRuntime(
       home,
       hostId: localHostId,
       lifecycle,
-      server,
+      server: requireServer(server),
       providerAdmission,
       executionCoordinator,
+      schedulerLoop,
       close: () => {
         closePromise ??= closeRuntime({
           server: requireServer(server),
@@ -712,6 +921,7 @@ export async function startDaemonRuntime(
           authRuntime,
           providerAdmission,
           admissionEventLoop,
+          schedulerLoop,
         });
         return closePromise;
       },
@@ -731,6 +941,7 @@ export async function startDaemonRuntime(
         authRuntime,
         providerAdmission,
         admissionEventLoop,
+        schedulerLoop,
       });
     } catch (cleanupError) {
       failure = new AggregateError([error, cleanupError], "daemon startup and cleanup failed");
@@ -815,10 +1026,30 @@ async function closeRuntime(
     authRuntime: RunningAuthRuntime | undefined;
     providerAdmission: ProviderAdmissionProxy | undefined;
     admissionEventLoop: Promise<void> | undefined;
+    schedulerLoop: SchedulerLoop | undefined;
   }>,
 ): Promise<void> {
   const errors: unknown[] = [];
   await captureFailure(errors, async () => input.server.close());
+  if (input.schedulerLoop !== undefined) {
+    await captureFailure(errors, async () => {
+      let timeoutId: NodeJS.Timeout | undefined;
+      const stopPromise = input.schedulerLoop?.stop();
+      const timeoutPromise = new Promise<"timeout">((resolve) => {
+        timeoutId = setTimeout(() => {
+          resolve("timeout");
+        }, 3_000);
+        timeoutId.unref();
+      });
+      const result = await Promise.race([stopPromise, timeoutPromise]);
+      clearTimeout(timeoutId);
+      if (result === "timeout") {
+        input.logger.log("warn", "scheduler_stop_timeout", {
+          instance_id: input.instanceId,
+        });
+      }
+    });
+  }
   if (input.authRuntime !== undefined) {
     unregisterAuthExitCleanup(input.authRuntime);
     await captureFailure(errors, input.authRuntime.close);
@@ -860,9 +1091,15 @@ async function cleanupFailedStart(
     authRuntime: RunningAuthRuntime | undefined;
     providerAdmission: ProviderAdmissionProxy | undefined;
     admissionEventLoop: Promise<void> | undefined;
+    schedulerLoop: SchedulerLoop | undefined;
   }>,
 ): Promise<void> {
   const errors: unknown[] = [];
+  if (input.schedulerLoop !== undefined) {
+    await captureFailure(errors, async () => {
+      await input.schedulerLoop?.stop();
+    });
+  }
   if (input.authRuntime !== undefined) {
     unregisterAuthExitCleanup(input.authRuntime);
     await captureFailure(errors, input.authRuntime.close);
@@ -1369,6 +1606,11 @@ function errorCode(error: unknown): string {
     }
   }
   return "unknown_error";
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 // -------------------------------------------------------------------------------------------------

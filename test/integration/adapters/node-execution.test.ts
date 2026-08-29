@@ -296,6 +296,8 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
   readonly #options: ScriptedHarnessOptions;
   readonly whenBlocked: Promise<void>;
   #whenBlockedResolve: (() => void) | undefined;
+  readonly startWorkspacePaths: (string | undefined)[] = [];
+  readonly resumeWorkspacePaths: (string | undefined)[] = [];
   #session: ScriptedHarnessSession | undefined;
   get session(): ScriptedHarnessSession | undefined {
     return this.#session;
@@ -316,12 +318,14 @@ class ScriptedHarnessAdapter implements HarnessAdapter {
   }
 
   start(request: StartHarnessSessionRequest): Promise<HarnessSession> {
+    this.startWorkspacePaths.push(request.workspacePath);
     return Promise.resolve(
       this.bind({ durableHarnessId: request.durableHarnessId, sessionId: this.#options.sessionId }),
     );
   }
 
   resume(request: ResumeHarnessSessionRequest): Promise<HarnessSession> {
+    this.resumeWorkspacePaths.push(request.workspacePath);
     return Promise.resolve(this.bind(request.identity));
   }
 
@@ -717,10 +721,34 @@ function handshake(spawnTool = false): HarnessHandshake {
   return Object.freeze(hs);
 }
 
+function stageLease(
+  fixture: NodeExecutionFixture,
+  attemptIdValue: AttemptId,
+  nodeId: TaskNodeId,
+): SchedulerLease {
+  const lease: SchedulerLease = Object.freeze({
+    id: schedulerLeaseId(id(leaseSeed)),
+    attemptId: attemptIdValue,
+    nodeId,
+    treeId: TREE_ID,
+    repositoryId: REPOSITORY_ID,
+    hostId: HOST_ID,
+    ownerId: OWNER_ID,
+    fencingToken: fencingToken(1n),
+    acquiredAt: at(0),
+    heartbeatAt: at(0),
+    expiresAt: at(10_000),
+  });
+  leaseSeed += 1;
+  fixture.scheduler.enqueue(lease);
+  return lease;
+}
+
 function nodeRequest(
   fixture: NodeExecutionFixture,
   attemptIdValue: AttemptId,
   nodeId: TaskNodeId,
+  lease: SchedulerLease,
   overrides: Readonly<{ goal?: string; baseCommit?: GitSha }> = {},
 ): NodeExecutionRequest {
   const base = overrides.baseCommit ?? DEFAULT_HEAD;
@@ -733,6 +761,7 @@ function nodeRequest(
       repositoryId: REPOSITORY_ID,
       hostId: HOST_ID,
     }),
+    lease,
     ownerId: OWNER_ID,
     leaseDurationMs: 10_000,
     capacity: schedulerCapacityPolicy(4, 2),
@@ -757,29 +786,6 @@ function nodeRequest(
   });
 }
 
-function stageLease(
-  fixture: NodeExecutionFixture,
-  attemptIdValue: AttemptId,
-  nodeId: TaskNodeId,
-): SchedulerLease {
-  const lease: SchedulerLease = Object.freeze({
-    id: schedulerLeaseId(id(leaseSeed)),
-    attemptId: attemptIdValue,
-    nodeId,
-    treeId: TREE_ID,
-    repositoryId: REPOSITORY_ID,
-    hostId: HOST_ID,
-    ownerId: OWNER_ID,
-    fencingToken: fencingToken(1n),
-    acquiredAt: at(0),
-    heartbeatAt: at(0),
-    expiresAt: at(10_000),
-  });
-  leaseSeed += 1;
-  fixture.scheduler.enqueue(lease);
-  return lease;
-}
-
 function expectCoordinatorError(error: unknown, code: string): void {
   expect(error).toBeInstanceOf(ExecutionCoordinatorError);
   expect((error as ExecutionCoordinatorError).code).toBe(code);
@@ -794,7 +800,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture();
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     const harness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-artifact",
@@ -805,7 +811,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
         result("succeeded", "artifact written"),
       ],
     });
-    const request = nodeRequest(fixture, attempt, node);
+    const request = nodeRequest(fixture, attempt, node, lease);
 
     const outcome = await fixture.coordinator(harness).runNode(request);
 
@@ -851,14 +857,14 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture();
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     const harness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-order",
       payloads: [message("nothing to do"), result("succeeded", "no changes needed")],
     });
 
-    await fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node));
+    await fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node, lease));
 
     const checkpointIndex = fixture.artifacts.calls.indexOf("checkpoint:finalizing");
     const outcomeIndex = fixture.artifacts.calls.indexOf("recordOutcome");
@@ -871,14 +877,16 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture();
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     const harness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-nochange",
       payloads: [message("nothing to do"), result("succeeded", "no changes needed")],
     });
 
-    const outcome = await fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node));
+    const outcome = await fixture
+      .coordinator(harness)
+      .runNode(nodeRequest(fixture, attempt, node, lease));
 
     expect(outcome.outcome.kind).toBe("succeeded");
     expect(outcome.outcome.artifacts).toHaveLength(0);
@@ -892,7 +900,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture();
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     fixture.vcs.setDiff(
       attempt,
       new TextEncoder().encode("diff --git a/src/a.ts b/src/a.ts\n+export const x = 1;\n"),
@@ -908,7 +916,9 @@ describe("execution coordinator (node-execution pipeline)", () => {
       ],
     });
 
-    const outcome = await fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node));
+    const outcome = await fixture
+      .coordinator(harness)
+      .runNode(nodeRequest(fixture, attempt, node, lease));
 
     expect(outcome.outcome.kind).toBe("succeeded");
     expect(outcome.outcome.revision).toBe(commitSha(0));
@@ -932,7 +942,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     ];
 
     // (1) A completed sibling: its transcript + outcome must survive the crash/resume.
-    stageLease(fixture, siblingAttempt, siblingNode);
+    const siblingLease = stageLease(fixture, siblingAttempt, siblingNode);
     await fixture
       .coordinator(
         new ScriptedHarnessAdapter({
@@ -941,14 +951,14 @@ describe("execution coordinator (node-execution pipeline)", () => {
           payloads: [message("sibling done"), result("succeeded", "sibling completed")],
         }),
       )
-      .runNode(nodeRequest(fixture, siblingAttempt, siblingNode));
+      .runNode(nodeRequest(fixture, siblingAttempt, siblingNode, siblingLease));
 
     const siblingTranscriptBefore = await fixture.transcripts.readAll(siblingAttempt);
     const siblingOutcomeBefore = fixture.artifacts.getOutcome(siblingNode);
     const siblingReleases = fixture.scheduler.releases.length;
 
     // (2) The affected node crashes mid-stream (harness process death) at sequence 3.
-    stageLease(fixture, attempt, node);
+    const crashLease = stageLease(fixture, attempt, node);
     const crashHarness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-resume",
@@ -956,7 +966,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
       crashAfterSequence: 3n,
     });
     await expect(
-      fixture.coordinator(crashHarness).runNode(nodeRequest(fixture, attempt, node)),
+      fixture.coordinator(crashHarness).runNode(nodeRequest(fixture, attempt, node, crashLease)),
     ).rejects.toSatisfy((error: unknown) => {
       expectCoordinatorError(error, "harness_unavailable");
       return true;
@@ -974,10 +984,11 @@ describe("execution coordinator (node-execution pipeline)", () => {
     expect(checkpoint?.identity.harnessIdentity.sessionId).toBe("session-resume");
     // Harness session disposed exactly once on crash failure.
     expect(crashHarness.session?.disposeCount).toBe(1);
+    expect(crashHarness.startWorkspacePaths).toEqual(["/workspace"]);
 
     // (3) A restarted coordinator re-binds the SAME identity + sandbox and replays
     // from the checkpoint sequence, resuming ONLY this node.
-    stageLease(fixture, attempt, node);
+    const resumeLease = stageLease(fixture, attempt, node);
     const resumeHarness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-resume",
@@ -986,7 +997,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     if (checkpoint === undefined) throw new Error("checkpoint expected after crash");
     const outcome = await fixture
       .coordinator(resumeHarness)
-      .resumeFromCheckpoint(checkpoint, nodeRequest(fixture, attempt, node));
+      .resumeFromCheckpoint(checkpoint, nodeRequest(fixture, attempt, node, resumeLease));
 
     expect(outcome.outcome.kind).toBe("succeeded");
     const resumedTranscript = await fixture.transcripts.readAll(attempt);
@@ -995,6 +1006,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     expect(fixture.sandbox.destroys).toHaveLength(2); // sibling + resumed node
     expect(fixture.scheduler.releases).toHaveLength(siblingReleases + 2);
     expect(resumeHarness.session?.disposeCount).toBe(1);
+    expect(resumeHarness.resumeWorkspacePaths).toEqual(["/workspace"]);
 
     // Sibling is untouched: same transcript length + same recorded outcome.
     const siblingTranscriptAfter = await fixture.transcripts.readAll(siblingAttempt);
@@ -1007,7 +1019,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture();
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     const harness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-interrupt",
@@ -1016,7 +1028,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     });
     const coordinator = fixture.coordinator(harness);
 
-    const done = coordinator.runNode(nodeRequest(fixture, attempt, node));
+    const done = coordinator.runNode(nodeRequest(fixture, attempt, node, lease));
     await harness.whenBlocked;
     const outcome = await coordinator.interrupt(attempt);
     await done;
@@ -1031,7 +1043,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture();
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     const harness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-handshake-fail",
@@ -1040,7 +1052,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     });
 
     await expect(
-      fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node)),
+      fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node, lease)),
     ).rejects.toSatisfy((error: unknown) => {
       expectCoordinatorError(error, "harness_unavailable");
       return true;
@@ -1061,7 +1073,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture(unavailable);
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     const harness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-sandbox-fail",
@@ -1069,7 +1081,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     });
 
     await expect(
-      fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node)),
+      fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node, lease)),
     ).rejects.toSatisfy((error: unknown) => {
       expectCoordinatorError(error, "sandbox_unavailable");
       return true;
@@ -1083,7 +1095,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture();
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     const harness = new ScriptedHarnessAdapter({
       handshake: handshake(true),
       sessionId: "session-spawn",
@@ -1091,7 +1103,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
     });
 
     await expect(
-      fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node)),
+      fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node, lease)),
     ).rejects.toSatisfy((error: unknown) => {
       expectCoordinatorError(error, "policy_violation");
       return true;
@@ -1105,25 +1117,62 @@ describe("execution coordinator (node-execution pipeline)", () => {
     const fixture = await createFixture();
     const attempt = freshAttempt();
     const node = freshNode();
-    stageLease(fixture, attempt, node);
+    const lease = stageLease(fixture, attempt, node);
     const harness = new ScriptedHarnessAdapter({
       handshake: handshake(),
       sessionId: "session-failed",
       payloads: [message("failing"), result("failed", "execution failed")],
     });
 
-    const outcome = await fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node));
+    const outcome = await fixture
+      .coordinator(harness)
+      .runNode(nodeRequest(fixture, attempt, node, lease));
 
     expect(outcome.outcome.kind).toBe("failed");
     expect(harness.session?.disposeCount).toBe(1);
+  });
+  it("rejects execution when the lease does not match the request context (not_leased)", async () => {
+    const fixture = await createFixture();
+    const attempt = freshAttempt();
+    const node = freshNode();
+    const otherNode = freshNode();
+    const mismatchedLease = stageLease(fixture, attempt, otherNode);
+    const harness = new ScriptedHarnessAdapter({
+      handshake: handshake(),
+      sessionId: "session-mismatched",
+      payloads: [result("succeeded", "never reached")],
+    });
+
+    await expect(
+      fixture.coordinator(harness).runNode(nodeRequest(fixture, attempt, node, mismatchedLease)),
+    ).rejects.toSatisfy((error: unknown) => {
+      expectCoordinatorError(error, "not_leased");
+      return true;
+    });
+
+    expect(fixture.scheduler.releases).toHaveLength(0);
+    expect(fixture.sandbox.creates).toHaveLength(0);
   });
 
   it("renders a deterministic context pack (REC-03..06)", () => {
     const fingerprinter = createSandboxPolicyFingerprinter();
     const policy = sandboxPolicy();
     const fingerprint = fingerprinter.fingerprint(policy);
-    const buildInput = (attemptIdValue: AttemptId): NodeExecutionRequest =>
-      Object.freeze({
+    const buildInput = (attemptIdValue: AttemptId): NodeExecutionRequest => {
+      const lease: SchedulerLease = Object.freeze({
+        id: schedulerLeaseId(id(0x4001)),
+        attemptId: attemptIdValue,
+        nodeId: NODE_X,
+        treeId: TREE_ID,
+        repositoryId: REPOSITORY_ID,
+        hostId: HOST_ID,
+        ownerId: OWNER_ID,
+        fencingToken: fencingToken(1n),
+        acquiredAt: at(0),
+        heartbeatAt: at(0),
+        expiresAt: at(10_000),
+      });
+      return Object.freeze({
         context: Object.freeze({
           attemptId: attemptIdValue,
           attemptOrdinal: 1,
@@ -1132,6 +1181,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
           repositoryId: REPOSITORY_ID,
           hostId: HOST_ID,
         }),
+        lease,
         ownerId: OWNER_ID,
         leaseDurationMs: 10_000,
         capacity: schedulerCapacityPolicy(4, 2),
@@ -1154,6 +1204,7 @@ describe("execution coordinator (node-execution pipeline)", () => {
         model: Object.freeze({ model: "test-model", reasoningLevel: "high" }),
         recording: Object.freeze({ actorSessionId: ACTOR_ID, expectedNodeVersion: undefined }),
       });
+    };
 
     const hs = handshake();
     const first = computeContextPackDigest(

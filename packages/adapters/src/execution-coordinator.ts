@@ -175,6 +175,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
   readonly #digest: DigestFunction;
   readonly #outputCaptureLimitBytes: number;
   readonly #runs = new Map<AttemptId, RunHandle>();
+  readonly #workspacePaths = new Map<AttemptId, string>();
 
   constructor(options: ExecutionCoordinatorOptions) {
     this.#scheduler = options.scheduler;
@@ -289,7 +290,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     request: NodeExecutionRequest,
     resumeFrom: AttemptCheckpoint | undefined,
   ): Promise<Setup> {
-    const lease = await this.#claimForNode(request);
+    const lease = this.#leaseForNode(request);
     let createdInstance: SandboxInstance | undefined;
     let sandbox: SandboxHandle;
     let session: HarnessSession | undefined;
@@ -297,13 +298,16 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     try {
       if (resumeFrom === undefined) {
         createdInstance = await this.#createSandbox(request);
-        await this.#prepareWorkspace(request);
+        const workspacePath = await this.#prepareWorkspace(request);
+        this.#workspacePaths.set(request.context.attemptId, workspacePath);
         sandbox = sandboxHandle(createdInstance);
         const started = await this.#startHarness(request);
         handshake = started.handshake;
         session = started.session;
       } else {
         sandbox = checkpointSandboxHandle(resumeFrom.identity);
+        const workspacePath = await this.#prepareWorkspace(request);
+        this.#workspacePaths.set(request.context.attemptId, workspacePath);
         session = await this.#resumeHarness(request, resumeFrom);
         handshake = await this.#handshake();
       }
@@ -338,6 +342,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       // and destroy a sandbox created during THIS setup (never the retained resume
       // sandbox — HAR-01 keeps it for rebind). Mid-stream failures are handled by
       // #failClosed, which retains the sandbox for resume.
+      this.#workspacePaths.delete(request.context.attemptId);
       session?.dispose();
       if (createdInstance !== undefined) {
         await this.#destroySandbox(sandboxHandle(createdInstance));
@@ -347,25 +352,12 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     }
   }
 
-  async #claimForNode(request: NodeExecutionRequest): Promise<SchedulerLease> {
-    const lease = await this.#scheduler.claimNext({
-      ownerId: request.ownerId,
-      at: this.#clock.now(),
-      leaseDurationMs: request.leaseDurationMs,
-      capacity: request.capacity,
-    });
-    if (lease === undefined) {
-      throw new ExecutionCoordinatorError(
-        "not_leased",
-        `no scheduler lease eligible for node ${request.context.nodeId}`,
-        request.context.attemptId,
-      );
-    }
+  #leaseForNode(request: NodeExecutionRequest): SchedulerLease {
+    const lease = request.lease;
     if (lease.nodeId !== request.context.nodeId || lease.attemptId !== request.context.attemptId) {
-      await this.#releaseLease(lease);
       throw new ExecutionCoordinatorError(
         "not_leased",
-        `claimed lease ${lease.nodeId}/${lease.attemptId} does not match request ${request.context.nodeId}/${request.context.attemptId}`,
+        `lease ${lease.nodeId}/${lease.attemptId} does not match request ${request.context.nodeId}/${request.context.attemptId}`,
         request.context.attemptId,
       );
     }
@@ -411,8 +403,8 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     }
   }
 
-  async #prepareWorkspace(request: NodeExecutionRequest): Promise<void> {
-    await this.#vcs.createWorkingCopyAtCommit({
+  async #prepareWorkspace(request: NodeExecutionRequest): Promise<string> {
+    const receipt = await this.#vcs.createWorkingCopyAtCommit({
       attemptId: request.context.attemptId,
       nodeId: request.context.nodeId,
       treeId: request.context.treeId,
@@ -422,6 +414,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       baseCommit: request.workspace.baseCommit,
       sourcePath: request.workspace.workspacePath,
     });
+    return receipt.workspacePath;
   }
 
   async #handshake(): Promise<HarnessHandshake> {
@@ -442,9 +435,11 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     const handshake = await this.#handshake();
     this.#assertHarnessPolicy(handshake, request);
     try {
+      const workspacePath = this.#workspacePaths.get(request.context.attemptId);
       const session = await this.#harness.start({
         context: request.context,
         durableHarnessId: request.durableHarnessId,
+        ...(workspacePath !== undefined ? { workspacePath } : {}),
       });
       return Object.freeze({ handshake, session });
     } catch (error) {
@@ -461,10 +456,12 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     checkpoint: AttemptCheckpoint,
   ): Promise<HarnessSession> {
     try {
+      const workspacePath = this.#workspacePaths.get(request.context.attemptId);
       return await this.#harness.resume({
         context: request.context,
         identity: checkpoint.identity.harnessIdentity,
         afterSequence: checkpoint.sequence,
+        ...(workspacePath !== undefined ? { workspacePath } : {}),
       });
     } catch (error) {
       throw new ExecutionCoordinatorError(
@@ -611,6 +608,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       }
       await this.#releaseLease(setup.lease);
     } finally {
+      this.#workspacePaths.delete(attemptIdValue);
       setup.session.dispose();
     }
     await this.#destroySandbox(setup.sandbox);
@@ -716,7 +714,6 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
       successKind: "no_change",
     };
   }
-
   async #captureDiff(attemptIdValue: AttemptId): Promise<Uint8Array> {
     try {
       const diff = await this.#vcs.captureDiff({ attemptId: attemptIdValue });
@@ -843,6 +840,7 @@ class DefaultExecutionCoordinator implements ExecutionCoordinator {
     error: unknown,
   ): Promise<void> {
     const attemptIdValue = request.context.attemptId;
+    this.#workspacePaths.delete(attemptIdValue);
     const streamingStarted = setup !== undefined && phase !== "claimed";
     if (setup !== undefined) {
       try {

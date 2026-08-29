@@ -8,6 +8,7 @@ import {
   createAuthGatewayManager,
   createCredentialVault,
   parseJsonObject,
+  probeOmpAgentVersion,
   redactSecrets,
   resolveOmpPath as resolveOmpPathProduction,
   runOmp,
@@ -47,10 +48,12 @@ import { requireLiveDependency } from "../support/live-gate.js";
  */
 
 const ompPath = tryResolveOmpPath();
+const liveOmpVersion =
+  ompPath !== undefined ? await probeOmpAgentVersion(ompPath).catch(() => undefined) : undefined;
 const keyMode = detectKeyMode();
 const live = requireLiveDependency(
   "omp+systemd-creds",
-  ompPath !== undefined && keyMode !== undefined,
+  ompPath !== undefined && keyMode !== undefined && liveOmpVersion !== undefined,
 );
 
 const HOST_ID = "01900000-0000-7000-8000-000000000020";
@@ -99,7 +102,7 @@ describe.skipIf(!live)("auth-broker + auth-gateway lifecycle (real omp subproces
     const brokerHealth = await broker.health();
     expect(brokerHealth.ok).toBe(true);
     expect(brokerHealth.url).toBe(broker.endpoint);
-    expect(brokerHealth.version).toBe("17.1.3");
+    expect(brokerHealth.version).toBe(liveOmpVersion);
 
     expect(controlBearer.length).toBeGreaterThan(0);
 
