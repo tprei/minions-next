@@ -46,7 +46,7 @@ describe("task-template catalog", () => {
       const resolved = resolveTaskTemplate("fix", "fix sqlite constraint violation on tree create");
 
       expect(resolved.key).toBe("fix");
-      expect(resolved.autoApprove).toBe(false);
+      expect(resolved.autoApprove).toBe(true);
       expect(resolved.budget).toEqual({
         maxDepth: 3,
         maxFanOut: 1,
@@ -90,7 +90,7 @@ describe("task-template catalog", () => {
       const resolved = resolveTaskTemplate("feature", "add dark mode theme support");
 
       expect(resolved.key).toBe("feature");
-      expect(resolved.autoApprove).toBe(false);
+      expect(resolved.autoApprove).toBe(true);
       expect(resolved.budget).toEqual({
         maxDepth: 3,
         maxFanOut: 1,
@@ -137,8 +137,8 @@ describe("task-template catalog", () => {
   });
 
   describe("domain rule assertions", () => {
-    it("prohibits any template with an implementation node from having autoApprove = true", () => {
-      const invalidTemplate: TaskTemplateDefinition = {
+    it("allows a template with an implementation node to have autoApprove = true", () => {
+      const validTemplate: TaskTemplateDefinition = {
         key: "fix",
         autoApprove: true,
         budget: {
@@ -160,11 +160,8 @@ describe("task-template catalog", () => {
       };
 
       expect(() => {
-        validateTemplateDefinition(invalidTemplate);
-      }).toThrow(DomainError);
-      expect(() => {
-        validateTemplateDefinition(invalidTemplate);
-      }).toThrow(/contains an implementation node and cannot be autoApprove/);
+        validateTemplateDefinition(validTemplate);
+      }).not.toThrow();
     });
 
     it("rejects template definitions where budget maxDepth is insufficient for the chain", () => {
@@ -251,10 +248,6 @@ describe("task-template catalog", () => {
             expect(ac.length).toBeGreaterThan(0);
           }
           expect(node.allowedRepositoryPaths.length).toBeGreaterThanOrEqual(1);
-        }
-
-        if (resolved.nodes.some((n) => n.mode === "implementation")) {
-          expect(resolved.autoApprove).toBe(false);
         }
       }
     });

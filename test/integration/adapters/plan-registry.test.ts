@@ -1381,7 +1381,7 @@ describe("SQLite plan registry", () => {
     });
   });
 
-  it("creates a draft FIX tree with chained research child and implementation grandchild", async () => {
+  it("creates an approved FIX tree with chained research child and implementation grandchild", async () => {
     await fixture(async (_temporary, registry) => {
       const prompt = "fix memory leak in stream processor";
       const resolved = resolveTaskTemplate("fix", prompt);
@@ -1416,19 +1416,19 @@ describe("SQLite plan registry", () => {
         at: AT,
       });
       expect(tree.id).toBe(TREE_ID);
-      expect(tree.state).toBe(TreeState.DRAFT);
+      expect(tree.state).toBe(TreeState.APPROVED);
       expect(tree.version).toBe(0);
       expect(tree.attention).toBeUndefined();
       expect(tree.revisions).toHaveLength(1);
-      expect(tree.revisions[0]?.state).toBe(PlanRevisionState.DRAFT);
-      expect(tree.revisions[0]?.version).toBe(0);
+      expect(tree.revisions[0]?.state).toBe(PlanRevisionState.APPROVED);
+      expect(tree.revisions[0]?.version).toBe(1);
       expect(tree.nodes).toHaveLength(3);
 
       const researchNode = tree.nodes.find((node) => node.id === researchChildId);
       expect(researchNode).toBeDefined();
       expect(researchNode?.mode).toBe(PlanNodeMode.RESEARCH);
-      expect(researchNode?.state).toBe(NodeState.PLANNED);
-      expect(researchNode?.version).toBe(0);
+      expect(researchNode?.state).toBe(NodeState.READY);
+      expect(researchNode?.version).toBe(1);
       expect(researchNode?.parentNodeId).toBe(ROOT_NODE_ID);
 
       const implementationNode = tree.nodes.find((node) => node.id === implementationGrandchildId);
