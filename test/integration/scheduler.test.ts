@@ -219,7 +219,6 @@ async function createFixture(): Promise<Fixture> {
           }),
           attentionId: spec.attentionId,
           rootAllowedRepositoryPaths: ["."],
-          rootCheckProfile: "scheduler-root",
         }),
         at: spec.at,
       });
@@ -252,7 +251,6 @@ async function createFixture(): Promise<Fixture> {
                       }),
                     },
               allowedRepositoryPaths: ["."],
-              checkProfile: "scheduler-node",
             }),
           ),
         }),
@@ -293,7 +291,6 @@ async function createDraftPlan(fixture: Fixture, spec: PlanSpec): Promise<void> 
       }),
       attentionId: spec.attentionId,
       rootAllowedRepositoryPaths: ["."],
-      rootCheckProfile: "scheduler-root",
     }),
     at: spec.at,
   });
@@ -326,7 +323,6 @@ async function createDraftPlan(fixture: Fixture, spec: PlanSpec): Promise<void> 
                   }),
                 },
           allowedRepositoryPaths: ["."],
-          checkProfile: "scheduler-node",
         }),
       ),
     }),

@@ -174,7 +174,6 @@ async function createFixture(): Promise<SteeringFixture> {
       }),
       attentionId: planAttention,
       rootAllowedRepositoryPaths: ["."],
-      rootCheckProfile: "root-checks",
     }),
     at,
   });
@@ -198,7 +197,6 @@ async function createFixture(): Promise<SteeringFixture> {
             value: create(ImplementationOutputContractSchema, {}),
           },
           allowedRepositoryPaths: ["."],
-          checkProfile: "implementation-checks",
         }),
         create(ProposedNodeSchema, {
           nodeId: secondChild,
@@ -212,7 +210,6 @@ async function createFixture(): Promise<SteeringFixture> {
             value: create(ImplementationOutputContractSchema, {}),
           },
           allowedRepositoryPaths: ["."],
-          checkProfile: "implementation-checks",
         }),
       ],
     }),

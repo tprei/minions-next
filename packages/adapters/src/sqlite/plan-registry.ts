@@ -8,6 +8,8 @@ import {
   AttentionSummarySchema,
   ArtifactInputSchema,
   ArtifactOutputContractSchema,
+  CreateTemplatedTreeRequestSchema,
+  CreateTemplatedTreeResponseSchema,
   CreateTreeRequestSchema,
   CreateTreeResponseSchema,
   ImplementationOutputContractSchema,
@@ -35,11 +37,13 @@ import {
 } from "@minions/contracts";
 import type {
   ApprovePlanRequest,
+  CreateTemplatedTreeRequest,
   CreateTreeRequest,
   ProposePlanRequest,
   ProposedNode,
   RepairPlanRequest,
 } from "@minions/contracts";
+import type { ResolvedTaskTemplate } from "@minions/core";
 import {
   actorSessionId,
   artifactId,
@@ -147,7 +151,6 @@ export type TaskNodeRecord = Readonly<{
   inputs: readonly ArtifactInputRecord[];
   outputContract: TaskNodeOutputRecord;
   allowedRepositoryPaths: readonly NonEmptyText[];
-  checkProfile: NonEmptyText;
   budget: NodeBudgetRecord;
   state: NodeState;
   version: number;
@@ -205,6 +208,18 @@ export type CreateTreeInput = Readonly<{
   at: Timestamp;
 }>;
 
+export type CreateTemplatedNodeInput = Readonly<{
+  nodeId: TaskNodeId;
+  artifactId?: ArtifactId | undefined;
+}>;
+
+export type CreateTemplatedTreeInput = Readonly<{
+  request: CreateTemplatedTreeRequest;
+  resolved: ResolvedTaskTemplate;
+  baseCommit: GitSha;
+  mintedNodes: readonly CreateTemplatedNodeInput[];
+  at: Timestamp;
+}>;
 export type ProposePlanInput = Readonly<{
   request: ProposePlanRequest;
   at: Timestamp;
@@ -227,6 +242,7 @@ export type ListTreesInput = Readonly<{
 
 export interface PlanRegistry {
   create(input: CreateTreeInput): Promise<TreeRecord>;
+  createTemplated(input: CreateTemplatedTreeInput): Promise<TreeRecord>;
   get(treeId: TaskTreeId): TreeRecord;
   list(input: ListTreesInput): readonly TreeSummaryRecord[];
   propose(input: ProposePlanInput): Promise<TreeRecord>;
@@ -243,11 +259,9 @@ type ProposedNodeRecord = Readonly<{
   inputs: readonly ArtifactInputRecord[];
   outputContract: TaskNodeOutputRecord;
   allowedRepositoryPaths: readonly NonEmptyText[];
-  checkProfile: NonEmptyText;
 }>;
 
 type NodePolicyRecord = Readonly<{
-  checkProfile: NonEmptyText;
   maxAttempts: number;
 }>;
 
@@ -265,11 +279,28 @@ type CreateSnapshot = Readonly<{
   baseCommit: GitSha;
   budget: TreeBudgetRecord;
   rootAllowedRepositoryPaths: readonly NonEmptyText[];
-  rootCheckProfile: NonEmptyText;
   attentionId: string;
   at: Timestamp;
 }>;
 
+type CreateTemplatedSnapshot = Readonly<{
+  requestBytes: Uint8Array;
+  commandId: CommandId;
+  actorSessionId: ActorSessionId;
+  repositoryId: RepositoryId;
+  treeId: TaskTreeId;
+  planRevisionId: PlanRevisionId;
+  rootNodeId: TaskNodeId;
+  rootArtifactId: ArtifactId;
+  goal: NonEmptyText;
+  baseCommit: GitSha;
+  budget: TreeBudgetRecord;
+  rootAllowedRepositoryPaths: readonly NonEmptyText[];
+  attentionId: string;
+  autoApprove: boolean;
+  nodes: readonly ProposedNodeRecord[];
+  at: Timestamp;
+}>;
 type PlanSnapshot = Readonly<{
   requestBytes: Uint8Array;
   commandId: CommandId;
@@ -291,7 +322,7 @@ type ApproveSnapshot = Readonly<{
   at: Timestamp;
 }>;
 
-type RegistrySnapshot = CreateSnapshot | PlanSnapshot | ApproveSnapshot;
+type RegistrySnapshot = CreateSnapshot | CreateTemplatedSnapshot | PlanSnapshot | ApproveSnapshot;
 
 type EncodedEffect = Readonly<{
   event: Readonly<{ typeName: NonEmptyText; bytes: Uint8Array }>;
@@ -346,6 +377,32 @@ class DefaultPlanRegistry implements PlanRegistry {
     }
   }
 
+  async createTemplated(input: CreateTemplatedTreeInput): Promise<TreeRecord> {
+    const snapshot = snapshotCreateTemplatedInput(input);
+    const command = commandRequest(
+      snapshot.commandId,
+      snapshot.actorSessionId,
+      "tree",
+      snapshot.treeId,
+      null,
+      CreateTemplatedTreeRequestSchema.typeName,
+      snapshot.requestBytes,
+    );
+    try {
+      const receipt = await this.#commandStore.execute(command, (transaction) =>
+        applyCreateTemplated(transaction, snapshot, this.#hostId),
+      );
+      return this.#resultTree(
+        receipt.result,
+        CreateTemplatedTreeResponseSchema.typeName,
+        receipt.aggregateVersion,
+        snapshot,
+        "createTemplated",
+      );
+    } catch (error) {
+      throw normalizePlanError(error);
+    }
+  }
   get(treeId: TaskTreeId): TreeRecord {
     const parsed = parseTreeId(treeId, "tree ID");
     try {
@@ -498,7 +555,7 @@ class DefaultPlanRegistry implements PlanRegistry {
     expectedTypeName: string,
     aggregateVersion: number,
     snapshot: RegistrySnapshot,
-    operation: "create" | "propose" | "repair" | "approve",
+    operation: "create" | "createTemplated" | "propose" | "repair" | "approve",
   ): TreeRecord {
     if (result.typeName !== expectedTypeName) {
       throw new PlanRegistryError("corrupt", "plan result type does not match the command");
@@ -507,11 +564,13 @@ class DefaultPlanRegistry implements PlanRegistry {
       const schema =
         operation === "create"
           ? CreateTreeResponseSchema
-          : operation === "propose"
-            ? ProposePlanResponseSchema
-            : operation === "repair"
-              ? RepairPlanResponseSchema
-              : ApprovePlanResponseSchema;
+          : operation === "createTemplated"
+            ? CreateTemplatedTreeResponseSchema
+            : operation === "propose"
+              ? ProposePlanResponseSchema
+              : operation === "repair"
+                ? RepairPlanResponseSchema
+                : ApprovePlanResponseSchema;
       const decoded = fromBinary(schema, result.bytes);
       const unknownField = findUnknownField(schema, decoded);
       if (unknownField !== undefined || decoded.tree === undefined) {
@@ -685,9 +744,9 @@ function applyCreate(
     );
   }
   transaction.run(
-    `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
-     VALUES (?, ?, ?)`,
-    [snapshot.rootNodeId, snapshot.rootCheckProfile, snapshot.budget.maxAttemptsPerNode],
+    `INSERT INTO node_plan_policies (node_id, max_attempts)
+     VALUES (?, ?)`,
+    [snapshot.rootNodeId, snapshot.budget.maxAttemptsPerNode],
   );
   transaction.run(
     `INSERT INTO tree_budgets (
@@ -718,6 +777,271 @@ function applyCreate(
   return effectForTree(tree, "create");
 }
 
+function applyCreateTemplated(
+  transaction: SqliteCommandTransaction,
+  snapshot: CreateTemplatedSnapshot,
+  trustedHostId: HostId,
+): EncodedEffect {
+  const registration = transaction.get(
+    `SELECT rr.repository_id, rr.host_id, rr.base_commit, rr.registered_at_ms,
+            r.id AS projection_id, r.host_id AS projection_host_id,
+            r.version AS projection_version, r.archived_at_ms AS projection_archived_at_ms
+       FROM repository_registrations AS rr
+       JOIN repositories AS r ON r.id = rr.repository_id
+      WHERE rr.repository_id = ?`,
+    [snapshot.repositoryId],
+  );
+  if (registration === undefined) {
+    throw new PlanRegistryError("not_found", "repository registration does not exist");
+  }
+  const registeredHost = parseHostId(requiredString(registration, "host_id"), "registered host ID");
+  const registeredBase = parseGitSha(
+    requiredString(registration, "base_commit"),
+    "registered base commit",
+  );
+  const registeredAt = safeTimestamp(registration["registered_at_ms"], "registered_at_ms");
+  if (
+    requiredString(registration, "projection_id") !== snapshot.repositoryId ||
+    requiredString(registration, "projection_host_id") !== registeredHost ||
+    safeInteger(registration["projection_version"], "projection_version") !== 0 ||
+    registration["projection_archived_at_ms"] !== null
+  ) {
+    throw new PlanRegistryError("corrupt", "repository registration projection is corrupt");
+  }
+  if (registeredHost !== trustedHostId) {
+    throw new PlanRegistryError(
+      "identity_conflict",
+      "repository registration belongs to another host",
+    );
+  }
+  if (registeredBase !== snapshot.baseCommit) {
+    throw new PlanRegistryError(
+      "identity_conflict",
+      "tree base commit differs from registered repository base commit",
+    );
+  }
+  if (snapshot.at < registeredAt) {
+    if (registeredAt - snapshot.at > 1000) {
+      throw new PlanRegistryError(
+        "invalid_input",
+        "tree timestamp predates repository registration",
+      );
+    }
+  }
+  assertDistinctIds(
+    [
+      snapshot.repositoryId,
+      trustedHostId,
+      snapshot.treeId,
+      snapshot.planRevisionId,
+      snapshot.rootNodeId,
+      snapshot.rootArtifactId,
+      snapshot.attentionId,
+      ...snapshot.nodes.flatMap((node) => [
+        node.id,
+        ...(node.outputContract.case === "artifact" ? [node.outputContract.value.artifactId] : []),
+      ]),
+    ],
+    "tree IDs must be distinct",
+  );
+  assertCreateTemplatedIdAvailability(transaction, snapshot);
+
+  if (
+    snapshot.autoApprove &&
+    snapshot.nodes.some((node) => node.mode === PlanNodeMode.IMPLEMENTATION)
+  ) {
+    throw new PlanRegistryError(
+      "invalid_plan",
+      "a template with implementation nodes cannot be auto-approved",
+    );
+  }
+
+  transaction.run(
+    `INSERT INTO trees (
+       id, repository_id, host_id, base_commit, goal, active_plan_revision_id,
+       root_node_id, version, created_at_ms, updated_at_ms, archived_at_ms
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)`,
+    [
+      snapshot.treeId,
+      snapshot.repositoryId,
+      trustedHostId,
+      snapshot.baseCommit,
+      snapshot.goal,
+      snapshot.planRevisionId,
+      snapshot.rootNodeId,
+      snapshot.at,
+      snapshot.at,
+    ],
+  );
+  transaction.run(
+    `INSERT INTO plan_revisions (
+       id, tree_id, ordinal, goal, state_kind, version, created_at_ms,
+       approved_at_ms, superseded_at_ms
+     ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, NULL)`,
+    [
+      snapshot.planRevisionId,
+      snapshot.treeId,
+      snapshot.goal,
+      snapshot.autoApprove ? "approved" : "draft",
+      snapshot.autoApprove ? 1 : 0,
+      snapshot.at,
+      snapshot.autoApprove ? snapshot.at : null,
+    ],
+  );
+  transaction.run(
+    `INSERT INTO nodes (
+       id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+       mode, objective, output_kind, output_artifact_id, output_artifact_type,
+       state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+       blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+       outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+       outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+       version, created_at_ms, updated_at_ms
+     ) VALUES (?, ?, ?, ?, NULL, ?, 'plan', ?, 'artifact', ?, 'plan',
+               'planned', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+               NULL, NULL, NULL, NULL, NULL, NULL, 0, ?, ?)`,
+    [
+      snapshot.rootNodeId,
+      snapshot.treeId,
+      snapshot.repositoryId,
+      trustedHostId,
+      snapshot.planRevisionId,
+      snapshot.goal,
+      snapshot.rootArtifactId,
+      snapshot.at,
+      snapshot.at,
+    ],
+  );
+  transaction.run(
+    `INSERT INTO node_acceptance_criteria (node_id, ordinal, criterion)
+     VALUES (?, 0, ?)`,
+    [snapshot.rootNodeId, snapshot.goal],
+  );
+  for (let index = 0; index < snapshot.rootAllowedRepositoryPaths.length; index += 1) {
+    const repositoryPath = snapshot.rootAllowedRepositoryPaths[index];
+    if (repositoryPath === undefined) {
+      throw new PlanRegistryError("corrupt", "root repository scope is sparse");
+    }
+    transaction.run(
+      `INSERT INTO node_repository_scope (node_id, ordinal, repository_path)
+       VALUES (?, ?, ?)`,
+      [snapshot.rootNodeId, index, repositoryPath],
+    );
+  }
+  transaction.run(
+    `INSERT INTO node_plan_policies (node_id, max_attempts)
+     VALUES (?, ?)`,
+    [snapshot.rootNodeId, snapshot.budget.maxAttemptsPerNode],
+  );
+
+  for (const node of snapshot.nodes) {
+    const isDirectExecutableChild =
+      snapshot.autoApprove &&
+      node.parentNodeId === snapshot.rootNodeId &&
+      isExecutableNodeMode(node.mode);
+    const nodeStateKind = isDirectExecutableChild ? "ready" : "planned";
+    const output = node.outputContract.case === "artifact" ? node.outputContract.value : undefined;
+
+    transaction.run(
+      `INSERT INTO nodes (
+         id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+         mode, objective, output_kind, output_artifact_id, output_artifact_type,
+         state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+         blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+         outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+         outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+         version, created_at_ms, updated_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL,
+                 NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+      [
+        node.id,
+        snapshot.treeId,
+        snapshot.repositoryId,
+        trustedHostId,
+        node.parentNodeId ?? null,
+        snapshot.planRevisionId,
+        modeKind(node.mode),
+        node.objective,
+        node.outputContract.case,
+        output?.artifactId ?? null,
+        output?.artifactType ?? null,
+        nodeStateKind,
+        isDirectExecutableChild ? 1 : 0,
+        snapshot.at,
+        snapshot.at,
+      ],
+    );
+    for (let index = 0; index < node.acceptanceCriteria.length; index += 1) {
+      const criterion = node.acceptanceCriteria[index];
+      if (criterion === undefined) {
+        throw new PlanRegistryError("corrupt", "node acceptance criteria are sparse");
+      }
+      transaction.run(
+        `INSERT INTO node_acceptance_criteria (node_id, ordinal, criterion)
+         VALUES (?, ?, ?)`,
+        [node.id, index, criterion],
+      );
+    }
+    for (let index = 0; index < node.inputs.length; index += 1) {
+      const input = node.inputs[index];
+      if (input === undefined) {
+        throw new PlanRegistryError("corrupt", "node artifact inputs are sparse");
+      }
+      transaction.run(
+        `INSERT INTO node_artifact_inputs (node_id, ordinal, artifact_id, source_node_id)
+         VALUES (?, ?, ?, ?)`,
+        [node.id, index, input.artifactId, input.sourceNodeId],
+      );
+    }
+    for (let index = 0; index < node.allowedRepositoryPaths.length; index += 1) {
+      const repositoryPath = node.allowedRepositoryPaths[index];
+      if (repositoryPath === undefined) {
+        throw new PlanRegistryError("corrupt", "node repository scope is sparse");
+      }
+      transaction.run(
+        `INSERT INTO node_repository_scope (node_id, ordinal, repository_path)
+         VALUES (?, ?, ?)`,
+        [node.id, index, repositoryPath],
+      );
+    }
+    transaction.run(
+      `INSERT INTO node_plan_policies (node_id, max_attempts)
+       VALUES (?, ?)`,
+      [node.id, snapshot.budget.maxAttemptsPerNode],
+    );
+  }
+
+  transaction.run(
+    `INSERT INTO tree_budgets (
+       tree_id, max_depth, max_fan_out, max_nodes, max_concurrency, max_attempts_per_node
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      snapshot.treeId,
+      snapshot.budget.maxDepth,
+      snapshot.budget.maxFanOut,
+      snapshot.budget.maxNodes,
+      snapshot.budget.maxConcurrency,
+      snapshot.budget.maxAttemptsPerNode,
+    ],
+  );
+
+  transaction.run(
+    `INSERT INTO plan_attentions (
+       id, tree_id, plan_revision_id, kind, message, state_kind, created_at_ms, resolved_at_ms
+     ) VALUES (?, ?, ?, 'plan_required', ?, 'resolved', ?, ?)`,
+    [
+      snapshot.attentionId,
+      snapshot.treeId,
+      snapshot.planRevisionId,
+      "tree requires an initial plan",
+      snapshot.at,
+      snapshot.at,
+    ],
+  );
+
+  const tree = readTreeRecord(transaction, snapshot.treeId);
+  return effectForTree(tree, "createTemplated");
+}
 function applyPlan(
   transaction: SqliteCommandTransaction,
   snapshot: PlanSnapshot,
@@ -852,9 +1176,9 @@ function applyPlan(
       );
     }
     transaction.run(
-      `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
-       VALUES (?, ?, ?)`,
-      [node.id, node.checkProfile, current.budget.maxAttemptsPerNode],
+      `INSERT INTO node_plan_policies (node_id, max_attempts)
+       VALUES (?, ?)`,
+      [node.id, current.budget.maxAttemptsPerNode],
     );
   }
   if (
@@ -914,13 +1238,13 @@ function applyApprove(
     !current.nodes.some(
       (node) =>
         node.planRevisionId === snapshot.planRevisionId &&
-        node.mode === PlanNodeMode.IMPLEMENTATION &&
+        isExecutableNodeMode(node.mode) &&
         node.state === NodeState.PLANNED,
     )
   ) {
     throw new PlanRegistryError(
       "invalid_plan",
-      "an approved plan requires an implementation child",
+      "an approved plan requires at least one planned executable child",
     );
   }
   transaction.run(
@@ -933,8 +1257,14 @@ function applyApprove(
     `UPDATE nodes
         SET state_kind = 'ready', version = version + 1, updated_at_ms = ?
       WHERE tree_id = ? AND plan_revision_id = ? AND parent_node_id = ?
-        AND mode = 'implementation' AND state_kind = 'planned'`,
-    [snapshot.at, snapshot.treeId, snapshot.planRevisionId, current.rootNodeId],
+        AND mode IN (${EXECUTABLE_NODE_MODE_PLACEHOLDERS}) AND state_kind = 'planned'`,
+    [
+      snapshot.at,
+      snapshot.treeId,
+      snapshot.planRevisionId,
+      current.rootNodeId,
+      ...EXECUTABLE_NODE_MODE_KINDS,
+    ],
   );
   transaction.run(`UPDATE trees SET version = version + 1, updated_at_ms = ? WHERE id = ?`, [
     snapshot.at,
@@ -949,7 +1279,7 @@ function applyApprove(
 
 function effectForTree(
   tree: TreeRecord,
-  operation: "create" | "propose" | "repair" | "approve",
+  operation: "create" | "createTemplated" | "propose" | "repair" | "approve",
 ): EncodedEffect {
   const responseSchema = responseSchemaFor(operation);
   const response = create(responseSchema, { tree: treeMessage(tree) });
@@ -1040,8 +1370,11 @@ function effectForTree(
   });
 }
 
-function responseSchemaFor(operation: "create" | "propose" | "repair" | "approve") {
+function responseSchemaFor(
+  operation: "create" | "createTemplated" | "propose" | "repair" | "approve",
+) {
   if (operation === "create") return CreateTreeResponseSchema;
+  if (operation === "createTemplated") return CreateTemplatedTreeResponseSchema;
   if (operation === "propose") return ProposePlanResponseSchema;
   if (operation === "repair") return RepairPlanResponseSchema;
   return ApprovePlanResponseSchema;
@@ -1092,7 +1425,6 @@ function treeMessage(tree: TreeRecord) {
       createdAt: timestampMessage(node.createdAt),
       updatedAt: timestampMessage(node.updatedAt),
       allowedRepositoryPaths: [...node.allowedRepositoryPaths],
-      checkProfile: node.checkProfile,
       budget: create(NodeBudgetSchema, node.budget),
     }),
   );
@@ -1159,13 +1491,119 @@ function snapshotCreateInput(input: CreateTreeInput): CreateSnapshot {
         message.rootAllowedRepositoryPaths,
         "root allowed repository paths",
       ),
-      rootCheckProfile: snapshotCheckProfile(message.rootCheckProfile, "root check profile"),
       attentionId: parseUuid(message.attentionId, "attention ID"),
       at: timestampFromEpochMilliseconds(input.at),
     });
   } catch (error) {
     if (error instanceof PlanRegistryError) throw error;
     throw new PlanRegistryError("invalid_input", "create tree input is invalid", { cause: error });
+  }
+}
+
+function snapshotCreateTemplatedInput(input: CreateTemplatedTreeInput): CreateTemplatedSnapshot {
+  try {
+    const { message, bytes } = snapshotMessage(
+      CreateTemplatedTreeRequestSchema,
+      input.request,
+      "create templated tree request",
+    );
+    const budget = snapshotBudget(input.resolved.budget);
+    const repository = repositoryId(message.repositoryId);
+    const tree = taskTreeId(message.treeId);
+    const revision = planRevisionId(message.planRevisionId);
+    const root = taskNodeId(message.rootNodeId);
+    const artifact = artifactId(message.rootArtifactId);
+    const goal = nonEmptyText(message.prompt, "prompt");
+    const baseCommit = gitSha(input.baseCommit);
+
+    if (input.mintedNodes.length !== input.resolved.nodes.length) {
+      throw new PlanRegistryError(
+        "invalid_input",
+        "minted nodes count does not match resolved template nodes count",
+      );
+    }
+
+    const proposedNodes: ProposedNodeRecord[] = input.resolved.nodes.map((node, index) => {
+      const minted = input.mintedNodes[index];
+      if (minted === undefined) {
+        throw new PlanRegistryError(
+          "invalid_input",
+          `minted node missing at index ${index.toString()}`,
+        );
+      }
+      const parentNodeId =
+        node.parentIndex === undefined ? root : input.mintedNodes[node.parentIndex]?.nodeId;
+      if (parentNodeId === undefined) {
+        throw new PlanRegistryError("invalid_input", "invalid parent node index");
+      }
+      const mode = modeFromKind(node.mode);
+      if (mode === PlanNodeMode.PLAN || mode === PlanNodeMode.UNSPECIFIED) {
+        throw new PlanRegistryError(
+          "invalid_input",
+          "template child mode cannot be plan or unspecified",
+        );
+      }
+      let outputContract: TaskNodeOutputRecord;
+      if (node.outputKind === "artifact") {
+        if (minted.artifactId === undefined) {
+          throw new PlanRegistryError(
+            "invalid_input",
+            "minted artifactId required for artifact output",
+          );
+        }
+        outputContract = {
+          case: "artifact",
+          value: {
+            artifactId: artifactId(minted.artifactId),
+            artifactType: nonEmptyText("report", "artifact type"),
+          },
+        };
+      } else {
+        outputContract = {
+          case: "implementation",
+          value: {},
+        };
+      }
+      return Object.freeze({
+        id: taskNodeId(minted.nodeId),
+        parentNodeId: taskNodeId(parentNodeId),
+        mode,
+        objective: nonEmptyText(node.objective, "node objective"),
+        acceptanceCriteria: node.acceptanceCriteria.map((criterion, criterionIndex) =>
+          nonEmptyText(criterion, `acceptance criteria ${criterionIndex.toString()}`),
+        ),
+        inputs: [],
+        outputContract,
+        allowedRepositoryPaths: snapshotRepositoryPaths(
+          node.allowedRepositoryPaths,
+          "node allowed repository paths",
+        ),
+      });
+    });
+
+    return Object.freeze({
+      requestBytes: bytes,
+      commandId: commandId(message.commandId),
+      actorSessionId: actorSessionId(message.actorSessionId),
+      repositoryId: repository,
+      treeId: tree,
+      planRevisionId: revision,
+      rootNodeId: root,
+      rootArtifactId: artifact,
+      goal,
+      baseCommit,
+      budget,
+      rootAllowedRepositoryPaths: snapshotRepositoryPaths(["."], "root allowed repository paths"),
+      attentionId: parseUuid(message.attentionId, "attention ID"),
+      autoApprove: input.resolved.autoApprove,
+      nodes: Object.freeze(proposedNodes),
+      at: timestampFromEpochMilliseconds(input.at),
+    });
+  } catch (error) {
+    if (error instanceof PlanRegistryError) throw error;
+    throw new PlanRegistryError("invalid_input", "create templated tree input is invalid", {
+      cause: error,
+    });
   }
 }
 
@@ -1325,12 +1763,6 @@ function repositoryPath(value: string, fieldName: string): NonEmptyText {
   return path;
 }
 
-function snapshotCheckProfile(value: string, fieldName: string): NonEmptyText {
-  const profile = nonEmptyText(value, fieldName);
-  if (profile.length > 512) throw new TypeError(`${fieldName} exceeds 512 characters`);
-  return profile;
-}
-
 function snapshotProposedNodes(values: readonly ProposedNode[]): readonly ProposedNodeRecord[] {
   if (values.length < 1) {
     throw new TypeError("a plan must contain at least one proposed node");
@@ -1371,7 +1803,6 @@ function snapshotProposedNodes(values: readonly ProposedNode[]): readonly Propos
         value.allowedRepositoryPaths,
         `node ${String(index)} allowed repository paths`,
       ),
-      checkProfile: snapshotCheckProfile(value.checkProfile, `node ${String(index)} check profile`),
     });
   });
   const ids = new Set<string>();
@@ -1748,7 +2179,7 @@ function readTreeRecord(reader: SqliteReader, treeId: TaskTreeId): TreeRecord {
       scopes.set(nodeId, values);
     }
     const policyRows = reader.all(
-      `SELECT node_id, check_profile, max_attempts
+      `SELECT node_id, max_attempts
          FROM node_plan_policies
         WHERE node_id IN (SELECT id FROM nodes WHERE tree_id = ?)
         ORDER BY node_id`,
@@ -1765,10 +2196,6 @@ function readTreeRecord(reader: SqliteReader, treeId: TaskTreeId): TreeRecord {
       policies.set(
         nodeId,
         Object.freeze({
-          checkProfile: snapshotCheckProfile(
-            requiredString(row, "check_profile"),
-            "node check profile",
-          ),
           maxAttempts,
         }),
       );
@@ -1905,7 +2332,6 @@ function nodeFromRow(
     inputs: Object.freeze([...nodeInputs]),
     outputContract: output,
     allowedRepositoryPaths: Object.freeze([...nodeScope]),
-    checkProfile: nodePolicy.checkProfile,
     budget: Object.freeze({ maxAttempts: nodePolicy.maxAttempts }),
     state,
     version,
@@ -2224,7 +2650,6 @@ function validateTreeRecord(tree: TreeRecord): void {
     )
       throw new TypeError("node acceptance criteria are invalid");
     snapshotRepositoryPaths(node.allowedRepositoryPaths, "node allowed repository paths");
-    snapshotCheckProfile(node.checkProfile, "node check profile");
     if (
       !Number.isSafeInteger(node.budget.maxAttempts) ||
       node.budget.maxAttempts < 1 ||
@@ -2446,10 +2871,6 @@ function nodeFromMessage(value: unknown): TaskNodeRecord {
       pathsValue.map((path) => assertString(path, "repository path")),
       "node allowed repository paths",
     ),
-    checkProfile: snapshotCheckProfile(
-      requiredObjectString(message, "checkProfile"),
-      "node check profile",
-    ),
     budget: nodeBudgetFromMessage(message["budget"]),
     state: nodeStateFromValue(message["state"]),
     version: safeBigIntNumber(requiredObjectBigInt(message, "version"), "node version"),
@@ -2536,7 +2957,7 @@ function assertResultVersion(tree: TreeRecord, aggregateVersion: number): void {
 function assertRequestFacts(
   tree: TreeRecord,
   snapshot: RegistrySnapshot,
-  operation: "create" | "propose" | "repair" | "approve",
+  operation: "create" | "createTemplated" | "propose" | "repair" | "approve",
 ): void {
   if (tree.id !== snapshot.treeId)
     throw new PlanRegistryError("facts_changed", "replayed tree ID differs from request");
@@ -2553,7 +2974,6 @@ function assertRequestFacts(
       root.outputContract.value.artifactId !== snapshot.rootArtifactId ||
       root.outputContract.value.artifactType !== "plan" ||
       !sameStrings(root.allowedRepositoryPaths, snapshot.rootAllowedRepositoryPaths) ||
-      root.checkProfile !== snapshot.rootCheckProfile ||
       root.budget.maxAttempts !== snapshot.budget.maxAttemptsPerNode ||
       !sameAttentionFacts(
         attention,
@@ -2605,14 +3025,123 @@ function assertRequestFacts(
       );
     return;
   }
+  if (operation === "createTemplated" && "autoApprove" in snapshot && "nodes" in snapshot) {
+    const root = tree.nodes.find((node) => node.id === tree.rootNodeId);
+    const revision = tree.revisions.find((candidate) => candidate.id === snapshot.planRevisionId);
+    const expectedTreeState = snapshot.autoApprove ? TreeState.APPROVED : TreeState.DRAFT;
+    const expectedRevisionState = snapshot.autoApprove
+      ? PlanRevisionState.APPROVED
+      : PlanRevisionState.DRAFT;
+
+    if (
+      tree.repositoryId !== snapshot.repositoryId ||
+      tree.baseCommit !== snapshot.baseCommit ||
+      tree.goal !== snapshot.goal ||
+      tree.rootNodeId !== snapshot.rootNodeId ||
+      tree.activePlanRevisionId !== snapshot.planRevisionId ||
+      tree.state !== expectedTreeState ||
+      tree.version !== 0 ||
+      tree.createdAt !== tree.updatedAt ||
+      tree.revisions.length !== 1 ||
+      revision?.state !== expectedRevisionState ||
+      revision.version !== (snapshot.autoApprove ? 1 : 0) ||
+      revision.createdAt !== tree.createdAt ||
+      (snapshot.autoApprove
+        ? revision.approvedAt !== tree.createdAt
+        : revision.approvedAt !== undefined) ||
+      revision.supersededAt !== undefined ||
+      tree.attention !== undefined ||
+      root === undefined ||
+      tree.nodes.length !== 1 + snapshot.nodes.length ||
+      root.planRevisionId !== snapshot.planRevisionId ||
+      root.version !== 0 ||
+      root.createdAt !== tree.createdAt ||
+      root.updatedAt !== tree.updatedAt ||
+      root.mode !== PlanNodeMode.PLAN ||
+      root.state !== NodeState.PLANNED ||
+      root.objective !== tree.goal ||
+      root.acceptanceCriteria.length !== 1 ||
+      root.acceptanceCriteria[0] !== tree.goal ||
+      root.outputContract.case !== "artifact" ||
+      root.outputContract.value.artifactId !== snapshot.rootArtifactId ||
+      root.outputContract.value.artifactType !== "plan" ||
+      !sameStrings(root.allowedRepositoryPaths, snapshot.rootAllowedRepositoryPaths) ||
+      root.budget.maxAttempts !== snapshot.budget.maxAttemptsPerNode ||
+      tree.budget.maxDepth !== snapshot.budget.maxDepth ||
+      tree.budget.maxFanOut !== snapshot.budget.maxFanOut ||
+      tree.budget.maxNodes !== snapshot.budget.maxNodes ||
+      tree.budget.maxConcurrency !== snapshot.budget.maxConcurrency ||
+      tree.budget.maxAttemptsPerNode !== snapshot.budget.maxAttemptsPerNode
+    ) {
+      throw new PlanRegistryError(
+        "facts_changed",
+        "replayed tree facts differ from create templated request",
+      );
+    }
+    const childNodes = tree.nodes.filter((node) => node.id !== tree.rootNodeId);
+    if (childNodes.length !== snapshot.nodes.length) {
+      throw new PlanRegistryError(
+        "facts_changed",
+        "replayed templated child node count differs from request",
+      );
+    }
+    for (let index = 0; index < snapshot.nodes.length; index += 1) {
+      const candidate = snapshot.nodes[index];
+      const node = childNodes[index];
+      if (candidate === undefined || node === undefined) {
+        throw new PlanRegistryError("facts_changed", "replayed templated child nodes are sparse");
+      }
+      const isDirectExecutable =
+        snapshot.autoApprove &&
+        candidate.parentNodeId === snapshot.rootNodeId &&
+        isExecutableNodeMode(candidate.mode);
+      const expectedNodeState = isDirectExecutable ? NodeState.READY : NodeState.PLANNED;
+
+      const expectedParentId =
+        candidate.parentNodeId === snapshot.rootNodeId
+          ? tree.rootNodeId
+          : (() => {
+              const parentCandidateIndex = snapshot.nodes.findIndex(
+                (n) => n.id === candidate.parentNodeId,
+              );
+              return parentCandidateIndex >= 0 ? childNodes[parentCandidateIndex]?.id : undefined;
+            })();
+
+      const sameOutputContract =
+        node.outputContract.case === candidate.outputContract.case &&
+        (node.outputContract.case !== "artifact" ||
+          (candidate.outputContract.case === "artifact" &&
+            node.outputContract.value.artifactType ===
+              candidate.outputContract.value.artifactType));
+
+      if (
+        node.parentNodeId !== expectedParentId ||
+        node.mode !== candidate.mode ||
+        node.objective !== candidate.objective ||
+        !sameStrings(node.acceptanceCriteria, candidate.acceptanceCriteria) ||
+        !sameInputs(node.inputs, candidate.inputs) ||
+        !sameOutputContract ||
+        !sameStrings(node.allowedRepositoryPaths, candidate.allowedRepositoryPaths) ||
+        node.budget.maxAttempts !== tree.budget.maxAttemptsPerNode ||
+        node.state !== expectedNodeState ||
+        node.version !== (isDirectExecutable ? 1 : 0) ||
+        node.createdAt !== tree.createdAt ||
+        node.updatedAt !== tree.updatedAt
+      ) {
+        throw new PlanRegistryError(
+          "facts_changed",
+          "replayed templated child nodes differ from request",
+        );
+      }
+    }
+    return;
+  }
   if (operation === "approve" && "planRevisionId" in snapshot) {
     const revision = tree.revisions.find((candidate) => candidate.id === snapshot.planRevisionId);
     const revisionNodes = tree.nodes.filter(
       (node) => node.planRevisionId === snapshot.planRevisionId && node.id !== tree.rootNodeId,
     );
-    const implementationNodes = revisionNodes.filter(
-      (node) => node.mode === PlanNodeMode.IMPLEMENTATION,
-    );
+    const executableNodes = revisionNodes.filter((node) => isExecutableNodeMode(node.mode));
     if (
       tree.activePlanRevisionId !== snapshot.planRevisionId ||
       tree.state !== TreeState.APPROVED ||
@@ -2621,11 +3150,11 @@ function assertRequestFacts(
       revision.version !== 1 ||
       revision.approvedAt === undefined ||
       revision.approvedAt !== tree.updatedAt ||
-      implementationNodes.length === 0 ||
+      executableNodes.length === 0 ||
       revisionNodes.some((node) => {
-        const isDirectImplementation =
-          node.parentNodeId === tree.rootNodeId && node.mode === PlanNodeMode.IMPLEMENTATION;
-        return isDirectImplementation
+        const isDirectExecutable =
+          node.parentNodeId === tree.rootNodeId && isExecutableNodeMode(node.mode);
+        return isDirectExecutable
           ? node.state !== NodeState.READY ||
               node.version !== 1 ||
               node.updatedAt !== tree.updatedAt
@@ -2670,7 +3199,6 @@ function assertRequestFacts(
       !sameInputs(node.inputs, candidate.inputs) ||
       !sameOutput(node.outputContract, candidate.outputContract) ||
       !sameStrings(node.allowedRepositoryPaths, candidate.allowedRepositoryPaths) ||
-      node.checkProfile !== candidate.checkProfile ||
       node.budget.maxAttempts !== tree.budget.maxAttemptsPerNode ||
       node.state !== NodeState.PLANNED ||
       node.version !== 0 ||
@@ -2781,7 +3309,6 @@ function assertImmutableReplayFacts(result: TreeRecord, persisted: TreeRecord): 
       !sameInputs(node.inputs, current.inputs) ||
       !sameOutput(node.outputContract, current.outputContract) ||
       !sameStrings(node.allowedRepositoryPaths, current.allowedRepositoryPaths) ||
-      node.checkProfile !== current.checkProfile ||
       node.budget.maxAttempts !== current.budget.maxAttempts ||
       node.createdAt !== current.createdAt ||
       node.version > current.version ||
@@ -2937,6 +3464,36 @@ function assertCreateIdAvailability(
   }
 }
 
+function assertCreateTemplatedIdAvailability(
+  transaction: SqliteCommandTransaction,
+  snapshot: CreateTemplatedSnapshot,
+): void {
+  const ids = [
+    snapshot.treeId,
+    snapshot.planRevisionId,
+    snapshot.rootNodeId,
+    snapshot.rootArtifactId,
+    snapshot.attentionId,
+    ...snapshot.nodes.flatMap((node) => [
+      node.id,
+      ...(node.outputContract.case === "artifact" ? [node.outputContract.value.artifactId] : []),
+    ]),
+  ];
+  for (const id of ids) {
+    const row = transaction.get(
+      `SELECT id FROM trees WHERE id = ?
+       UNION ALL SELECT id FROM plan_revisions WHERE id = ?
+       UNION ALL SELECT id FROM nodes WHERE id = ?
+       UNION ALL SELECT output_artifact_id AS id FROM nodes WHERE output_artifact_id = ?
+       UNION ALL SELECT id FROM plan_attentions WHERE id = ?
+       UNION ALL SELECT id FROM repositories WHERE id = ?`,
+      [id, id, id, id, id, id],
+    );
+    if (row !== undefined)
+      throw new PlanRegistryError("invalid_plan", "tree IDs are already persisted");
+  }
+}
+
 function assertProposedIdAvailability(
   transaction: SqliteCommandTransaction,
   snapshot: PlanSnapshot,
@@ -2969,6 +3526,26 @@ function assertProposedIdAvailability(
 
 function assertDistinctIds(values: readonly string[], message: string): void {
   if (new Set(values).size !== values.length) throw new PlanRegistryError("invalid_plan", message);
+}
+
+const EXECUTABLE_NODE_MODES: readonly PlanNodeMode[] = [
+  PlanNodeMode.RESEARCH,
+  PlanNodeMode.EXPLORE,
+  PlanNodeMode.IMPLEMENTATION,
+];
+
+const EXECUTABLE_NODE_MODE_KINDS: readonly string[] = EXECUTABLE_NODE_MODES.map((mode) =>
+  modeKind(mode),
+);
+
+const EXECUTABLE_NODE_MODE_PLACEHOLDERS: string = EXECUTABLE_NODE_MODE_KINDS.map(() => "?").join(
+  ", ",
+);
+
+/** Modes a plan approval activates. PLAN is excluded: the root's own planning node is never
+ *  promoted to ready by approving the plan it produced. */
+function isExecutableNodeMode(mode: PlanNodeMode): boolean {
+  return EXECUTABLE_NODE_MODES.includes(mode);
 }
 
 function modeKind(mode: PlanNodeMode): string {

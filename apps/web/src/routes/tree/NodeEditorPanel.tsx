@@ -33,8 +33,6 @@ import {
 } from "./tree-labels.js";
 import "./NodeEditorPanel.css";
 
-const CHECK_PROFILE_HINTS = ["lint", "typecheck", "tests", "build", "security_review"];
-const CHECK_PROFILE_HINTS_ID = "tree-node-check-profile-hints";
 const MODE_OPTIONS: readonly SelectOption[] = EDITABLE_PLAN_NODE_MODES.map((mode) => ({
   value: String(mode),
   label: planNodeModeLabel(mode),
@@ -98,7 +96,6 @@ export function NodeEditorPanel({
         </Commentary>
         <div className="mn-node-editor__facts">
           <Fact>{planNodeModeLabel(locked.mode)}</Fact>
-          <Fact>check profile: {locked.checkProfile}</Fact>
           <Fact>max attempts: {locked.maxAttempts}</Fact>
           <Fact>
             {locked.outputContract.case === "artifact"
@@ -229,38 +226,13 @@ export function NodeEditorPanel({
         }}
       />
 
-      <Field label="Check profile" htmlFor="tree-node-check-profile">
-        <TextInput
-          id="tree-node-check-profile"
-          list={CHECK_PROFILE_HINTS_ID}
-          value={working.checkProfile}
-          onChange={(event) => {
-            patch({ checkProfile: event.target.value });
-          }}
-        />
-        <datalist id={CHECK_PROFILE_HINTS_ID}>
-          {CHECK_PROFILE_HINTS.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
-      </Field>
-
       <Field label="Output contract" htmlFor="tree-node-output-kind">
-        <Select
+        <TextInput
           id="tree-node-output-kind"
-          value={working.outputContract.case}
-          options={[
-            { value: "implementation", label: "implementation (no artifact)" },
-            { value: "artifact", label: "artifact" },
-          ]}
-          onChange={(event) => {
-            patch({
-              outputContract:
-                event.target.value === "artifact"
-                  ? { case: "artifact", artifactType: "" }
-                  : { case: "implementation" },
-            });
-          }}
+          value={
+            working.outputContract.case === "artifact" ? "artifact" : "implementation (no artifact)"
+          }
+          disabled
         />
       </Field>
       {working.outputContract.case === "artifact" ? (

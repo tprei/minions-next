@@ -39,8 +39,7 @@ the real CLI and scripts; there is no separate dogfood harness.
 - A running daemon: `minions start` (loopback only, noninteractive). Confirm with
   `minions status` and `minions doctor` — the latter must report a healthy auth broker,
   host, and sandbox capability for the target platform.
-- The maintained gate profile checked in at `.minions/gates.yaml` (the daemon loads it; a
-  named `root_check_profile` only passes if its gate exists there).
+- The maintained gate profile checked in at `.minions/gates.yaml` (the daemon loads it).
 - For a live run, a provider credential vaulted on the local host via `minions auth-login`
   (one interactive login per host; survives worker/daemon/machine restarts).
 
@@ -58,7 +57,7 @@ paths, nested repositories, or a rejected gate profile.
 ### Create, approve, inspect, steer
 
 ```sh
-minions tree-create --repository <id> --text "<objective>" --root-check-profile <name>
+minions tree-create --repository <id> --text "<objective>"
 minions tree-propose --tree <id> --max-depth N --max-fan-out M      # inspect/review first
 minions tree-approve --tree <id> --expected-version <n>             # approval gates writable execution
 minions tree-get --tree <id>                                        # inspect structure/state

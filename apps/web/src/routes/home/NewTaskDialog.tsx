@@ -3,8 +3,11 @@ import { Link } from "react-router-dom";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import {
+  CreateTemplatedTreeRequestSchema,
   CreateTreeRequestSchema,
+  TaskTemplate,
   TreeBudgetSchema,
+  TreeState,
   type ExecutionHost,
   type RegisteredRepository,
   type RepositorySummary,
@@ -41,12 +44,14 @@ export interface NewTaskDialogProps {
 }
 
 interface FormState {
+  isAdvanced: boolean;
+  template: TaskTemplate;
+  prompt: string;
   hostId: string;
   repositoryId: string;
   goal: string;
   baseCommit: string;
   rootAllowedPath: string;
-  rootCheckProfile: string;
   maxDepth: string;
   maxFanOut: string;
   maxNodes: string;
@@ -55,12 +60,13 @@ interface FormState {
 }
 
 interface FieldErrors {
+  template?: string;
+  prompt?: string;
   host?: string;
   repository?: string;
   goal?: string;
   baseCommit?: string;
   rootAllowedPath?: string;
-  rootCheckProfile?: string;
   maxDepth?: string;
   maxFanOut?: string;
   maxNodes?: string;
@@ -68,16 +74,15 @@ interface FieldErrors {
   maxAttemptsPerNode?: string;
 }
 
-// Sane, bounded defaults for a small local single-host fleet — every value stays well
-// within the server's enforced uint32 range (1..4294967295, see validateBudget) and is
-// freely editable before submit.
 const INITIAL_FORM_STATE: FormState = {
+  isAdvanced: false,
+  template: TaskTemplate.EXPLAIN,
+  prompt: "",
   hostId: "",
   repositoryId: "",
   goal: "",
   baseCommit: "",
   rootAllowedPath: ".",
-  rootCheckProfile: "",
   maxDepth: "4",
   maxFanOut: "4",
   maxNodes: "24",
@@ -85,26 +90,51 @@ const INITIAL_FORM_STATE: FormState = {
   maxAttemptsPerNode: "3",
 };
 
-// `root_check_profile` is a free-text gate profile name — these are only autocomplete
-// hints/placeholders (the 5 GateCategory values this repository's own .minions/gates.yaml
-// maps to real commands for). The client enforces nothing beyond non-empty text; the
-// daemon is authoritative for whether a named profile actually exists.
-const ROOT_CHECK_PROFILE_HINTS = ["lint", "typecheck", "tests", "build", "security_review"];
-const ROOT_CHECK_PROFILE_HINTS_ID = "new-task-root-check-profile-hints";
-
-const HOST_FIELD_ID = "new-task-host";
+const TEMPLATE_FIELD_ID = "new-task-template";
+const PROMPT_FIELD_ID = "new-task-prompt";
 const REPOSITORY_FIELD_ID = "new-task-repository";
+const HOST_FIELD_ID = "new-task-host";
 const GOAL_FIELD_ID = "new-task-goal";
 const BASE_COMMIT_FIELD_ID = "new-task-base-commit";
 const ROOT_ALLOWED_PATH_FIELD_ID = "new-task-root-allowed-path";
-const ROOT_CHECK_PROFILE_FIELD_ID = "new-task-root-check-profile";
 const MAX_DEPTH_FIELD_ID = "new-task-max-depth";
 const MAX_FAN_OUT_FIELD_ID = "new-task-max-fan-out";
 const MAX_NODES_FIELD_ID = "new-task-max-nodes";
 const MAX_CONCURRENCY_FIELD_ID = "new-task-max-concurrency";
 const MAX_ATTEMPTS_FIELD_ID = "new-task-max-attempts-per-node";
 
-function validateForm(fields: FormState): FieldErrors {
+const TEMPLATE_OPTIONS: readonly SelectOption[] = [
+  { value: String(TaskTemplate.EXPLAIN), label: "Explain — Read-only diagnosis (auto-approved)" },
+  { value: String(TaskTemplate.FIX), label: "Fix — Diagnose then apply fix (sequential chain)" },
+  { value: String(TaskTemplate.FEATURE), label: "Feature — Explore then build (sequential chain)" },
+];
+
+const TEMPLATE_DESCRIPTIONS: Readonly<Record<TaskTemplate, string>> = {
+  [TaskTemplate.UNSPECIFIED]: "Select a task template.",
+  [TaskTemplate.EXPLAIN]:
+    "Creates a single research node exploring the repo and answering your prompt. Auto-approves for immediate execution.",
+  [TaskTemplate.FIX]:
+    "Creates a sequential two-node chain: diagnoses the issue, and upon success, creates an implementation node to apply the fix.",
+  [TaskTemplate.FEATURE]:
+    "Creates a sequential two-node chain: maps the affected area, and upon success, creates an implementation node to build the feature.",
+};
+
+function validateTemplateForm(fields: FormState): FieldErrors {
+  const errors: FieldErrors = {};
+  if (fields.template === TaskTemplate.UNSPECIFIED) {
+    errors.template = "Select a task template.";
+  }
+  const promptError = validateRequiredText(fields.prompt, "Prompt");
+  if (promptError !== undefined) {
+    errors.prompt = promptError;
+  }
+  if (fields.repositoryId.length === 0) {
+    errors.repository = "Select a repository.";
+  }
+  return errors;
+}
+
+function validateAdvancedForm(fields: FormState): FieldErrors {
   const errors: FieldErrors = {};
   if (fields.hostId.length === 0) {
     errors.host = "Select a host.";
@@ -126,10 +156,6 @@ function validateForm(fields: FormState): FieldErrors {
   );
   if (rootAllowedPathError !== undefined) {
     errors.rootAllowedPath = rootAllowedPathError;
-  }
-  const rootCheckProfileError = validateRequiredText(fields.rootCheckProfile, "Root check profile");
-  if (rootCheckProfileError !== undefined) {
-    errors.rootCheckProfile = rootCheckProfileError;
   }
   const maxDepthError = validateBudget(fields.maxDepth, "Max depth");
   if (maxDepthError !== undefined) {
@@ -154,24 +180,6 @@ function validateForm(fields: FormState): FieldErrors {
   return errors;
 }
 
-/**
- * New-task (tree creation) form (PR 45 — host-repository-task-ui, PRD UI-01 "New task"
- * screen). The operator explicitly picks a host, then a repository under that host — no
- * selection is ever implied or pre-authored by the client (PR 45 acceptance: "create a tree
- * from one explicit boundary"). `CreateTreeRequest` has no `mode`/`attachments` field in the
- * actual proto (proto/minions/v1/tree.proto) despite the PRD's screen sketch mentioning them —
- * the root node's mode is always a read-only `plan` node assigned by the domain engine, and
- * no attachment upload RPC exists yet, so neither is offered here. Every resource id the
- * request needs (`tree_id`, `plan_revision_id`, `root_node_id`, `root_artifact_id`,
- * `attention_id`) is minted client-side with `generateUuidV7()`, exactly like
- * apps/cli/src/index.ts's own `tree create` — the browser only ever sends ids and intents,
- * never a status or transition.
- *
- * Base commit defaults to the selected repository's own registered `baseCommit` (its
- * resolved default-branch HEAD at registration time) rather than forcing the operator to
- * type a raw SHA from scratch — it stays a plain editable text field so pinning a different
- * commit is one edit away, not a separate flow.
- */
 export function NewTaskDialog({
   hosts,
   repositories,
@@ -204,22 +212,39 @@ export function NewTaskDialog({
     setFields((previous) => ({ ...previous, [key]: value }));
   }
 
+  function handlePromptChange(prompt: string): void {
+    setFields((previous) => ({
+      ...previous,
+      prompt,
+      goal: previous.goal === "" || previous.goal === previous.prompt ? prompt : previous.goal,
+    }));
+  }
+
   function handleHostChange(hostId: string): void {
-    setFields((previous) => ({ ...previous, hostId, repositoryId: "", baseCommit: "" }));
+    setFields((previous) => ({
+      ...previous,
+      hostId,
+      repositoryId: "",
+      baseCommit: "",
+    }));
   }
 
   function handleRepositoryChange(repositoryId: string): void {
     const detail = repositoryDetail.get(repositoryId);
+    const repoSummary = repositories.find((r) => r.id === repositoryId);
     setFields((previous) => ({
       ...previous,
       repositoryId,
+      hostId: repoSummary?.hostId ?? previous.hostId,
       baseCommit: detail?.baseCommit ?? "",
     }));
   }
 
   async function handleSubmit(event: SubmitEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const nextErrors = validateForm(fields);
+    const nextErrors = fields.isAdvanced
+      ? validateAdvancedForm(fields)
+      : validateTemplateForm(fields);
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
@@ -228,29 +253,43 @@ export function NewTaskDialog({
     setSubmitError(undefined);
     setSubmitting(true);
     try {
-      const response = await treeClient.createTree(
-        create(CreateTreeRequestSchema, {
-          commandId: generateUuidV7(),
-          actorSessionId: actorSessionId(),
-          repositoryId: fields.repositoryId,
-          treeId: generateUuidV7(),
-          planRevisionId: generateUuidV7(),
-          rootNodeId: generateUuidV7(),
-          rootArtifactId: generateUuidV7(),
-          goal: fields.goal.trim(),
-          baseCommit: fields.baseCommit,
-          budget: create(TreeBudgetSchema, {
-            maxDepth: parseBudgetValue(fields.maxDepth),
-            maxFanOut: parseBudgetValue(fields.maxFanOut),
-            maxNodes: parseBudgetValue(fields.maxNodes),
-            maxConcurrency: parseBudgetValue(fields.maxConcurrency),
-            maxAttemptsPerNode: parseBudgetValue(fields.maxAttemptsPerNode),
-          }),
-          attentionId: generateUuidV7(),
-          rootAllowedRepositoryPaths: [fields.rootAllowedPath],
-          rootCheckProfile: fields.rootCheckProfile.trim(),
-        }),
-      );
+      const response = fields.isAdvanced
+        ? await treeClient.createTree(
+            create(CreateTreeRequestSchema, {
+              commandId: generateUuidV7(),
+              actorSessionId: actorSessionId(),
+              repositoryId: fields.repositoryId,
+              treeId: generateUuidV7(),
+              planRevisionId: generateUuidV7(),
+              rootNodeId: generateUuidV7(),
+              rootArtifactId: generateUuidV7(),
+              goal: fields.goal.trim(),
+              baseCommit: fields.baseCommit,
+              budget: create(TreeBudgetSchema, {
+                maxDepth: parseBudgetValue(fields.maxDepth),
+                maxFanOut: parseBudgetValue(fields.maxFanOut),
+                maxNodes: parseBudgetValue(fields.maxNodes),
+                maxConcurrency: parseBudgetValue(fields.maxConcurrency),
+                maxAttemptsPerNode: parseBudgetValue(fields.maxAttemptsPerNode),
+              }),
+              attentionId: generateUuidV7(),
+              rootAllowedRepositoryPaths: [fields.rootAllowedPath],
+            }),
+          )
+        : await treeClient.createTemplatedTree(
+            create(CreateTemplatedTreeRequestSchema, {
+              commandId: generateUuidV7(),
+              actorSessionId: actorSessionId(),
+              repositoryId: fields.repositoryId,
+              treeId: generateUuidV7(),
+              planRevisionId: generateUuidV7(),
+              rootNodeId: generateUuidV7(),
+              rootArtifactId: generateUuidV7(),
+              attentionId: generateUuidV7(),
+              template: fields.template,
+              prompt: fields.prompt.trim(),
+            }),
+          );
       if (response.tree === undefined) {
         setSubmitError({
           code: "Internal",
@@ -270,14 +309,23 @@ export function NewTaskDialog({
     value: host.id,
     label: host.displayName,
   }));
+
   const repositoryOptions: SelectOption[] = repositories
-    .filter((repository) => repository.hostId === fields.hostId)
-    .map((repository) => ({
-      value: repository.id,
-      label:
-        repositoryDetail.get(repository.id)?.canonicalRoot ??
-        `Repository ${shortId(repository.id)}`,
-    }));
+    .filter((repository) =>
+      fields.isAdvanced && fields.hostId.length > 0 ? repository.hostId === fields.hostId : true,
+    )
+    .map((repository) => {
+      const detail = repositoryDetail.get(repository.id);
+      const host = hosts.find((h) => h.id === repository.hostId);
+      const hostSuffix =
+        !fields.isAdvanced && hosts.length > 1 && host !== undefined
+          ? ` (${host.displayName})`
+          : "";
+      return {
+        value: repository.id,
+        label: (detail?.canonicalRoot ?? `Repository ${shortId(repository.id)}`) + hostSuffix,
+      };
+    });
 
   return (
     <Dialog
@@ -285,11 +333,16 @@ export function NewTaskDialog({
       onOpenChange={handleOpenChange}
       trigger={<Button>New task</Button>}
       title="New task"
-      description="Create a task tree from one explicit host, repository, and base commit."
+      description="Create a task tree from a template or explicit budget configuration."
     >
       {createdTree !== undefined ? (
         <div className="mn-task-confirmation">
           <p role="status">Task created.</p>
+          <p className="mn-task-confirmation__message">
+            {createdTree.state === TreeState.APPROVED || createdTree.state === TreeState.ACTIVE
+              ? "The task plan was auto-approved and is ready to run."
+              : "Review and approve the proposed plan to begin execution."}
+          </p>
           <Fact>{createdTree.goal}</Fact>
           <Fact title={createdTree.id}>tree {shortId(createdTree.id)}</Fact>
           <StatusBadge
@@ -319,173 +372,201 @@ export function NewTaskDialog({
           }}
           noValidate
         >
-          <Field label="Host" htmlFor={HOST_FIELD_ID} error={errors.host}>
+          <Field
+            label="Template"
+            htmlFor={TEMPLATE_FIELD_ID}
+            hint={TEMPLATE_DESCRIPTIONS[fields.template]}
+            error={errors.template}
+          >
             <Select
-              id={HOST_FIELD_ID}
-              placeholder="Select a host"
-              options={hostOptions}
-              value={fields.hostId}
-              invalid={errors.host !== undefined}
+              id={TEMPLATE_FIELD_ID}
+              options={TEMPLATE_OPTIONS}
+              value={String(fields.template)}
+              invalid={errors.template !== undefined}
               onChange={(event) => {
-                handleHostChange(event.target.value);
+                const value = Number(event.target.value);
+                updateField("template", value);
               }}
             />
           </Field>
-          <Field label="Repository" htmlFor={REPOSITORY_FIELD_ID} error={errors.repository}>
+          <Field
+            label="Prompt"
+            htmlFor={PROMPT_FIELD_ID}
+            hint="What should this task accomplish?"
+            error={errors.prompt}
+          >
+            <TextArea
+              id={PROMPT_FIELD_ID}
+              value={fields.prompt}
+              invalid={errors.prompt !== undefined}
+              onChange={(event) => {
+                handlePromptChange(event.target.value);
+              }}
+            />
+          </Field>
+          <Field
+            label="Repository"
+            htmlFor={REPOSITORY_FIELD_ID}
+            hint="Repository to execute the task in."
+            error={errors.repository}
+          >
             <Select
               id={REPOSITORY_FIELD_ID}
               placeholder="Select a repository"
               options={repositoryOptions}
               value={fields.repositoryId}
               invalid={errors.repository !== undefined}
-              disabled={fields.hostId.length === 0}
               onChange={(event) => {
                 handleRepositoryChange(event.target.value);
               }}
             />
           </Field>
-          <Field
-            label="Goal"
-            htmlFor={GOAL_FIELD_ID}
-            hint="What should this task accomplish?"
-            error={errors.goal}
+          <details
+            className="mn-new-task-advanced"
+            onToggle={(event) => {
+              updateField("isAdvanced", event.currentTarget.open);
+            }}
           >
-            <TextArea
-              id={GOAL_FIELD_ID}
-              value={fields.goal}
-              invalid={errors.goal !== undefined}
-              onChange={(event) => {
-                updateField("goal", event.target.value);
-              }}
-            />
-          </Field>
-          <Field
-            label="Base commit"
-            htmlFor={BASE_COMMIT_FIELD_ID}
-            hint="Defaults to the selected repository's registered base commit; edit to pin a different one."
-            error={errors.baseCommit}
-          >
-            <TextInput
-              id={BASE_COMMIT_FIELD_ID}
-              value={fields.baseCommit}
-              invalid={errors.baseCommit !== undefined}
-              onChange={(event) => {
-                updateField("baseCommit", event.target.value);
-              }}
-            />
-          </Field>
-          <Field
-            label="Root allowed path"
-            htmlFor={ROOT_ALLOWED_PATH_FIELD_ID}
-            hint={'Relative path scope for the root task node (use "." for the whole repository).'}
-            error={errors.rootAllowedPath}
-          >
-            <TextInput
-              id={ROOT_ALLOWED_PATH_FIELD_ID}
-              value={fields.rootAllowedPath}
-              invalid={errors.rootAllowedPath !== undefined}
-              onChange={(event) => {
-                updateField("rootAllowedPath", event.target.value);
-              }}
-            />
-          </Field>
-          <Field
-            label="Root check profile"
-            htmlFor={ROOT_CHECK_PROFILE_FIELD_ID}
-            hint="Gate profile name the root node's checks run under."
-            error={errors.rootCheckProfile}
-          >
-            <TextInput
-              id={ROOT_CHECK_PROFILE_FIELD_ID}
-              list={ROOT_CHECK_PROFILE_HINTS_ID}
-              placeholder="e.g. lint"
-              value={fields.rootCheckProfile}
-              invalid={errors.rootCheckProfile !== undefined}
-              onChange={(event) => {
-                updateField("rootCheckProfile", event.target.value);
-              }}
-            />
-            <datalist id={ROOT_CHECK_PROFILE_HINTS_ID}>
-              {ROOT_CHECK_PROFILE_HINTS.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-          </Field>
-          <div className="mn-new-task-budget">
-            <Field label="Max depth" htmlFor={MAX_DEPTH_FIELD_ID} error={errors.maxDepth}>
-              <TextInput
-                id={MAX_DEPTH_FIELD_ID}
-                type="number"
-                min={1}
-                max={4294967295}
-                value={fields.maxDepth}
-                invalid={errors.maxDepth !== undefined}
-                onChange={(event) => {
-                  updateField("maxDepth", event.target.value);
-                }}
-              />
-            </Field>
-            <Field label="Max fan-out" htmlFor={MAX_FAN_OUT_FIELD_ID} error={errors.maxFanOut}>
-              <TextInput
-                id={MAX_FAN_OUT_FIELD_ID}
-                type="number"
-                min={1}
-                max={4294967295}
-                value={fields.maxFanOut}
-                invalid={errors.maxFanOut !== undefined}
-                onChange={(event) => {
-                  updateField("maxFanOut", event.target.value);
-                }}
-              />
-            </Field>
-            <Field label="Max nodes" htmlFor={MAX_NODES_FIELD_ID} error={errors.maxNodes}>
-              <TextInput
-                id={MAX_NODES_FIELD_ID}
-                type="number"
-                min={1}
-                max={4294967295}
-                value={fields.maxNodes}
-                invalid={errors.maxNodes !== undefined}
-                onChange={(event) => {
-                  updateField("maxNodes", event.target.value);
-                }}
-              />
-            </Field>
-            <Field
-              label="Max concurrency"
-              htmlFor={MAX_CONCURRENCY_FIELD_ID}
-              error={errors.maxConcurrency}
-            >
-              <TextInput
-                id={MAX_CONCURRENCY_FIELD_ID}
-                type="number"
-                min={1}
-                max={4294967295}
-                value={fields.maxConcurrency}
-                invalid={errors.maxConcurrency !== undefined}
-                onChange={(event) => {
-                  updateField("maxConcurrency", event.target.value);
-                }}
-              />
-            </Field>
-            <Field
-              label="Max attempts per node"
-              htmlFor={MAX_ATTEMPTS_FIELD_ID}
-              error={errors.maxAttemptsPerNode}
-            >
-              <TextInput
-                id={MAX_ATTEMPTS_FIELD_ID}
-                type="number"
-                min={1}
-                max={4294967295}
-                value={fields.maxAttemptsPerNode}
-                invalid={errors.maxAttemptsPerNode !== undefined}
-                onChange={(event) => {
-                  updateField("maxAttemptsPerNode", event.target.value);
-                }}
-              />
-            </Field>
-          </div>
+            <summary className="mn-new-task-advanced__summary mn-focus-ring">
+              Advanced options (custom tree & budgets)
+            </summary>
+            <div className="mn-new-task-advanced__content">
+              <Field label="Host" htmlFor={HOST_FIELD_ID} error={errors.host}>
+                <Select
+                  id={HOST_FIELD_ID}
+                  placeholder="Select a host"
+                  options={hostOptions}
+                  value={fields.hostId}
+                  invalid={errors.host !== undefined}
+                  onChange={(event) => {
+                    handleHostChange(event.target.value);
+                  }}
+                />
+              </Field>
+              <Field
+                label="Goal"
+                htmlFor={GOAL_FIELD_ID}
+                hint="Explicit goal for the custom tree root."
+                error={errors.goal}
+              >
+                <TextArea
+                  id={GOAL_FIELD_ID}
+                  value={fields.goal}
+                  invalid={errors.goal !== undefined}
+                  onChange={(event) => {
+                    updateField("goal", event.target.value);
+                  }}
+                />
+              </Field>
+              <Field
+                label="Base commit"
+                htmlFor={BASE_COMMIT_FIELD_ID}
+                hint="Defaults to the selected repository's registered base commit; edit to pin a different one."
+                error={errors.baseCommit}
+              >
+                <TextInput
+                  id={BASE_COMMIT_FIELD_ID}
+                  value={fields.baseCommit}
+                  invalid={errors.baseCommit !== undefined}
+                  onChange={(event) => {
+                    updateField("baseCommit", event.target.value);
+                  }}
+                />
+              </Field>
+              <Field
+                label="Root allowed path"
+                htmlFor={ROOT_ALLOWED_PATH_FIELD_ID}
+                hint={
+                  'Relative path scope for the root task node (use "." for the whole repository).'
+                }
+                error={errors.rootAllowedPath}
+              >
+                <TextInput
+                  id={ROOT_ALLOWED_PATH_FIELD_ID}
+                  value={fields.rootAllowedPath}
+                  invalid={errors.rootAllowedPath !== undefined}
+                  onChange={(event) => {
+                    updateField("rootAllowedPath", event.target.value);
+                  }}
+                />
+              </Field>
+              <div className="mn-new-task-budget">
+                <Field label="Max depth" htmlFor={MAX_DEPTH_FIELD_ID} error={errors.maxDepth}>
+                  <TextInput
+                    id={MAX_DEPTH_FIELD_ID}
+                    type="number"
+                    min={1}
+                    max={4294967295}
+                    value={fields.maxDepth}
+                    invalid={errors.maxDepth !== undefined}
+                    onChange={(event) => {
+                      updateField("maxDepth", event.target.value);
+                    }}
+                  />
+                </Field>
+                <Field label="Max fan-out" htmlFor={MAX_FAN_OUT_FIELD_ID} error={errors.maxFanOut}>
+                  <TextInput
+                    id={MAX_FAN_OUT_FIELD_ID}
+                    type="number"
+                    min={1}
+                    max={4294967295}
+                    value={fields.maxFanOut}
+                    invalid={errors.maxFanOut !== undefined}
+                    onChange={(event) => {
+                      updateField("maxFanOut", event.target.value);
+                    }}
+                  />
+                </Field>
+                <Field label="Max nodes" htmlFor={MAX_NODES_FIELD_ID} error={errors.maxNodes}>
+                  <TextInput
+                    id={MAX_NODES_FIELD_ID}
+                    type="number"
+                    min={1}
+                    max={4294967295}
+                    value={fields.maxNodes}
+                    invalid={errors.maxNodes !== undefined}
+                    onChange={(event) => {
+                      updateField("maxNodes", event.target.value);
+                    }}
+                  />
+                </Field>
+                <Field
+                  label="Max concurrency"
+                  htmlFor={MAX_CONCURRENCY_FIELD_ID}
+                  error={errors.maxConcurrency}
+                >
+                  <TextInput
+                    id={MAX_CONCURRENCY_FIELD_ID}
+                    type="number"
+                    min={1}
+                    max={4294967295}
+                    value={fields.maxConcurrency}
+                    invalid={errors.maxConcurrency !== undefined}
+                    onChange={(event) => {
+                      updateField("maxConcurrency", event.target.value);
+                    }}
+                  />
+                </Field>
+                <Field
+                  label="Max attempts per node"
+                  htmlFor={MAX_ATTEMPTS_FIELD_ID}
+                  error={errors.maxAttemptsPerNode}
+                >
+                  <TextInput
+                    id={MAX_ATTEMPTS_FIELD_ID}
+                    type="number"
+                    min={1}
+                    max={4294967295}
+                    value={fields.maxAttemptsPerNode}
+                    invalid={errors.maxAttemptsPerNode !== undefined}
+                    onChange={(event) => {
+                      updateField("maxAttemptsPerNode", event.target.value);
+                    }}
+                  />
+                </Field>
+              </div>
+            </div>
+          </details>
           {submitError !== undefined ? (
             <p className="mn-form-error" role="alert">
               <strong>{submitError.code}:</strong> {submitError.message}

@@ -734,6 +734,97 @@ function createHostV12VcsChangeBindingsFixture(path: string, appliedAtMs: number
     database.close();
   }
 }
+function createHostV14PlanPolicyFixture(path: string, appliedAtMs: number): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec("PRAGMA foreign_keys = ON");
+    for (const migration of hostMigrations.slice(0, 14)) {
+      database.exec(migration.sql);
+      database
+        .prepare(
+          "INSERT INTO schema_migrations (version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)",
+        )
+        .run(migration.version, migration.name, migration.checksum, appliedAtMs);
+    }
+    database.exec("BEGIN");
+    database
+      .prepare(
+        "INSERT INTO repositories (id, host_id, root_path, version, registered_at_ms, archived_at_ms) VALUES (?, ?, ?, 0, ?, NULL)",
+      )
+      .run(planRepositoryId, planHostId, "/workspace/plan", appliedAtMs);
+    database
+      .prepare(
+        `INSERT INTO trees (
+           id, repository_id, host_id, base_commit, goal, active_plan_revision_id,
+           root_node_id, version, created_at_ms, updated_at_ms, archived_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)`,
+      )
+      .run(
+        planTreeId,
+        planRepositoryId,
+        planHostId,
+        planBaseCommit,
+        "plan policy migration",
+        planRevisionId,
+        planRootNodeId,
+        appliedAtMs,
+        appliedAtMs,
+      );
+    database
+      .prepare(
+        `INSERT INTO plan_revisions (
+           id, tree_id, ordinal, goal, state_kind, version, created_at_ms,
+           approved_at_ms, superseded_at_ms
+         ) VALUES (?, ?, 1, ?, 'draft', 0, ?, NULL, NULL)`,
+      )
+      .run(planRevisionId, planTreeId, "plan policy migration", appliedAtMs);
+    const insertNode = database.prepare(
+      `INSERT INTO nodes (
+         id, tree_id, repository_id, host_id, parent_node_id, plan_revision_id,
+         mode, objective, output_kind, output_artifact_id, output_artifact_type,
+         state_kind, resume_state_kind, blocker_kind, blocker_evidence_id,
+         blocker_parent_node_id, blocker_host_id, outcome_kind, outcome_artifact_id,
+         outcome_content_hash, outcome_artifact_type, outcome_commit, outcome_evidence_id,
+         outcome_explanation, terminal_evidence_id, superseded_plan_revision_id,
+         version, created_at_ms, updated_at_ms
+       ) VALUES (?, ?, ?, ?, ?, ?, 'plan', ?, 'artifact', ?, 'plan',
+         'planned', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+         NULL, NULL, NULL, NULL, 0, ?, ?)`,
+    );
+    insertNode.run(
+      planRootNodeId,
+      planTreeId,
+      planRepositoryId,
+      planHostId,
+      null,
+      planRevisionId,
+      "plan policy root node",
+      planRootArtifactId,
+      appliedAtMs,
+      appliedAtMs,
+    );
+    insertNode.run(
+      schedulerChildNodeId,
+      planTreeId,
+      planRepositoryId,
+      planHostId,
+      planRootNodeId,
+      planRevisionId,
+      "plan policy child node",
+      schedulerChildArtifactId,
+      appliedAtMs,
+      appliedAtMs,
+    );
+    const insertPolicy = database.prepare(
+      "INSERT INTO node_plan_policies (node_id, check_profile, max_attempts) VALUES (?, ?, ?)",
+    );
+    insertPolicy.run(planRootNodeId, "profile-strict", 3);
+    insertPolicy.run(schedulerChildNodeId, "profile-lenient", 5);
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
 
 function tamperHostV1Checksum(path: string, checksum: string): void {
   const database = new DatabaseSync(path);
@@ -747,6 +838,7 @@ function tamperHostV1Checksum(path: string, checksum: string): void {
 async function expectSqliteFailure(
   operation: () => Promise<unknown>,
   expectedCode: SqliteDatabaseErrorCode,
+  expectedCauseMessage?: string | RegExp,
 ): Promise<void> {
   const rejection = await operation().then(
     () => undefined,
@@ -754,6 +846,14 @@ async function expectSqliteFailure(
   );
   expect(rejection).toBeInstanceOf(SqliteDatabaseError);
   expect(rejection).toMatchObject({ code: expectedCode });
+  if (expectedCauseMessage !== undefined && rejection instanceof SqliteDatabaseError) {
+    expect(rejection.cause).toBeInstanceOf(Error);
+    if (typeof expectedCauseMessage === "string") {
+      expect((rejection.cause as Error).message).toContain(expectedCauseMessage);
+    } else {
+      expect((rejection.cause as Error).message).toMatch(expectedCauseMessage);
+    }
+  }
 }
 
 async function seedPlanFoundation(database: TestManagedSqliteDatabase): Promise<void> {
@@ -1046,8 +1146,8 @@ describe("SQLite migration integration", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 1,
-          currentVersion: 14,
-          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+          currentVersion: 15,
+          appliedVersions: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1334,8 +1434,8 @@ describe("SQLite v7 durable steering schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 14,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        currentVersion: 15,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         backupPath: null,
       });
       expect(
@@ -1409,8 +1509,8 @@ describe("SQLite v7 durable steering schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 6,
-          currentVersion: 14,
-          appliedVersions: [7, 8, 9, 10, 11, 12, 13, 14],
+          currentVersion: 15,
+          appliedVersions: [7, 8, 9, 10, 11, 12, 13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -1464,8 +1564,8 @@ describe("SQLite v6 scheduler lease schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 14,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        currentVersion: 15,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         backupPath: null,
       });
       expect(
@@ -1531,8 +1631,8 @@ describe("SQLite v6 scheduler lease schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 5,
-          currentVersion: 14,
-          appliedVersions: [6, 7, 8, 9, 10, 11, 12, 13, 14],
+          currentVersion: 15,
+          appliedVersions: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3011,8 +3111,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 14,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        currentVersion: 15,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         backupPath: null,
       });
       expect(
@@ -3149,8 +3249,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 14,
-          appliedVersions: [8, 9, 10, 11, 12, 13, 14],
+          currentVersion: 15,
+          appliedVersions: [8, 9, 10, 11, 12, 13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3251,8 +3351,8 @@ describe("SQLite v8 artifacts and outcomes schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 7,
-          currentVersion: 14,
-          appliedVersions: [8, 9, 10, 11, 12, 13, 14],
+          currentVersion: 15,
+          appliedVersions: [8, 9, 10, 11, 12, 13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3723,8 +3823,8 @@ describe("SQLite v10 attempt transcript schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 14,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        currentVersion: 15,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         backupPath: null,
       });
       expect(
@@ -3804,8 +3904,8 @@ describe("SQLite v10 attempt transcript schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 9,
-          currentVersion: 14,
-          appliedVersions: [10, 11, 12, 13, 14],
+          currentVersion: 15,
+          appliedVersions: [10, 11, 12, 13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -3911,8 +4011,8 @@ describe("SQLite v11 attempt checkpoint schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 14,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        currentVersion: 15,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         backupPath: null,
       });
       expect(
@@ -3998,8 +4098,8 @@ describe("SQLite v11 attempt checkpoint schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 10,
-          currentVersion: 14,
-          appliedVersions: [11, 12, 13, 14],
+          currentVersion: 15,
+          appliedVersions: [11, 12, 13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -4202,8 +4302,8 @@ describe("SQLite v12 gate receipts schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 14,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        currentVersion: 15,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         backupPath: null,
       });
       expect(
@@ -4331,8 +4431,8 @@ describe("SQLite v12 gate receipts schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 11,
-          currentVersion: 14,
-          appliedVersions: [12, 13, 14],
+          currentVersion: 15,
+          appliedVersions: [12, 13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -4516,8 +4616,8 @@ describe("SQLite v13 vcs change bindings schema", () => {
       expect(temporary.database.migration).toEqual({
         databaseKind: "host",
         previousVersion: 0,
-        currentVersion: 14,
-        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        currentVersion: 15,
+        appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         backupPath: null,
       });
       expect(
@@ -4636,8 +4736,8 @@ describe("SQLite v13 vcs change bindings schema", () => {
         expect(database.migration).toEqual({
           databaseKind: "host",
           previousVersion: 12,
-          currentVersion: 14,
-          appliedVersions: [13, 14],
+          currentVersion: 15,
+          appliedVersions: [13, 14, 15],
           backupPath: resolve(backupPath),
         });
         expect(
@@ -4898,6 +4998,149 @@ describe("SQLite v13 vcs change bindings schema", () => {
   });
 });
 
+describe("SQLite v15 plan policy schema", () => {
+  it("upgrades a v14 host database and preserves node plan policy rows", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "minions-host-plan-policy-migration-"));
+    const path = join(directory, "host.db");
+    const backupPath = join(directory, "host.backup.db");
+    try {
+      createHostV14PlanPolicyFixture(path, fixedTimestamp);
+      const database = await openHostDatabase({
+        path,
+        clock: new FixedClock(fixedTimestamp),
+        backupPath,
+      });
+      try {
+        expect(database.migration).toEqual({
+          databaseKind: "host",
+          previousVersion: 14,
+          currentVersion: 15,
+          appliedVersions: [15],
+          backupPath: resolve(backupPath),
+        });
+        expect(
+          database.read((reader) =>
+            reader.all("SELECT node_id, max_attempts FROM node_plan_policies ORDER BY node_id"),
+          ),
+        ).toEqual([
+          { node_id: planRootNodeId, max_attempts: 3n },
+          { node_id: schedulerChildNodeId, max_attempts: 5n },
+        ]);
+        expect(
+          database.read((reader) => reader.get("SELECT COUNT(*) AS count FROM node_plan_policies")),
+        ).toEqual({ count: 2n });
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT node_id, max_attempts FROM node_plan_policies WHERE node_id = ?", [
+              planRootNodeId,
+            ]),
+          ),
+        ).toEqual({ node_id: planRootNodeId, max_attempts: 3n });
+        expect(
+          database.read((reader) =>
+            reader.get("SELECT node_id, max_attempts FROM node_plan_policies WHERE node_id = ?", [
+              schedulerChildNodeId,
+            ]),
+          ),
+        ).toEqual({ node_id: schedulerChildNodeId, max_attempts: 5n });
+        expect(
+          database.read((reader) =>
+            reader.all(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            ),
+          ),
+        ).toEqual(expectedHistory(hostMigrations, fixedTimestamp));
+
+        await expectSqliteFailure(
+          () =>
+            executeTestSqliteWrite(database, (transaction) => {
+              transaction.run("UPDATE node_plan_policies SET max_attempts = ? WHERE node_id = ?", [
+                10,
+                planRootNodeId,
+              ]);
+            }),
+          "transaction_failed",
+          "node plan policy definition is immutable",
+        );
+        await expectSqliteFailure(
+          () =>
+            executeTestSqliteWrite(database, (transaction) => {
+              transaction.run("UPDATE node_plan_policies SET max_attempts = ? WHERE node_id = ?", [
+                10,
+                schedulerChildNodeId,
+              ]);
+            }),
+          "transaction_failed",
+          "node plan policy definition is immutable",
+        );
+        await expectSqliteFailure(
+          () =>
+            executeTestSqliteWrite(database, (transaction) => {
+              transaction.run("UPDATE node_plan_policies SET node_id = ? WHERE node_id = ?", [
+                schedulerSecondChildNodeId,
+                planRootNodeId,
+              ]);
+            }),
+          "transaction_failed",
+          "node plan policy definition is immutable",
+        );
+      } finally {
+        await database.close();
+      }
+      expect(
+        withReadOnlyDatabase(path, (db) =>
+          db
+            .prepare("PRAGMA table_info('node_plan_policies')")
+            .all()
+            .map((row) => [row["name"], row["type"], row["notnull"], row["pk"]]),
+        ),
+      ).toEqual([
+        ["node_id", "TEXT", 1n, 1n],
+        ["max_attempts", "INTEGER", 1n, 0n],
+      ]);
+      expect(
+        withReadOnlyDatabase(path, (db) =>
+          db
+            .prepare("PRAGMA table_info('node_plan_policies')")
+            .all()
+            .map((row) => row["name"]),
+        ),
+      ).toEqual(["node_id", "max_attempts"]);
+      expect(
+        withReadOnlyDatabase(backupPath, (backup) =>
+          backup
+            .prepare(
+              "SELECT version, name, checksum, applied_at_ms FROM schema_migrations ORDER BY version",
+            )
+            .all(),
+        ),
+      ).toEqual(expectedHistory(hostMigrations.slice(0, 14), fixedTimestamp));
+      expect(
+        withReadOnlyDatabase(backupPath, (backup) =>
+          backup
+            .prepare(
+              "SELECT node_id, check_profile, max_attempts FROM node_plan_policies ORDER BY node_id",
+            )
+            .all(),
+        ),
+      ).toEqual([
+        {
+          node_id: planRootNodeId,
+          check_profile: "profile-strict",
+          max_attempts: 3n,
+        },
+        {
+          node_id: schedulerChildNodeId,
+          check_profile: "profile-lenient",
+          max_attempts: 5n,
+        },
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
+
 describe("SQLite v4 plan foundation", () => {
   it("enforces structural budgets, ordered scope policies, attention resolution, and immutable definitions", async () => {
     const temporary = await TemporarySqliteDatabase.create("host", new FixedClock(fixedTimestamp));
@@ -4950,19 +5193,8 @@ describe("SQLite v4 plan foundation", () => {
         () =>
           temporary.database.write((transaction) => {
             transaction.run(
-              `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
-               VALUES (?, '', 1)`,
-              [planRootNodeId],
-            );
-          }),
-        "transaction_failed",
-      );
-      await expectSqliteFailure(
-        () =>
-          temporary.database.write((transaction) => {
-            transaction.run(
-              `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
-               VALUES (?, 'event', 0)`,
+              `INSERT INTO node_plan_policies (node_id, max_attempts)
+               VALUES (?, 0)`,
               [planRootNodeId],
             );
           }),
@@ -4970,8 +5202,8 @@ describe("SQLite v4 plan foundation", () => {
       );
       await temporary.database.write((transaction) => {
         transaction.run(
-          `INSERT INTO node_plan_policies (node_id, check_profile, max_attempts)
-           VALUES (?, 'event', 1)`,
+          `INSERT INTO node_plan_policies (node_id, max_attempts)
+           VALUES (?, 1)`,
           [planRootNodeId],
         );
       });
@@ -5032,12 +5264,11 @@ describe("SQLite v4 plan foundation", () => {
       ]);
       expect(
         temporary.database.read((reader) =>
-          reader.get(
-            "SELECT check_profile, max_attempts FROM node_plan_policies WHERE node_id = ?",
-            [planRootNodeId],
-          ),
+          reader.get("SELECT max_attempts FROM node_plan_policies WHERE node_id = ?", [
+            planRootNodeId,
+          ]),
         ),
-      ).toEqual({ check_profile: "event", max_attempts: 1n });
+      ).toEqual({ max_attempts: 1n });
       expect(
         temporary.database.read((reader) =>
           reader.get("SELECT max_depth, max_nodes FROM tree_budgets WHERE tree_id = ?", [
@@ -5075,10 +5306,9 @@ describe("SQLite v4 plan foundation", () => {
       await expectSqliteFailure(
         () =>
           temporary.database.write((transaction) => {
-            transaction.run(
-              "UPDATE node_plan_policies SET check_profile = 'changed' WHERE node_id = ?",
-              [planRootNodeId],
-            );
+            transaction.run("UPDATE node_plan_policies SET max_attempts = 2 WHERE node_id = ?", [
+              planRootNodeId,
+            ]);
           }),
         "transaction_failed",
       );

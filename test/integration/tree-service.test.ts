@@ -14,6 +14,7 @@ import {
   ArtifactOutputContractSchema,
   AttentionKind,
   AttentionSummarySchema,
+  CreateTemplatedTreeRequestSchema,
   CreateTreeRequestSchema,
   EventService,
   GetServerInfoRequestSchema,
@@ -37,6 +38,7 @@ import {
   TaskNodeSchema,
   TaskTreeSchema,
   TreeBudgetSchema,
+  TaskTemplate,
   TreeService,
   TreeState,
   TreeSummarySchema,
@@ -149,12 +151,8 @@ const CONNECT_REPAIR_NODE_ID = "01900000-0000-7000-8000-000000000412";
 
 const CONNECT_SCOPE_ROOT = ".";
 const CONNECT_SCOPE_IMPLEMENTATION = ["src", "tests"] as const;
-const CONNECT_CHECK_PROFILE_ROOT = "connect-root";
-const CONNECT_CHECK_PROFILE_IMPLEMENTATION = "connect-implementation";
 const CLI_SCOPE_ROOT = ".";
 const CLI_SCOPE_IMPLEMENTATION = ["src", "tests"] as const;
-const CLI_CHECK_PROFILE_ROOT = "cli-root";
-const CLI_CHECK_PROFILE_IMPLEMENTATION = "cli-implementation";
 
 const CLI_REPAIR_INSTANCE_ID = "01900000-0000-7000-8000-000000000501";
 const CLI_REPAIR_HOST_CANDIDATE_ID = "01900000-0000-7000-8000-000000000502";
@@ -290,7 +288,6 @@ type JsonNode = Readonly<{
   created_at: JsonTimestamp;
   updated_at: JsonTimestamp;
   allowed_repository_paths: readonly string[];
-  check_profile: string;
   budget: JsonNodeBudget;
   artifact?: JsonArtifact;
   implementation?: Readonly<Record<string, never>>;
@@ -486,7 +483,6 @@ function parseJsonNode(value: unknown, index: number): JsonNode {
       "created_at",
       "updated_at",
       "allowed_repository_paths",
-      "check_profile",
       "budget",
     ],
     ["parent_node_id", "artifact", "implementation"],
@@ -524,7 +520,6 @@ function parseJsonNode(value: unknown, index: number): JsonNode {
     created_at: parseJsonTimestamp(node["created_at"], `${field}.created_at`),
     updated_at: parseJsonTimestamp(node["updated_at"], `${field}.updated_at`),
     allowed_repository_paths: requireStringArray(node, "allowed_repository_paths"),
-    check_profile: requireString(node, "check_profile"),
     budget: parseJsonNodeBudget(node["budget"], `${field}.budget`),
     ...output,
   };
@@ -817,7 +812,6 @@ function createTreeRequest(
     baseCommit,
     budget,
     rootAllowedRepositoryPaths: [CONNECT_SCOPE_ROOT],
-    rootCheckProfile: CONNECT_CHECK_PROFILE_ROOT,
     attentionId,
   });
 }
@@ -840,7 +834,6 @@ function proposedImplementationNode(
       value: create(ImplementationOutputContractSchema, {}),
     },
     allowedRepositoryPaths: [...CONNECT_SCOPE_IMPLEMENTATION],
-    checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
   });
 }
 
@@ -871,7 +864,6 @@ function proposedResearchNode(
       }),
     },
     allowedRepositoryPaths: [...CONNECT_SCOPE_IMPLEMENTATION],
-    checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
   });
 }
 
@@ -892,7 +884,6 @@ function proposedResearchNodeForCli(
     acceptanceCriteria: [...acceptanceCriteria],
     inputs: [{ artifactId: rootArtifactId, sourceNodeId: rootNodeId }],
     allowedRepositoryPaths: [...CLI_SCOPE_IMPLEMENTATION],
-    checkProfile: CLI_CHECK_PROFILE_IMPLEMENTATION,
     artifact: { artifactId, artifactType: "research/notes" },
   };
 }
@@ -965,10 +956,6 @@ function expectedArtifactNode(
     state,
     allowedRepositoryPaths:
       mode === PlanNodeMode.PLAN ? [CONNECT_SCOPE_ROOT] : [...CONNECT_SCOPE_IMPLEMENTATION],
-    checkProfile:
-      mode === PlanNodeMode.PLAN
-        ? CONNECT_CHECK_PROFILE_ROOT
-        : CONNECT_CHECK_PROFILE_IMPLEMENTATION,
     budget: create(NodeBudgetSchema, { maxAttempts: 2 }),
     version,
     createdAt: timestampMessage(createdAtMs),
@@ -1007,7 +994,6 @@ function expectedImplementationNode(
     },
     state,
     allowedRepositoryPaths: [...CONNECT_SCOPE_IMPLEMENTATION],
-    checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
     budget: create(NodeBudgetSchema, { maxAttempts: 2 }),
     version,
     createdAt: timestampMessage(createdAtMs),
@@ -1325,10 +1311,6 @@ function jsonArtifactNode(
     state: input.state,
     allowed_repository_paths:
       input.mode === "PLAN_NODE_MODE_PLAN" ? [CLI_SCOPE_ROOT] : [...CLI_SCOPE_IMPLEMENTATION],
-    check_profile:
-      input.mode === "PLAN_NODE_MODE_PLAN"
-        ? CLI_CHECK_PROFILE_ROOT
-        : CLI_CHECK_PROFILE_IMPLEMENTATION,
     budget: { max_attempts: 2 },
     version: String(input.version),
     created_at: jsonTimestamp(input.createdAtMs),
@@ -1366,7 +1348,6 @@ function jsonImplementationNode(
     inputs: [],
     state: input.state,
     allowed_repository_paths: [...CLI_SCOPE_IMPLEMENTATION],
-    check_profile: CLI_CHECK_PROFILE_IMPLEMENTATION,
     budget: { max_attempts: 2 },
     version: String(input.version),
     created_at: jsonTimestamp(input.createdAtMs),
@@ -1582,7 +1563,6 @@ describe("tree service integration", () => {
               value: create(ImplementationOutputContractSchema, {}),
             },
             allowedRepositoryPaths: [...CONNECT_SCOPE_IMPLEMENTATION],
-            checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
           }),
         ],
       });
@@ -2538,7 +2518,6 @@ describe("tree service integration", () => {
       expect(missingRootScope.code).toBe(2);
       expect(missingRootScope.stdout).toBe("");
       expect(missingRootScope.stderr).toContain("--root-allowed-path");
-      expect(missingRootScope.stderr).toContain("--root-check-profile");
 
       const created = await captureCliJson(
         () =>
@@ -2560,8 +2539,6 @@ describe("tree service integration", () => {
             "2",
             "--root-allowed-path",
             CLI_SCOPE_ROOT,
-            "--root-check-profile",
-            CLI_CHECK_PROFILE_ROOT,
             "--home",
             home,
           ]),
@@ -2706,7 +2683,6 @@ describe("tree service integration", () => {
               inputs: [],
               implementation: {},
               allowedRepositoryPaths: [...CLI_SCOPE_IMPLEMENTATION],
-              checkProfile: CLI_CHECK_PROFILE_IMPLEMENTATION,
             },
             proposedResearchNodeForCli(
               CLI_DEEP_NODE_ID,
@@ -3060,7 +3036,6 @@ describe("tree service integration", () => {
               value: create(ImplementationOutputContractSchema, {}),
             },
             allowedRepositoryPaths: ["../escape"],
-            checkProfile: CONNECT_CHECK_PROFILE_IMPLEMENTATION,
           }),
         ],
       });
@@ -3291,8 +3266,6 @@ describe("tree service integration", () => {
             "2",
             "--root-allowed-path",
             CLI_SCOPE_ROOT,
-            "--root-check-profile",
-            CLI_CHECK_PROFILE_ROOT,
             "--home",
             home,
           ]),
@@ -3319,7 +3292,6 @@ describe("tree service integration", () => {
               acceptanceCriteria: ["the repaired cli child is implementable"],
               inputs: [],
               allowedRepositoryPaths: ["../escape"],
-              checkProfile: CLI_CHECK_PROFILE_IMPLEMENTATION,
               implementation: {},
             },
           ],
@@ -3365,7 +3337,6 @@ describe("tree service integration", () => {
               acceptanceCriteria: ["the repaired cli child is implementable"],
               inputs: [],
               allowedRepositoryPaths: [...CLI_SCOPE_IMPLEMENTATION],
-              checkProfile: CLI_CHECK_PROFILE_IMPLEMENTATION,
               implementation: {},
             },
           ],
@@ -3466,6 +3437,267 @@ describe("tree service integration", () => {
       await closeWritable(capture.stream);
       await rm(malformedPath ?? join(home, "malformed-repair-plan.json"), { force: true });
       await rm(repairPath ?? join(home, "repair-plan.json"), { force: true });
+      await rm(fixture.directory, { force: true, recursive: true });
+      await rm(home, { force: true, recursive: true });
+    }
+  });
+
+  it("creates templated trees for EXPLAIN, FIX, handles replay idempotency and rejects invalid template/prompt", async () => {
+    const home = await mkdtemp(join(tmpdir(), "minions-tree-templated-test-home-"));
+    const fixture = await createGitFixture("templated");
+    const capture = createLogCapture();
+    const clock = new MutableClock(STARTED_AT_MS);
+    let runtime: RunningDaemonRuntime | undefined;
+    try {
+      const port = await reserveLoopbackPort();
+      const logger = createStructuredLogger({ stream: capture.stream, now: () => clock.now() });
+      runtime = await startDaemonRuntime(
+        runtimeOptions(
+          home,
+          port,
+          clock,
+          new SequenceIdGenerator([
+            "01900000-0000-7000-8000-000000001001",
+            "01900000-0000-7000-8000-000000001002",
+            "01900000-0000-7000-8000-000000001003",
+            "01900000-0000-7000-8000-000000001004",
+            "01900000-0000-7000-8000-000000001005",
+            "01900000-0000-7000-8000-000000001006",
+            "01900000-0000-7000-8000-000000001007",
+            "01900000-0000-7000-8000-000000001008",
+            "01900000-0000-7000-8000-000000001009",
+            "01900000-0000-7000-8000-00000000100a",
+            "01900000-0000-7000-8000-00000000100b",
+            "01900000-0000-7000-8000-00000000100c",
+            "01900000-0000-7000-8000-00000000100d",
+            "01900000-0000-7000-8000-00000000100e",
+            "01900000-0000-7000-8000-00000000100f",
+            "01900000-0000-7000-8000-000000001010",
+          ]),
+          logger,
+        ),
+      );
+      const hostId = runtime.hostId;
+      if (hostId === undefined) {
+        throw new Error("local runtime did not produce a host ID");
+      }
+      const clients = connectClients(runtime.server.baseUrl);
+
+      const repoId = "01900000-0000-7000-8000-000000000201";
+      await clients.repository.registerRepository(
+        registerRequest(
+          "01900000-0000-7000-8000-000000000202",
+          "01900000-0000-7000-8000-000000000203",
+          repoId,
+          fixture.root,
+        ),
+      );
+
+      await expectConnectCode(
+        () =>
+          clients.tree.createTemplatedTree(
+            create(CreateTemplatedTreeRequestSchema, {
+              commandId: "01900000-0000-7000-8000-000000000210",
+              actorSessionId: "01900000-0000-7000-8000-000000000203",
+              repositoryId: repoId,
+              treeId: "01900000-0000-7000-8000-000000000211",
+              planRevisionId: "01900000-0000-7000-8000-000000000212",
+              rootNodeId: "01900000-0000-7000-8000-000000000213",
+              rootArtifactId: "01900000-0000-7000-8000-000000000214",
+              attentionId: "01900000-0000-7000-8000-000000000215",
+              template: TaskTemplate.UNSPECIFIED,
+              prompt: "explain the architecture",
+            }),
+          ),
+        Code.InvalidArgument,
+      );
+
+      await expectConnectCode(
+        () =>
+          clients.tree.createTemplatedTree(
+            create(CreateTemplatedTreeRequestSchema, {
+              commandId: "01900000-0000-7000-8000-000000000220",
+              actorSessionId: "01900000-0000-7000-8000-000000000203",
+              repositoryId: repoId,
+              treeId: "01900000-0000-7000-8000-000000000221",
+              planRevisionId: "01900000-0000-7000-8000-000000000222",
+              rootNodeId: "01900000-0000-7000-8000-000000000223",
+              rootArtifactId: "01900000-0000-7000-8000-000000000224",
+              attentionId: "01900000-0000-7000-8000-000000000225",
+              template: TaskTemplate.EXPLAIN,
+              prompt: "   ",
+            }),
+          ),
+        Code.InvalidArgument,
+      );
+
+      const explainCommandId = "01900000-0000-7000-8000-000000000230";
+      const explainTreeId = "01900000-0000-7000-8000-000000000231";
+      const explainRevisionId = "01900000-0000-7000-8000-000000000232";
+      const explainRootNodeId = "01900000-0000-7000-8000-000000000233";
+      const explainRootArtifactId = "01900000-0000-7000-8000-000000000234";
+      const explainAttentionId = "01900000-0000-7000-8000-000000000235";
+      const explainPrompt = "explain authentication architecture";
+
+      const explainResponse = await clients.tree.createTemplatedTree(
+        create(CreateTemplatedTreeRequestSchema, {
+          commandId: explainCommandId,
+          actorSessionId: "01900000-0000-7000-8000-000000000203",
+          repositoryId: repoId,
+          treeId: explainTreeId,
+          planRevisionId: explainRevisionId,
+          rootNodeId: explainRootNodeId,
+          rootArtifactId: explainRootArtifactId,
+          attentionId: explainAttentionId,
+          template: TaskTemplate.EXPLAIN,
+          prompt: explainPrompt,
+        }),
+      );
+
+      const explainTree = explainResponse.tree;
+      if (explainTree === undefined) {
+        throw new Error("explain template response did not contain a tree");
+      }
+      expect(explainTree.id).toBe(explainTreeId);
+      expect(explainTree.state).toBe(TreeState.APPROVED);
+      expect(explainTree.goal).toBe(explainPrompt);
+      expect(explainTree.revisions).toHaveLength(1);
+      expect(explainTree.revisions[0]?.state).toBe(PlanRevisionState.APPROVED);
+      expect(explainTree.revisions[0]?.version).toBe(1n);
+      expect(explainTree.nodes).toHaveLength(2);
+      const explainRoot = explainTree.nodes.find((n) => n.id === explainRootNodeId);
+      expect(explainRoot?.mode).toBe(PlanNodeMode.PLAN);
+      expect(explainRoot?.state).toBe(NodeState.PLANNED);
+      const explainResearchChild = explainTree.nodes.find((n) => n.id !== explainRootNodeId);
+      expect(explainResearchChild).toBeDefined();
+      expect(explainResearchChild?.parentNodeId).toBe(explainRootNodeId);
+      expect(explainResearchChild?.mode).toBe(PlanNodeMode.RESEARCH);
+      expect(explainResearchChild?.state).toBe(NodeState.READY);
+      expect(explainResearchChild?.version).toBe(1n);
+      expect(explainResearchChild?.outputContract.case).toBe("artifact");
+
+      const explainReplay = await clients.tree.createTemplatedTree(
+        create(CreateTemplatedTreeRequestSchema, {
+          commandId: explainCommandId,
+          actorSessionId: "01900000-0000-7000-8000-000000000203",
+          repositoryId: repoId,
+          treeId: explainTreeId,
+          planRevisionId: explainRevisionId,
+          rootNodeId: explainRootNodeId,
+          rootArtifactId: explainRootArtifactId,
+          attentionId: explainAttentionId,
+          template: TaskTemplate.EXPLAIN,
+          prompt: explainPrompt,
+        }),
+      );
+      expect(explainReplay.tree).toEqual(explainTree);
+
+      const fixCommandId = "01900000-0000-7000-8000-000000000240";
+      const fixTreeId = "01900000-0000-7000-8000-000000000241";
+      const fixRevisionId = "01900000-0000-7000-8000-000000000242";
+      const fixRootNodeId = "01900000-0000-7000-8000-000000000243";
+      const fixRootArtifactId = "01900000-0000-7000-8000-000000000244";
+      const fixAttentionId = "01900000-0000-7000-8000-000000000245";
+      const fixPrompt = "fix connection timeout bug";
+
+      const fixResponse = await clients.tree.createTemplatedTree(
+        create(CreateTemplatedTreeRequestSchema, {
+          commandId: fixCommandId,
+          actorSessionId: "01900000-0000-7000-8000-000000000203",
+          repositoryId: repoId,
+          treeId: fixTreeId,
+          planRevisionId: fixRevisionId,
+          rootNodeId: fixRootNodeId,
+          rootArtifactId: fixRootArtifactId,
+          attentionId: fixAttentionId,
+          template: TaskTemplate.FIX,
+          prompt: fixPrompt,
+        }),
+      );
+
+      const fixTree = fixResponse.tree;
+      if (fixTree === undefined) {
+        throw new Error("fix template response did not contain a tree");
+      }
+      expect(fixTree.id).toBe(fixTreeId);
+      expect(fixTree.state).toBe(TreeState.DRAFT);
+      expect(fixTree.goal).toBe(fixPrompt);
+      expect(fixTree.revisions).toHaveLength(1);
+      expect(fixTree.revisions[0]?.state).toBe(PlanRevisionState.DRAFT);
+      expect(fixTree.revisions[0]?.version).toBe(0n);
+      expect(fixTree.nodes).toHaveLength(3);
+
+      const fixRoot = fixTree.nodes.find((n) => n.id === fixRootNodeId);
+      expect(fixRoot).toBeDefined();
+      expect(fixRoot?.mode).toBe(PlanNodeMode.PLAN);
+      expect(fixRoot?.state).toBe(NodeState.PLANNED);
+
+      const fixResearchChild = fixTree.nodes.find((n) => n.mode === PlanNodeMode.RESEARCH);
+      if (fixResearchChild === undefined) {
+        throw new Error("fix template did not produce a research child");
+      }
+      expect(fixResearchChild.parentNodeId).toBe(fixRootNodeId);
+      expect(fixResearchChild.state).toBe(NodeState.PLANNED);
+      expect(fixResearchChild.version).toBe(0n);
+      expect(fixResearchChild.outputContract.case).toBe("artifact");
+
+      const fixImplementationGrandchild = fixTree.nodes.find(
+        (n) => n.mode === PlanNodeMode.IMPLEMENTATION,
+      );
+      if (fixImplementationGrandchild === undefined) {
+        throw new Error("fix template did not produce an implementation grandchild");
+      }
+      expect(fixImplementationGrandchild.parentNodeId).toBe(fixResearchChild.id);
+      expect(fixImplementationGrandchild.parentNodeId).not.toBe(fixRootNodeId);
+      expect(fixImplementationGrandchild.state).toBe(NodeState.PLANNED);
+      expect(fixImplementationGrandchild.version).toBe(0n);
+      expect(fixImplementationGrandchild.outputContract.case).toBe("implementation");
+
+      const featureCommandId = "01900000-0000-7000-8000-000000000250";
+      const featureTreeId = "01900000-0000-7000-8000-000000000251";
+      const featureRevisionId = "01900000-0000-7000-8000-000000000252";
+      const featureRootNodeId = "01900000-0000-7000-8000-000000000253";
+      const featureRootArtifactId = "01900000-0000-7000-8000-000000000254";
+      const featureAttentionId = "01900000-0000-7000-8000-000000000255";
+      const featurePrompt = "build dark mode setting";
+
+      const featureResponse = await clients.tree.createTemplatedTree(
+        create(CreateTemplatedTreeRequestSchema, {
+          commandId: featureCommandId,
+          actorSessionId: "01900000-0000-7000-8000-000000000203",
+          repositoryId: repoId,
+          treeId: featureTreeId,
+          planRevisionId: featureRevisionId,
+          rootNodeId: featureRootNodeId,
+          rootArtifactId: featureRootArtifactId,
+          attentionId: featureAttentionId,
+          template: TaskTemplate.FEATURE,
+          prompt: featurePrompt,
+        }),
+      );
+
+      const featureTree = featureResponse.tree;
+      if (featureTree === undefined) {
+        throw new Error("feature template response did not contain a tree");
+      }
+      expect(featureTree.state).toBe(TreeState.DRAFT);
+      expect(featureTree.nodes).toHaveLength(3);
+      const featureExploreChild = featureTree.nodes.find((n) => n.mode === PlanNodeMode.EXPLORE);
+      if (featureExploreChild === undefined) {
+        throw new Error("feature template did not produce an explore child");
+      }
+      expect(featureExploreChild.parentNodeId).toBe(featureRootNodeId);
+
+      const featureImplementationGrandchild = featureTree.nodes.find(
+        (n) => n.mode === PlanNodeMode.IMPLEMENTATION,
+      );
+      if (featureImplementationGrandchild === undefined) {
+        throw new Error("feature template did not produce an implementation grandchild");
+      }
+      expect(featureImplementationGrandchild.parentNodeId).toBe(featureExploreChild.id);
+    } finally {
+      await runtime?.close();
+      await closeWritable(capture.stream);
       await rm(fixture.directory, { force: true, recursive: true });
       await rm(home, { force: true, recursive: true });
     }

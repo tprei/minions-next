@@ -3,6 +3,7 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import {
   ApprovePlanRequestSchema,
   ApprovePlanResponseSchema,
+  CreateTemplatedTreeRequestSchema,
   CreateTreeRequestSchema,
   CreateTreeResponseSchema,
   ImplementationOutputContractSchema,
@@ -19,6 +20,7 @@ import {
   RepairPlanResponseSchema,
   TaskNodeSchema,
   TaskTreeSchema,
+  TaskTemplate,
   TreeBudgetSchema,
   TreeState,
 } from "@minions/contracts";
@@ -30,7 +32,14 @@ import {
   createSqliteCommandStore,
   PlanRegistryError,
 } from "@minions/adapters";
-import { hostId, timestampFromEpochMilliseconds } from "@minions/core";
+import {
+  artifactId,
+  gitSha,
+  hostId,
+  resolveTaskTemplate,
+  taskNodeId,
+  timestampFromEpochMilliseconds,
+} from "@minions/core";
 import { FixedClock, SequenceIdGenerator } from "@minions/testkit";
 import { FaultInjectingSqliteDatabase, TemporarySqliteDatabase } from "@minions/testkit/sqlite";
 import { describe, expect, it } from "vitest";
@@ -201,7 +210,6 @@ function createRequest() {
     budget: budget(),
     attentionId: ATTENTION_ID,
     rootAllowedRepositoryPaths: [".", "src"],
-    rootCheckProfile: "root-checks",
   });
 }
 
@@ -218,7 +226,6 @@ function proposedNode() {
       value: create(ImplementationOutputContractSchema, {}),
     },
     allowedRepositoryPaths: [".", "src"],
-    checkProfile: "implementation-checks",
   });
 }
 
@@ -489,7 +496,7 @@ describe("SQLite plan registry", () => {
           "SELECT node_id, ordinal, repository_path FROM node_repository_scope ORDER BY node_id, ordinal",
         ),
         policies: reader.all(
-          "SELECT node_id, check_profile, max_attempts FROM node_plan_policies ORDER BY node_id",
+          "SELECT node_id, max_attempts FROM node_plan_policies ORDER BY node_id",
         ),
         commands: reader.all("SELECT * FROM operator_commands"),
         idempotency: reader.all("SELECT * FROM idempotency_records"),
@@ -504,8 +511,8 @@ describe("SQLite plan registry", () => {
         { node_id: CHILD_NODE_ID, ordinal: 1n, repository_path: "src" },
       ]);
       expect(rows.policies).toEqual([
-        { node_id: ROOT_NODE_ID, check_profile: "root-checks", max_attempts: 2n },
-        { node_id: CHILD_NODE_ID, check_profile: "implementation-checks", max_attempts: 2n },
+        { node_id: ROOT_NODE_ID, max_attempts: 2n },
+        { node_id: CHILD_NODE_ID, max_attempts: 2n },
       ]);
       expect(rows.commands).toHaveLength(4);
       expect(rows.idempotency).toHaveLength(4);
@@ -603,7 +610,7 @@ describe("SQLite plan registry", () => {
       }
       const changedRoot = create(TaskNodeSchema, {
         ...root,
-        checkProfile: "changed",
+        objective: "changed",
       });
       const changedCreateTree = create(TaskTreeSchema, {
         ...createResult.tree,
@@ -615,7 +622,7 @@ describe("SQLite plan registry", () => {
       });
       const changedCreateBytes = toBinary(CreateTreeResponseSchema, changedCreateResult);
       expect(
-        fromBinary(CreateTreeResponseSchema, changedCreateBytes).tree?.nodes[0]?.checkProfile,
+        fromBinary(CreateTreeResponseSchema, changedCreateBytes).tree?.nodes[0]?.objective,
       ).toBe("changed");
       const corruptCreateDatabase = new DatabaseSync(temporary.path);
       try {
@@ -1316,6 +1323,121 @@ describe("SQLite plan registry", () => {
       await expect(registry.create({ request, at: AT })).rejects.toMatchObject({
         code: "not_found",
       });
+    });
+  });
+
+  it("creates an approved EXPLAIN tree with a ready research child and replays identically", async () => {
+    await fixture(async (_temporary, registry) => {
+      const prompt = "explain the cache subsystem";
+      const resolved = resolveTaskTemplate("explain", prompt);
+      const request = create(CreateTemplatedTreeRequestSchema, {
+        commandId: CREATE_COMMAND_ID,
+        actorSessionId: ACTOR_ID,
+        repositoryId: REPOSITORY_ID,
+        treeId: TREE_ID,
+        planRevisionId: REVISION_ID,
+        rootNodeId: ROOT_NODE_ID,
+        rootArtifactId: ROOT_ARTIFACT_ID,
+        attentionId: ATTENTION_ID,
+        template: TaskTemplate.EXPLAIN,
+        prompt,
+      });
+      const mintedNodes = [
+        {
+          nodeId: taskNodeId(CHILD_NODE_ID),
+          artifactId: artifactId(IDS[11]),
+        },
+      ];
+      const tree = await registry.createTemplated({
+        request,
+        resolved,
+        baseCommit: gitSha(BASE_COMMIT),
+        mintedNodes,
+        at: AT,
+      });
+      expect(tree.id).toBe(TREE_ID);
+      expect(tree.state).toBe(TreeState.APPROVED);
+      expect(tree.version).toBe(0);
+      expect(tree.attention).toBeUndefined();
+      expect(tree.revisions).toHaveLength(1);
+      expect(tree.revisions[0]?.state).toBe(PlanRevisionState.APPROVED);
+      expect(tree.revisions[0]?.version).toBe(1);
+      expect(tree.nodes).toHaveLength(2);
+      const child = tree.nodes.find((node) => node.id === CHILD_NODE_ID);
+      expect(child).toBeDefined();
+      expect(child?.mode).toBe(PlanNodeMode.RESEARCH);
+      expect(child?.state).toBe(NodeState.READY);
+      expect(child?.version).toBe(1);
+      expect(child?.parentNodeId).toBe(ROOT_NODE_ID);
+
+      const replayed = await registry.createTemplated({
+        request,
+        resolved,
+        baseCommit: gitSha(BASE_COMMIT),
+        mintedNodes,
+        at: AT,
+      });
+      expect(replayed).toEqual(tree);
+    });
+  });
+
+  it("creates a draft FIX tree with chained research child and implementation grandchild", async () => {
+    await fixture(async (_temporary, registry) => {
+      const prompt = "fix memory leak in stream processor";
+      const resolved = resolveTaskTemplate("fix", prompt);
+      const request = create(CreateTemplatedTreeRequestSchema, {
+        commandId: CREATE_COMMAND_ID,
+        actorSessionId: ACTOR_ID,
+        repositoryId: REPOSITORY_ID,
+        treeId: TREE_ID,
+        planRevisionId: REVISION_ID,
+        rootNodeId: ROOT_NODE_ID,
+        rootArtifactId: ROOT_ARTIFACT_ID,
+        attentionId: ATTENTION_ID,
+        template: TaskTemplate.FIX,
+        prompt,
+      });
+      const researchChildId = CHILD_NODE_ID;
+      const implementationGrandchildId = IDS[11];
+      const mintedNodes = [
+        {
+          nodeId: taskNodeId(researchChildId),
+          artifactId: artifactId(IDS[13]),
+        },
+        {
+          nodeId: taskNodeId(implementationGrandchildId),
+        },
+      ];
+      const tree = await registry.createTemplated({
+        request,
+        resolved,
+        baseCommit: gitSha(BASE_COMMIT),
+        mintedNodes,
+        at: AT,
+      });
+      expect(tree.id).toBe(TREE_ID);
+      expect(tree.state).toBe(TreeState.DRAFT);
+      expect(tree.version).toBe(0);
+      expect(tree.attention).toBeUndefined();
+      expect(tree.revisions).toHaveLength(1);
+      expect(tree.revisions[0]?.state).toBe(PlanRevisionState.DRAFT);
+      expect(tree.revisions[0]?.version).toBe(0);
+      expect(tree.nodes).toHaveLength(3);
+
+      const researchNode = tree.nodes.find((node) => node.id === researchChildId);
+      expect(researchNode).toBeDefined();
+      expect(researchNode?.mode).toBe(PlanNodeMode.RESEARCH);
+      expect(researchNode?.state).toBe(NodeState.PLANNED);
+      expect(researchNode?.version).toBe(0);
+      expect(researchNode?.parentNodeId).toBe(ROOT_NODE_ID);
+
+      const implementationNode = tree.nodes.find((node) => node.id === implementationGrandchildId);
+      expect(implementationNode).toBeDefined();
+      expect(implementationNode?.mode).toBe(PlanNodeMode.IMPLEMENTATION);
+      expect(implementationNode?.state).toBe(NodeState.PLANNED);
+      expect(implementationNode?.version).toBe(0);
+      expect(implementationNode?.parentNodeId).toBe(researchChildId);
+      expect(implementationNode?.parentNodeId).not.toBe(ROOT_NODE_ID);
     });
   });
 });

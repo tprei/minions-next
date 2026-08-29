@@ -69,7 +69,6 @@ interface LockedNode {
   readonly inputs: readonly ArtifactInput[];
   readonly outputContract: OutputContractView;
   readonly allowedRepositoryPaths: readonly string[];
-  readonly checkProfile: string;
   readonly state: NodeState;
   readonly maxAttempts: number;
   readonly vcsChangeBinding: VcsChangeBinding | undefined;
@@ -160,7 +159,6 @@ interface WorkingNode {
   readonly inputs: readonly ArtifactInputDraft[];
   readonly outputContract: OutputContractDraft;
   readonly allowedRepositoryPaths: readonly string[];
-  readonly checkProfile: string;
 }
 
 export interface WorkingTree {
@@ -195,7 +193,6 @@ export function seedWorkingTree(tree: TaskTree): WorkingTree {
         inputs: node.inputs,
         outputContract: outputContractView(node.outputContract),
         allowedRepositoryPaths: node.allowedRepositoryPaths,
-        checkProfile: node.checkProfile,
         state: node.state,
         maxAttempts: node.budget?.maxAttempts ?? 0,
         vcsChangeBinding: node.vcsChangeBinding,
@@ -216,7 +213,6 @@ export function seedWorkingTree(tree: TaskTree): WorkingTree {
         })),
         outputContract: outputContractDraft(node.outputContract),
         allowedRepositoryPaths: [...node.allowedRepositoryPaths],
-        checkProfile: node.checkProfile,
       });
     }
   }
@@ -472,6 +468,42 @@ export interface ValidationIssue {
   readonly message: string;
 }
 
+function defaultArtifactTypeForMode(mode: PlanNodeMode): string {
+  switch (mode) {
+    case PlanNodeMode.PLAN:
+      return "plan";
+    case PlanNodeMode.RESEARCH:
+      return "research";
+    case PlanNodeMode.EXPLORE:
+      return "explore";
+    case PlanNodeMode.IMPLEMENTATION:
+    case PlanNodeMode.UNSPECIFIED:
+      return "artifact";
+  }
+}
+
+/** A mode admits exactly one output-contract shape: implementation mode carries the
+ *  implementation contract, every other mode carries an artifact contract. Switching mode
+ *  therefore rewrites the contract, preserving an operator-chosen artifact type but replacing
+ *  a type that was only the previous mode's default. */
+function outputContractForMode(
+  mode: PlanNodeMode,
+  previousContract?: OutputContractDraft,
+  previousMode?: PlanNodeMode,
+): OutputContractDraft {
+  if (mode === PlanNodeMode.IMPLEMENTATION) {
+    return { case: "implementation" };
+  }
+  if (
+    previousContract?.case === "artifact" &&
+    (previousMode === undefined ||
+      previousContract.artifactType !== defaultArtifactTypeForMode(previousMode))
+  ) {
+    return previousContract;
+  }
+  return { case: "artifact", artifactType: defaultArtifactTypeForMode(mode) };
+}
+
 /** Client-side validation run before every Save — a strict SUBSET of what the server enforces
  *  (defense in depth, instant feedback), never a superset: nothing accepted here that the
  *  server would reject, and nothing rejected here that a legal plan would need. */
@@ -480,6 +512,12 @@ export function validateWorkingTree(
   budget: TreeBudget,
 ): readonly ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  if (tree.working.length === 0) {
+    issues.push({
+      key: undefined,
+      message: "Plan must contain at least one proposed node.",
+    });
+  }
   for (const node of tree.working) {
     if (node.objective.trim().length === 0) {
       issues.push({ key: node.key, message: "Objective must not be empty." });
@@ -499,9 +537,6 @@ export function validateWorkingTree(
     for (const path of node.allowedRepositoryPaths) {
       const error = validateCanonicalRelativePath(path, "Allowed repository path");
       if (error !== undefined) issues.push({ key: node.key, message: error });
-    }
-    if (node.checkProfile.trim().length === 0) {
-      issues.push({ key: node.key, message: "Check profile must not be empty." });
     }
     if (node.outputContract.case === "artifact") {
       if (node.outputContract.artifactType.trim().length === 0) {
@@ -566,17 +601,17 @@ export function addWorkingNode(
   parentKey: string,
 ): Readonly<{ tree: WorkingTree; key: string }> {
   const key = generateUuidV7();
+  const mode = PlanNodeMode.IMPLEMENTATION;
   const node: WorkingNode = {
     key,
     sourceNodeId: undefined,
     parentKey,
-    mode: PlanNodeMode.PLAN,
+    mode,
     objective: "",
-    acceptanceCriteria: [""],
+    acceptanceCriteria: [],
     inputs: [],
-    outputContract: { case: "implementation" },
+    outputContract: outputContractForMode(mode),
     allowedRepositoryPaths: [DEFAULT_ALLOWED_PATH],
-    checkProfile: "",
   };
   return { tree: { ...tree, working: [...tree.working, node] }, key };
 }
@@ -590,7 +625,6 @@ export type WorkingNodePatch = Partial<
     | "inputs"
     | "outputContract"
     | "allowedRepositoryPaths"
-    | "checkProfile"
   >
 >;
 
@@ -601,7 +635,22 @@ export function updateWorkingNode(
 ): WorkingTree {
   return {
     ...tree,
-    working: tree.working.map((node) => (node.key === key ? { ...node, ...patch } : node)),
+    working: tree.working.map((node) => {
+      if (node.key !== key) return node;
+      const merged = { ...node, ...patch };
+      let outputContract = merged.outputContract;
+      if (patch.mode !== undefined && patch.mode !== node.mode) {
+        outputContract = outputContractForMode(patch.mode, node.outputContract, node.mode);
+      } else if (merged.mode === PlanNodeMode.IMPLEMENTATION) {
+        outputContract = { case: "implementation" };
+      } else if (outputContract.case !== "artifact") {
+        outputContract = {
+          case: "artifact",
+          artifactType: defaultArtifactTypeForMode(merged.mode),
+        };
+      }
+      return { ...merged, outputContract };
+    }),
   };
 }
 
@@ -665,7 +714,6 @@ function describeFieldChanges(
   if (!sameStringArray(original.allowedRepositoryPaths, working.allowedRepositoryPaths)) {
     changes.push("allowed paths");
   }
-  if (original.checkProfile !== working.checkProfile) changes.push("check profile");
   const originalCase = original.outputContract.case;
   if (originalCase !== working.outputContract.case) {
     changes.push("output contract");
@@ -784,7 +832,6 @@ export function buildProposedNodes(tree: WorkingTree): ProposedNode[] {
         }),
       ),
       allowedRepositoryPaths: [...node.allowedRepositoryPaths],
-      checkProfile: node.checkProfile,
     };
     if (node.outputContract.case === "artifact") {
       return create(ProposedNodeSchema, {
@@ -822,7 +869,6 @@ export interface OutlineRow {
   readonly state: NodeState | undefined;
   readonly mode: PlanNodeMode;
   readonly objective: string;
-  readonly checkProfile: string;
   readonly stale: boolean;
 }
 
@@ -842,7 +888,6 @@ export function flattenOutline(
         state: locked.state,
         mode: locked.mode,
         objective: locked.objective,
-        checkProfile: locked.checkProfile,
         stale: staleNodeKeys.has(key),
       });
     } else {
@@ -856,7 +901,6 @@ export function flattenOutline(
         state: undefined,
         mode: working.mode,
         objective: working.objective,
-        checkProfile: working.checkProfile,
         stale: staleNodeKeys.has(key),
       });
     }

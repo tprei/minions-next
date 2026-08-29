@@ -26,10 +26,10 @@ async function openFreshTree(page: Page, gitFixtureRoot: string, goal: string): 
   await registerRepositoryViaUi(page, gitFixtureRoot);
   await page.getByRole("button", { name: "New task" }).click();
   await expect(page.getByRole("dialog", { name: "New task" })).toBeVisible();
+  await page.getByText("Advanced options (custom tree & budgets)").click();
   await page.locator("#new-task-host").selectOption({ index: 1 });
   await page.locator("#new-task-repository").selectOption({ label: gitFixtureRoot });
   await page.locator("#new-task-goal").fill(goal);
-  await page.locator("#new-task-root-check-profile").fill("lint");
   await page.getByRole("button", { name: "Create task" }).click();
   await expect(page.getByText("Task created.")).toBeVisible();
   await page.getByRole("link", { name: "Open tree" }).click();
@@ -132,7 +132,7 @@ test.describe("mobile read layout", () => {
     }
 
     // Outline tab: selecting the root and opening its edit form (the densest content on this
-    // route — parent/objective/mode/criteria/paths/check-profile/output-contract/inputs)
+    // route — parent/objective/mode/criteria/paths/output-contract/inputs)
     // never causes horizontal overflow, and its primary actions stay reachable.
     await page.getByTestId("tree-add-child").click();
     await expectNoHorizontalOverflow(page);

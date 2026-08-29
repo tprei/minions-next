@@ -441,7 +441,6 @@ async function createFixture(): Promise<Fixture> {
       }),
       attentionId: ATTENTION_ID,
       rootAllowedRepositoryPaths: ["."],
-      rootCheckProfile: "artifact-check",
     }),
     at: NOW,
   });
